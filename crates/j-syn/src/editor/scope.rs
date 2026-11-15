@@ -27,7 +27,7 @@ fn osc_preview_signature(osc: &OscPluginParams) -> u64 {
         h = h.wrapping_mul(0x100000001b3);
     };
     mix(osc.wt_pos.modulated_normalized_value().to_bits() as u64);
-    mix(osc.enabled.value() as u64);
+    mix(osc.level.value().to_bits() as u64);
     mix(osc.wt_select.value() as u64);
     mix(osc.phase.value().to_bits() as u64);
     mix(osc.warp_mode.value() as u64);
@@ -36,8 +36,7 @@ fn osc_preview_signature(osc: &OscPluginParams) -> u64 {
     mix(osc.mod_type.value() as u64);
     mix(osc.mod_order.value() as u64);
     mix(osc.mod_depth.value().to_bits() as u64);
-    mix(osc.octave.value() as u32 as u64);
-    mix(osc.semi.value() as u32 as u64);
+    mix(osc.pitch.value().to_bits() as u64);
     h
 }
 
@@ -101,7 +100,7 @@ impl View for WavetableScope {
         let dpx = cx.scale_factor();
         let radius = 4.0 * dpx;
         let osc = &self.params.oscs[self.osc_idx];
-        let enabled = osc.enabled.value();
+        let enabled = super::osc_panel::is_osc_awake(&self.params, self.osc_idx);
 
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
@@ -155,9 +154,9 @@ impl View for WavetableScope {
                     &mod_custom_guard
                 }
             };
-            let car_semi = osc.octave.value() * 12 + osc.semi.value();
-            let mod_semi = m_osc.octave.value() * 12 + m_osc.semi.value();
-            let ratio = 2.0_f32.powf((mod_semi - car_semi) as f32 / 12.0).clamp(0.25, 8.0);
+            let car_semi = osc.pitch.value();
+            let mod_semi = m_osc.pitch.value();
+            let ratio = 2.0_f32.powf((mod_semi - car_semi) / 12.0).clamp(0.25, 8.0);
             Some((
                 m_wt,
                 m_osc.wt_pos.value(),

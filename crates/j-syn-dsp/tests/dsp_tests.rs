@@ -46,20 +46,17 @@ fn pre_fader_cross_pm_and_feedback_stability() {
     let mut params = SynthParams::default();
 
     // OSC 1 is silent (level = 0.0) but enabled, modulating OSC 2 via PM
-    params.oscs[0].enabled = true;
     params.oscs[0].level = 0.0;
     params.oscs[0].mod_source = ModSource::Osc2; // backward mod 2 -> 1
     params.oscs[0].mod_type = ModType::Pm;
     params.oscs[0].mod_depth = 0.9;
 
-    params.oscs[1].enabled = true;
     params.oscs[1].level = 0.8;
     params.oscs[1].mod_source = ModSource::Osc1; // forward mod 1 -> 2
     params.oscs[1].mod_type = ModType::Pm;
     params.oscs[1].mod_depth = 0.85;
 
     // Self-modulation on OSC 3
-    params.oscs[2].enabled = true;
     params.oscs[2].level = 0.5;
     params.oscs[2].mod_source = ModSource::Osc3;
     params.oscs[2].mod_type = ModType::Pm;
@@ -222,14 +219,12 @@ fn phase_180_deg_cancels_0_deg_and_updates_realtime() {
     params.amp_sustain = 1.0;
 
     // OSC 1 at 0 deg, OSC 2 at 180 deg on identical pure sine (BasicShapes wt_pos = 0.0)
-    params.oscs[0].enabled = true;
     params.oscs[0].wt_pos = 0.0;
     params.oscs[0].level = 0.8;
     params.oscs[0].pan = 0.0;
     params.oscs[0].retrig = true;
     params.oscs[0].phase_offset = (0.0_f32 / 360.0).rem_euclid(1.0).fract();
 
-    params.oscs[1].enabled = true;
     params.oscs[1].wt_pos = 0.0;
     params.oscs[1].level = 0.8;
     params.oscs[1].pan = 0.0;
@@ -266,7 +261,6 @@ fn retrig_off_preserves_and_randomizes_phases() {
     let bank = WavetableBank::new();
     let mut engine = SynthEngine::new(44100.0);
     let mut params = SynthParams::default();
-    params.oscs[0].enabled = true;
     params.oscs[0].retrig = false;
     params.oscs[0].unison = 4;
 
@@ -307,11 +301,9 @@ fn cross_mod_immediate_and_bidirectional() {
 
         let mut params_base = SynthParams::default();
         params_base.amp_attack_s = 0.001;
-        params_base.oscs[0].enabled = true;
         params_base.oscs[0].level = 0.8;
-        params_base.oscs[1].enabled = true;
         params_base.oscs[1].level = 0.0; // Silent modulator
-        params_base.oscs[1].semi = 7;
+        params_base.oscs[1].pitch_semitones = 7.0;
 
         engine_unmod.note_on(0, 60, 1.0, None, &params_base);
         engine_mod.note_on(0, 60, 1.0, None, &params_base);
@@ -348,10 +340,8 @@ fn cross_mod_immediate_and_bidirectional() {
 
         let mut params_base = SynthParams::default();
         params_base.amp_attack_s = 0.001;
-        params_base.oscs[0].enabled = true;
         params_base.oscs[0].level = 0.0; // Silent modulator
-        params_base.oscs[0].semi = 7;
-        params_base.oscs[1].enabled = true;
+        params_base.oscs[0].pitch_semitones = 7.0;
         params_base.oscs[1].level = 0.8;
 
         engine_unmod.note_on(0, 60, 1.0, None, &params_base);
@@ -415,9 +405,9 @@ fn mod_order_pm_then_warp_differs_from_warp_then_pm() {
     let bank = WavetableBank::new();
 
     let mut base_params = SynthParams::default();
-    base_params.oscs[0].enabled = true;
+    base_params.oscs[0].level = 0.75;
     base_params.oscs[0].level = 0.0;
-    base_params.oscs[1].enabled = true;
+    base_params.oscs[1].level = 0.75;
     base_params.oscs[1].level = 1.0;
     base_params.oscs[1].mod_source = ModSource::Osc1;
     base_params.oscs[1].mod_type = ModType::Pm;
@@ -458,7 +448,7 @@ fn noise_generator_white_pink_brown_and_stereo_decorrelation() {
     let render_noise = |noise_type: NoiseType, color: f32, stereo: f32| {
         let mut params = SynthParams::default();
         for osc in &mut params.oscs {
-            osc.enabled = false;
+            osc.level = 0.0;
         }
         params.amp_attack_s = 0.001;
         params.filters[0].enabled = false;
@@ -825,7 +815,7 @@ fn osc_keytrack_off_locks_pitch_to_c3() {
         params.amp_attack_s = 0.001;
         params.filters[0].enabled = false;
         params.oscs[0].keytrack = keytrack;
-        params.oscs[0].semi = 3; // verify tuning offset still applies
+        params.oscs[0].pitch_semitones = 3.0; // verify tuning offset still applies
 
         let mut eng = SynthEngine::new(sample_rate);
         eng.note_on(0, note, 0.8, None, &params);
@@ -1123,7 +1113,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
     };
     bp_params.mod_matrix.slots[3] = ModSlot {
         source: ModMatrixSource::Keytrack,
-        destination: ModDestination::Osc1Semi,
+        destination: ModDestination::Osc1Pitch,
         depth: 0.25,
         bipolar: false,
         enabled: true,
@@ -1141,7 +1131,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
     assert!((tel_bp.dest_offset(ModDestination::Osc1Level) - (-0.4)).abs() < 1e-3);
     assert!(tel_bp.dest_offset(ModDestination::Filter1Cutoff) > 0.2);
     assert!((tel_bp.dest_offset(ModDestination::Osc1WtPos) - 0.4).abs() < 1e-3);
-    assert!(tel_bp.dest_offset(ModDestination::Osc1Semi) > 0.1);
+    assert!(tel_bp.dest_offset(ModDestination::Osc1Pitch) > 0.1);
     assert!(evaluate_adsr_preview(&bp_params.mod_envs[0], 0.5).is_finite());
 
     // 3. ModSeq curve presets, tension, Loop / OneShot / PingPong, PolyVoice & MonoGlobal
@@ -1303,19 +1293,17 @@ fn test_modseq_stamps_and_mseg_curve() {
 }
 
 #[test]
-fn osc_octave_range_minus_4_to_plus_4() {
+fn osc_pitch_range_minus_48_to_plus_48_and_auto_sleep() {
     let bank = WavetableBank::new();
     let sample_rate = 48_000.0;
 
-    let render = |note: u8, octave: i32| {
+    let render = |note: u8, pitch_semitones: f32| {
         let mut params = SynthParams::default();
         params.amp_attack_s = 0.001;
         params.filters[0].enabled = false;
         params.filters[1].enabled = false;
-        params.oscs[0].enabled = true;
         params.oscs[0].keytrack = true;
-        params.oscs[0].octave = octave;
-        params.oscs[0].semi = 0;
+        params.oscs[0].pitch_semitones = pitch_semitones;
 
         let mut eng = SynthEngine::new(sample_rate);
         eng.note_on(0, note, 0.9, None, &params);
@@ -1345,10 +1333,10 @@ fn osc_octave_range_minus_4_to_plus_4() {
         (re * re + im * im).sqrt() / buf.len() as f32
     };
 
-    // Note 57 = A3 (220 Hz): -4 oct = 13.75 Hz, 0 oct = 220 Hz, +4 oct = 3520 Hz
-    let buf_m4 = render(57, -4);
-    let buf_0 = render(57, 0);
-    let buf_p4 = render(57, 4);
+    // Note 57 = A3 (220 Hz): -48 st = 13.75 Hz, 0 st = 220 Hz, +48 st = 3520 Hz
+    let buf_m4 = render(57, -48.0);
+    let buf_0 = render(57, 0.0);
+    let buf_p4 = render(57, 48.0);
 
     let peak_m4 = buf_m4.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
     let peak_0 = buf_0.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
@@ -1360,7 +1348,7 @@ fn osc_octave_range_minus_4_to_plus_4() {
     let m4_base = dft_mag(&buf_m4, 220.0);
     assert!(
         m4_fund > m4_oct * 1.5 && m4_fund > m4_base * 3.0,
-        "Expected -4 oct fundamental at 13.75 Hz: fund={m4_fund}, 27.5Hz={m4_oct}, 220Hz={m4_base}"
+        "Expected -48 st fundamental at 13.75 Hz: fund={m4_fund}, 27.5Hz={m4_oct}, 220Hz={m4_base}"
     );
 
     let z_fund = dft_mag(&buf_0, 220.0);
@@ -1368,7 +1356,7 @@ fn osc_octave_range_minus_4_to_plus_4() {
     let z_low = dft_mag(&buf_0, 13.75);
     assert!(
         z_fund > z_sub * 3.0 && z_fund > z_low * 3.0,
-        "Expected 0 oct fundamental at 220 Hz: fund={z_fund}, 110Hz={z_sub}, 13.75Hz={z_low}"
+        "Expected 0 st fundamental at 220 Hz: fund={z_fund}, 110Hz={z_sub}, 13.75Hz={z_low}"
     );
 
     let p4_fund = dft_mag(&buf_p4, 3520.0);
@@ -1376,27 +1364,81 @@ fn osc_octave_range_minus_4_to_plus_4() {
     let p4_base = dft_mag(&buf_p4, 220.0);
     assert!(
         p4_fund > p4_sub * 3.0 && p4_fund > p4_base * 3.0,
-        "Expected +4 oct fundamental at 3520 Hz: fund={p4_fund}, 1760Hz={p4_sub}, 220Hz={p4_base}"
+        "Expected +48 st fundamental at 3520 Hz: fund={p4_fund}, 1760Hz={p4_sub}, 220Hz={p4_base}"
     );
 
-    // Also verify exact pitch equivalence with +/- 48 MIDI semitones
-    let equiv_m4 = render(12, 0);
-    let ref_m4 = render(60, -4);
+    // Fractional cents (+0.50 st = +50 cents -> 220 * 2^(0.5/12) Hz)
+    let buf_cents = render(57, 0.50);
+    let cents_target_hz = 220.0 * 2.0_f32.powf(0.5 / 12.0);
+    let cents_fund = dft_mag(&buf_cents, cents_target_hz);
+    let cents_orig = dft_mag(&buf_cents, 220.0);
+    assert!(
+        cents_fund > cents_orig * 3.0,
+        "Expected +0.50 st fundamental at {cents_target_hz} Hz: target={cents_fund}, 220Hz={cents_orig}"
+    );
+
+    // Exact pitch equivalence with +/- 48 MIDI semitones
+    let equiv_m4 = render(12, 0.0);
+    let ref_m4 = render(60, -48.0);
     let diff_m4: f32 = equiv_m4
         .iter()
         .zip(ref_m4.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
-    assert!(diff_m4 < 1e-4, "note 60 @ -4 oct must match note 12 @ 0 oct, diff={diff_m4}");
+    assert!(diff_m4 < 1e-4, "note 60 @ -48 st must match note 12 @ 0 st, diff={diff_m4}");
 
-    let equiv_p4 = render(96, 0);
-    let ref_p4 = render(48, 4);
+    let equiv_p4 = render(96, 0.0);
+    let ref_p4 = render(48, 48.0);
     let diff_p4: f32 = equiv_p4
         .iter()
         .zip(ref_p4.iter())
         .map(|(a, b)| (a - b).abs())
         .fold(0.0, f32::max);
-    assert!(diff_p4 < 1e-4, "note 48 @ +4 oct must match note 96 @ 0 oct, diff={diff_p4}");
+    assert!(diff_p4 < 1e-4, "note 48 @ +48 st must match note 96 @ 0 st, diff={diff_p4}");
+
+    // Auto-sleep: level == 0.0 on all oscs yields exact silence
+    let mut sleep_params = SynthParams::default();
+    sleep_params.amp_attack_s = 0.001;
+    sleep_params.oscs[0].level = 0.0;
+    let mut sleep_eng = SynthEngine::new(sample_rate);
+    sleep_eng.note_on(0, 60, 0.9, None, &sleep_params);
+    for _ in 0..256 {
+        let (l, r) = sleep_eng.process_sample(&sleep_params, &bank);
+        assert_eq!(l, 0.0);
+        assert_eq!(r, 0.0);
+    }
+
+    // Auto-sleep wakes cross-modulator chain (OSC 1 <- OSC 2 <- OSC 3) even with OSC 2 & 3 at level == 0.0
+    let mut chain_base = SynthParams::default();
+    chain_base.amp_attack_s = 0.001;
+    chain_base.filters[0].enabled = false;
+    chain_base.filters[1].enabled = false;
+    chain_base.oscs[0].level = 0.8;
+    chain_base.oscs[0].mod_source = ModSource::Osc2;
+    chain_base.oscs[0].mod_depth = 0.7;
+    chain_base.oscs[1].level = 0.0;
+    chain_base.oscs[1].mod_source = ModSource::Osc3;
+    chain_base.oscs[1].mod_depth = 0.8;
+    chain_base.oscs[2].level = 0.0;
+    chain_base.oscs[2].pitch_semitones = 7.0;
+
+    let mut chain_alt = chain_base;
+    chain_alt.oscs[2].pitch_semitones = 19.0;
+
+    let mut e1 = SynthEngine::new(sample_rate);
+    let mut e2 = SynthEngine::new(sample_rate);
+    e1.note_on(0, 60, 0.9, None, &chain_base);
+    e2.note_on(0, 60, 0.9, None, &chain_alt);
+    let mut max_chain_diff = 0.0_f32;
+    for _ in 0..1024 {
+        let (l1, _) = e1.process_sample(&chain_base, &bank);
+        let (l2, _) = e2.process_sample(&chain_alt, &bank);
+        max_chain_diff = max_chain_diff.max((l1 - l2).abs());
+    }
+    assert!(
+        max_chain_diff > 1e-2,
+        "Silent cross-modulator OSC 3 must wake through OSC 2 when OSC 1 uses OSC 2, diff={max_chain_diff}"
+    );
 }
 
 #[test]

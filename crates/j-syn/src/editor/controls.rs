@@ -12,7 +12,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
 use super::mod_bar::ModUiState;
-use super::widgets::{KnobDimExt, ParamStepPill, RotaryKnob, ValueFormatter};
+use super::widgets::{KnobDimExt, ParamStepPill, PitchDragBox, RotaryKnob, ValueFormatter};
 use super::{BottomTab, UiData, UiEvent};
 use crate::{JSynPluginParams, WavetableChoice};
 
@@ -257,6 +257,41 @@ where
     )
 }
 
+pub(super) const WT_ITEMS: &[(&str, WavetableChoice)] = &[
+    ("Basic Shapes", WavetableChoice::BasicShapes),
+    ("Digital Formant", WavetableChoice::DigitalFormant),
+    ("Harmonic Sync", WavetableChoice::HarmonicSync),
+    ("Aggressive PWM", WavetableChoice::AggressivePwm),
+    ("Custom .WAV", WavetableChoice::Custom),
+];
+
+fn set_wavetable_choice(
+    params: &JSynPluginParams,
+    gui_context: &Arc<dyn GuiContext>,
+    osc_idx: usize,
+    choice: WavetableChoice,
+) {
+    let param = &params.oscs[osc_idx].wt_select;
+    let setter = ParamSetter::new(gui_context.as_ref());
+    setter.begin_set_parameter(param);
+    setter.set_parameter(param, choice);
+    setter.end_set_parameter(param);
+}
+
+pub(super) fn step_wavetable(
+    params: &Arc<JSynPluginParams>,
+    gui_context: &Arc<dyn GuiContext>,
+    osc_idx: usize,
+    delta: isize,
+) {
+    let cur = params.oscs[osc_idx].wt_select.value();
+    let pos = WT_ITEMS.iter().position(|&(_, v)| v == cur).unwrap_or(0);
+    let next = (pos as isize + delta).rem_euclid(WT_ITEMS.len() as isize) as usize;
+    if next != pos {
+        set_wavetable_choice(params, gui_context, osc_idx, WT_ITEMS[next].1);
+    }
+}
+
 pub(super) fn build_wavetable_dropdown(
     cx: &mut Context,
     osc_idx: usize,
@@ -264,13 +299,6 @@ pub(super) fn build_wavetable_dropdown(
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
 ) -> Handle<'_, ScrollDropdown> {
-    const WT_ITEMS: &[(&str, WavetableChoice)] = &[
-        ("Basic Shapes", WavetableChoice::BasicShapes),
-        ("Digital Formant", WavetableChoice::DigitalFormant),
-        ("Harmonic Sync", WavetableChoice::HarmonicSync),
-        ("Aggressive PWM", WavetableChoice::AggressivePwm),
-        ("Custom .WAV", WavetableChoice::Custom),
-    ];
     let dialog_open = Arc::new(AtomicBool::new(false));
     let p_scroll = params.clone();
     let g_scroll = gui_context.clone();
@@ -278,15 +306,11 @@ pub(super) fn build_wavetable_dropdown(
     ScrollDropdown::new(
         cx,
         move |_cx, delta| {
-            let param = &p_scroll.oscs[osc_idx].wt_select;
-            let cur = param.value();
+            let cur = p_scroll.oscs[osc_idx].wt_select.value();
             let pos = WT_ITEMS.iter().position(|&(_, v)| v == cur).unwrap_or(0);
             let next = (pos as isize + delta).clamp(0, WT_ITEMS.len() as isize - 1) as usize;
             if next != pos {
-                let setter = ParamSetter::new(g_scroll.as_ref());
-                setter.begin_set_parameter(param);
-                setter.set_parameter(param, WT_ITEMS[next].1);
-                setter.end_set_parameter(param);
+                set_wavetable_choice(&p_scroll, &g_scroll, osc_idx, WT_ITEMS[next].1);
             }
         },
         move |cx| {
@@ -854,37 +878,6 @@ pub(super) fn build_flex_knob_cell_mod_dim<L, Params, P, FMap>(
     );
 }
 
-fn build_inline_pill_cell_inner<'a, L, Params, P, FMap>(
-    cx: &'a mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    num_steps: usize,
-    weight: f32,
-    mod_target: Option<(ModDestination, Arc<ModUiState>, u8)>,
-) -> Handle<'a, ParamStepPill>
-where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    let handle = match mod_target {
-        Some((dest, mod_ui, tab_tag)) => ParamStepPill::new_inline_with_mod(
-            cx,
-            params,
-            params_to_param,
-            num_steps,
-            title,
-            dest,
-            mod_ui,
-            tab_tag,
-        ),
-        None => ParamStepPill::new_inline(cx, params, params_to_param, num_steps, title),
-    };
-    handle.width(Stretch(weight)).height(Pixels(20.0))
-}
-
 pub(super) fn build_inline_pill_cell<'a, L, Params, P, FMap>(
     cx: &'a mut Context,
     params: L,
@@ -899,36 +892,9 @@ where
     P: Param + 'static,
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
-    build_inline_pill_cell_inner(cx, params, params_to_param, title, num_steps, weight, None)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn build_inline_pill_cell_mod<'a, L, Params, P, FMap>(
-    cx: &'a mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    num_steps: usize,
-    weight: f32,
-    dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
-    tab_tag: u8,
-) -> Handle<'a, ParamStepPill>
-where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    build_inline_pill_cell_inner(
-        cx,
-        params,
-        params_to_param,
-        title,
-        num_steps,
-        weight,
-        Some((dest, mod_ui, tab_tag)),
-    )
+    ParamStepPill::new_inline(cx, params, params_to_param, num_steps, title)
+        .width(Stretch(weight))
+        .height(Pixels(20.0))
 }
 
 pub(super) fn build_mini_pill_cell<L, Params, P, FMap>(
@@ -986,6 +952,90 @@ pub(super) fn build_flex_pill_cell<L, Params, P, FMap>(
     .width(Stretch(1.0))
     .height(Auto)
     .row_between(Pixels(1.0));
+}
+
+fn build_stacked_pill_shell<'a>(
+    cx: &'a mut Context,
+    title: &'static str,
+    build_widget: impl FnOnce(&mut Context),
+) -> Handle<'a, VStack> {
+    VStack::new(cx, move |cx| {
+        bold_label(cx, title, "mini-label")
+            .width(Stretch(1.0))
+            .height(Pixels(12.0))
+            .child_space(Stretch(1.0));
+        build_widget(cx);
+    })
+    .class("stacked-pill-cell")
+    .width(Stretch(1.0))
+    .height(Auto)
+    .row_between(Pixels(2.0))
+}
+
+pub(super) fn build_pitch_pill_cell<'a, L, Params, P, FMap>(
+    cx: &'a mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+    tab_tag: u8,
+) -> Handle<'a, VStack>
+where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    build_stacked_pill_shell(cx, title, move |cx| {
+        PitchDragBox::new_with_mod(cx, params, params_to_param, dest, mod_ui, tab_tag)
+            .width(Stretch(1.0))
+            .height(Pixels(19.0));
+    })
+}
+
+pub(super) fn build_stacked_pill_cell<'a, L, Params, P, FMap>(
+    cx: &'a mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    num_steps: usize,
+) -> Handle<'a, VStack>
+where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    build_stacked_pill_shell(cx, title, move |cx| {
+        ParamStepPill::new(cx, params, params_to_param, num_steps)
+            .width(Stretch(1.0))
+            .height(Pixels(19.0));
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_stacked_pill_cell_mod<'a, L, Params, P, FMap>(
+    cx: &'a mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    num_steps: usize,
+    dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+    tab_tag: u8,
+) -> Handle<'a, VStack>
+where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    build_stacked_pill_shell(cx, title, move |cx| {
+        ParamStepPill::new_with_mod(cx, params, params_to_param, num_steps, dest, mod_ui, tab_tag)
+            .width(Stretch(1.0))
+            .height(Pixels(19.0));
+    })
 }
 
 pub(super) fn build_module_header(cx: &mut Context, title: &'static str, height_px: f32) {

@@ -45,7 +45,7 @@ pub struct SynthParams {
 impl Default for SynthParams {
     fn default() -> Self {
         let mut oscs = [OscParams::default(); 4];
-        oscs[0].enabled = true;
+        oscs[0].level = 0.75;
         Self {
             master_gain: 0.707_106_77, // -3 dB
             engine_mode: EngineMode::Vintage2007,
@@ -164,11 +164,9 @@ fn apply_osc_modulation(
         (out.mod_depth + mod_offsets[ModDestination::osc_mod_depth(idx).index()]).clamp(0.0, 1.0);
     out.pan = (out.pan + mod_offsets[ModDestination::osc_pan(idx).index()] * 2.0).clamp(-1.0, 1.0);
     out.level = (out.level + mod_offsets[ModDestination::osc_level(idx).index()]).clamp(0.0, 1.0);
-    let mod_fine =
-        (out.fine_cents + mod_offsets[ModDestination::osc_fine(idx).index()] * 100.0)
-            .clamp(-200.0, 200.0);
-    let mod_semi_cents = mod_offsets[ModDestination::osc_semi(idx).index()] * 2400.0;
-    out.fine_cents = mod_fine + mod_semi_cents;
+    out.pitch_semitones = (out.pitch_semitones
+        + mod_offsets[ModDestination::osc_pitch(idx).index()] * 96.0)
+        .clamp(-48.0, 48.0);
     out.phase_offset =
         (out.phase_offset + mod_offsets[ModDestination::osc_phase(idx).index()]).rem_euclid(1.0);
     out.detune =
@@ -266,15 +264,34 @@ fn process_voice_bus<F: StereoFilterStage>(
     let mut direct_l = 0.0_f32;
     let mut direct_r = 0.0_f32;
 
+    let mod_oscs: [OscParams; 4] =
+        std::array::from_fn(|i| apply_osc_modulation(&params.oscs[i], i, mod_offsets));
+    let mut osc_active = [false; 4];
+    for i in 0..4 {
+        if mod_oscs[i].level > 0.0001 {
+            osc_active[i] = true;
+        }
+    }
+    for _ in 0..3 {
+        for i in 0..4 {
+            if osc_active[i] {
+                if let Some(src_idx) = mod_oscs[i].mod_source.osc_index() {
+                    osc_active[src_idx] = true;
+                }
+            }
+        }
+    }
+
     // Evaluate oscillators 1 -> 4 sequentially for zero-latency forward / 1-sample feedback cross-PM.
     for a in 0..4 {
-        let raw_osc_p = &params.oscs[a];
-        if !raw_osc_p.enabled {
+        if !osc_active[a] {
             oscillators[a].fb_lp_state = 0.0;
+            oscillators[a].fb_dc_x1 = 0.0;
+            oscillators[a].fb_dc_y1 = 0.0;
             osc_out[a] = 0.0;
             continue;
         }
-        let osc_p = apply_osc_modulation(raw_osc_p, a, mod_offsets);
+        let osc_p = mod_oscs[a];
 
         let (mod_sig, is_fb) = match osc_p.mod_source {
             ModSource::Off => (0.0, false),
@@ -308,19 +325,21 @@ fn process_voice_bus<F: StereoFilterStage>(
             is_fb,
         );
         osc_out[a] = raw;
-        if mod_routing.osc_direct[a] {
-            direct_l += l;
-            direct_r += r;
-        } else {
-            split_filter_send(
-                l,
-                r,
-                mod_routing.osc_filter_balance[a],
-                &mut f1_l,
-                &mut f1_r,
-                &mut f2_l,
-                &mut f2_r,
-            );
+        if osc_p.level > 0.0001 {
+            if mod_routing.osc_direct[a] {
+                direct_l += l;
+                direct_r += r;
+            } else {
+                split_filter_send(
+                    l,
+                    r,
+                    mod_routing.osc_filter_balance[a],
+                    &mut f1_l,
+                    &mut f1_r,
+                    &mut f2_l,
+                    &mut f2_r,
+                );
+            }
         }
     }
 

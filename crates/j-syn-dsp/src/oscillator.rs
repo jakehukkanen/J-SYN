@@ -66,6 +66,17 @@ impl ModSource {
             _ => Self::Off,
         }
     }
+
+    #[inline]
+    pub const fn osc_index(self) -> Option<usize> {
+        match self {
+            Self::Off => None,
+            Self::Osc1 => Some(0),
+            Self::Osc2 => Some(1),
+            Self::Osc3 => Some(2),
+            Self::Osc4 => Some(3),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,11 +103,8 @@ pub enum EngineMode {
 /// Per-oscillator control-rate / sample-rate parameters.
 #[derive(Debug, Clone, Copy)]
 pub struct OscParams {
-    pub enabled: bool,
     pub wt_pos: f32,
-    pub octave: i32,
-    pub semi: i32,
-    pub fine_cents: f32,
+    pub pitch_semitones: f32,
     /// Normalized phase offset `[0.0, 1.0)` corresponding to `0°..360°`.
     pub phase_offset: f32,
     pub retrig: bool,
@@ -117,11 +125,8 @@ pub struct OscParams {
 impl Default for OscParams {
     fn default() -> Self {
         Self {
-            enabled: false,
             wt_pos: 0.0,
-            octave: 0,
-            semi: 0,
-            fine_cents: 0.0,
+            pitch_semitones: 0.0,
             phase_offset: 0.0,
             retrig: true,
             warp_mode: WarpMode::None,
@@ -134,7 +139,7 @@ impl Default for OscParams {
             detune: 0.2,
             spread: 0.5,
             pan: 0.0,
-            level: 0.75,
+            level: 0.0,
             keytrack: true,
         }
     }
@@ -214,19 +219,11 @@ impl OscillatorState {
         mod_signal: f32,
         is_feedback_mod: bool,
     ) -> (f32, f32, f32) {
-        if !params.enabled {
-            self.fb_lp_state = 0.0;
-            self.fb_dc_x1 = 0.0;
-            self.fb_dc_y1 = 0.0;
-            return (0.0, 0.0, 0.0);
-        }
-
         let _ = osc_idx;
         let sr = sample_rate.max(1000.0);
 
-        // Pitch offset from Octave, Semi, Fine
-        let semitone_offset =
-            (params.octave * 12 + params.semi) as f32 + (params.fine_cents * 0.01);
+        // Continuous pitch offset in semitones (-48.00..=+48.00 + modulation)
+        let semitone_offset = params.pitch_semitones.clamp(-96.0, 96.0);
         let osc_hz = base_note_hz * (2.0_f32).powf(semitone_offset / 12.0);
         let base_inc = (osc_hz / sr).clamp(0.0, 0.49);
 

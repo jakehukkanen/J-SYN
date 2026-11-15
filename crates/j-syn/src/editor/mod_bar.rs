@@ -76,7 +76,7 @@ impl ModUiState {
     pub fn compute_enabled_mask(params: &JSynPluginParams) -> u64 {
         let mut mask = 0u64;
         for (i, osc) in params.oscs.iter().enumerate() {
-            if osc.enabled.value() {
+            if super::osc_panel::is_osc_awake(params, i) {
                 mask |= 1 << i;
             }
             if osc.unison.value() > 1 {

@@ -591,23 +591,14 @@ impl RoutingPluginParams {
 
 #[derive(Params)]
 pub struct OscPluginParams {
-    #[id = "enabled"]
-    pub enabled: BoolParam,
-
     #[id = "wt_select"]
     pub wt_select: EnumParam<WavetableChoice>,
 
     #[id = "wt_pos"]
     pub wt_pos: FloatParam,
 
-    #[id = "octave"]
-    pub octave: IntParam,
-
-    #[id = "semi"]
-    pub semi: IntParam,
-
-    #[id = "fine"]
-    pub fine: FloatParam,
+    #[id = "pitch"]
+    pub pitch: FloatParam,
 
     #[id = "phase"]
     pub phase: FloatParam,
@@ -660,26 +651,30 @@ impl OscPluginParams {
             2 => WavetableChoice::HarmonicSync,
             _ => WavetableChoice::AggressivePwm,
         };
+        let default_level = if osc_idx == 0 { 0.75 } else { 0.0 };
 
         Self {
-            enabled: BoolParam::new("Enabled", osc_idx == 0),
             wt_select: EnumParam::new("Wavetable", default_wt),
             wt_pos: FloatParam::new("WT Pos", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_unit(" %")
                 .with_value_to_string(formatters::v2s_f32_percentage(0))
                 .with_string_to_value(formatters::s2v_f32_percentage()),
-            octave: IntParam::new("Octave", 0, IntRange::Linear { min: -4, max: 4 }),
-            semi: IntParam::new("Semi", 0, IntRange::Linear { min: -12, max: 12 }),
-            fine: FloatParam::new(
-                "Fine",
+            pitch: FloatParam::new(
+                "Pitch",
                 0.0,
                 FloatRange::Linear {
-                    min: -100.0,
-                    max: 100.0,
+                    min: -48.0,
+                    max: 48.0,
                 },
             )
-            .with_unit(" ct")
-            .with_value_to_string(formatters::v2s_f32_rounded(0)),
+            .with_unit(" st")
+            .with_value_to_string(Arc::new(|val| {
+                let clean = if val.abs() < 0.0005 { 0.0 } else { val };
+                format!("{clean:.2}")
+            }))
+            .with_string_to_value(Arc::new(|s| {
+                s.trim().trim_end_matches("st").trim().parse::<f32>().ok()
+            })),
             phase: FloatParam::new(
                 "Phase",
                 0.0,
@@ -731,7 +726,7 @@ impl OscPluginParams {
             .with_unit(" %")
             .with_value_to_string(formatters::v2s_f32_percentage(0))
             .with_string_to_value(formatters::s2v_f32_percentage()),
-            level: FloatParam::new("Level", 0.75, FloatRange::Linear { min: 0.0, max: 1.0 })
+            level: FloatParam::new("Level", default_level, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_unit(" %")
                 .with_value_to_string(formatters::v2s_f32_percentage(0))
                 .with_string_to_value(formatters::s2v_f32_percentage()),
@@ -741,11 +736,8 @@ impl OscPluginParams {
 
     fn to_dsp(&self) -> OscParams {
         OscParams {
-            enabled: self.enabled.value(),
             wt_pos: self.wt_pos.value(),
-            octave: self.octave.value(),
-            semi: self.semi.value(),
-            fine_cents: self.fine.value(),
+            pitch_semitones: self.pitch.value(),
             phase_offset: (self.phase.value() / 360.0).rem_euclid(1.0).fract(),
             retrig: self.retrig.value(),
             warp_mode: match self.warp_mode.value() {

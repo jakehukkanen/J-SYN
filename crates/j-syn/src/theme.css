@@ -822,3 +822,44 @@ led-toggle:checked .switch-label {
 .fx-move-btn.fx-move-disabled .fx-move-label {
   color: #5b5046;
 }
+
+.wt-step-btn {
+  background-color: #26201b;
+  border-width: 1px;
+  border-color: #52463d;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.wt-step-btn:hover {
+  background-color: #322a23;
+  border-color: #f5b349;
+}
+
+.wt-step-label {
+  font-size: 9;
+  font-weight: bold;
+  color: #ffd382;
+}
+
+.hardware-module.module-disabled .wt-step-btn {
+  background-color: #1c1814;
+  border-color: #362f28;
+}
+
+.hardware-module.module-disabled .wt-step-label {
+  color: #5f554c;
+}
+
+.stacked-pill-cell.pill-dimmed .mini-label {
+  color: #5f554c;
+}
+
+.stacked-pill-cell.pill-dimmed .compact-pill {
+  background-color: #1c1814;
+  border-color: #362f28;
+}
+
+.stacked-pill-cell.pill-dimmed .compact-pill-text {
+  color: #7c7064;
+}

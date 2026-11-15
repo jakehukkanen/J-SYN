@@ -40,16 +40,16 @@ mod scope;
 mod widgets;
 
 use controls::{
-    bold_label, build_bool_dropdown, build_header_knob_cell, build_header_knob_cell_mod,
-    build_knob_cell, build_mini_pill_cell, build_module_header, build_placeholder_bay,
-    build_tab_button, build_ui_scale_dropdown,
+    bold_label, build_bool_dropdown, build_flex_knob_cell_mod_dim, build_header_knob_cell,
+    build_header_knob_cell_mod, build_knob_cell, build_mini_pill_cell, build_module_header,
+    build_placeholder_bay, build_tab_button, build_ui_scale_dropdown,
 };
 use filter_panel::build_filter_panel;
 use insert_panel::build_insert_panel;
-use mod_bar::{build_matrix_view, build_mod_source_bar, ModUiState};
+use mod_bar::{bottom_tab_tag, build_matrix_view, build_mod_source_bar, ModUiState};
 use modseq_tab::{build_modseq_tab, ModSeqSubTab};
 use noise_panel::build_noise_panel;
-use osc_panel::build_osc_panel;
+use osc_panel::{build_osc_panel, osc_enabled_fn};
 use routing_tab::build_routing_tab;
 use widgets::LedToggleSwitch;
 
@@ -555,13 +555,39 @@ fn build_bottom_tabs(
                         .width(Stretch(1.55))
                         .height(Stretch(1.0));
 
-                        VStack::new(cx, |cx| {
-                            build_module_header(cx, "VOICE ENGINE", 18.0);
-                            build_placeholder_bay(
-                                cx,
-                                "16-VOICE POLYPHONIC  |  MONO LEGATO",
-                                "VINTAGE 2007 (1.5 KHZ TICK)  /  HQ (AUDIO-RATE)  |  ENV 1-4 IN MODSEQ",
-                            );
+                        VStack::new(cx, {
+                            let params = params.clone();
+                            let mod_ui = mod_ui.clone();
+                            move |cx| {
+                                build_module_header(cx, "OSCILLATOR PAN", 18.0);
+                                HStack::new(cx, move |cx| {
+                                    const PAN_LABELS: [&str; 4] =
+                                        ["OSC 1 PAN", "OSC 2 PAN", "OSC 3 PAN", "OSC 4 PAN"];
+                                    const PAN_ACCENTS: [(u8, u8, u8); 4] =
+                                        [AMBER_RGB, GOLD_RGB, CORAL_RGB, AMBER_RGB];
+                                    for idx in 0..4 {
+                                        build_flex_knob_cell_mod_dim(
+                                            cx,
+                                            UiData::params,
+                                            move |p| &p.oscs[idx].pan,
+                                            PAN_LABELS[idx],
+                                            true,
+                                            PAN_ACCENTS[idx],
+                                            32.0,
+                                            ModDestination::osc_pan(idx),
+                                            mod_ui.clone(),
+                                            bottom_tab_tag(BottomTab::VoiceEnv),
+                                            params.clone(),
+                                            osc_enabled_fn(idx),
+                                        );
+                                    }
+                                })
+                                .col_between(Pixels(8.0))
+                                .child_top(Stretch(1.0))
+                                .child_bottom(Stretch(1.0))
+                                .width(Stretch(1.0))
+                                .height(Stretch(1.0));
+                            }
                         })
                         .class("hardware-module")
                         .class("drawer-module")
