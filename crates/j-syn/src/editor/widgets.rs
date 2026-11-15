@@ -1188,15 +1188,15 @@ impl ParamStepPill {
                         .child_top(Stretch(1.0))
                         .child_bottom(Stretch(1.0))
                         .hoverable(false);
-                    Element::new(cx).width(Stretch(1.0)).hoverable(false);
                     bold_label(cx, text_lens, "inline-pill-value")
-                        .width(Auto)
+                        .width(Stretch(1.0))
                         .height(Stretch(1.0))
                         .child_top(Stretch(1.0))
                         .child_bottom(Stretch(1.0))
+                        .overflow(Overflow::Hidden)
                         .hoverable(false);
                 })
-                .col_between(Pixels(4.0))
+                .col_between(Pixels(3.0))
                 .width(Stretch(1.0))
                 .height(Stretch(1.0))
                 .child_left(Pixels(3.0))

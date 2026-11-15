@@ -3,6 +3,7 @@ use crate::filter::{FilterParams, FilterState, FilterSvfCore};
 use crate::insert::{
     FilterRouting, InsertPosition, InsertShaperState, RoutingParams, VoiceFeedbackState,
 };
+use crate::fx::{FxSlotParams, NUM_FX_SLOTS};
 use crate::mod_matrix::{
     ModDestination, ModMatrixState, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS,
 };
@@ -37,6 +38,7 @@ pub struct SynthParams {
     pub modseqs: [ModSeqParams; 4],
     pub modseq_steps: ModSeqStepBank,
     pub mod_matrix: ModMatrixState,
+    pub fx_slots: [FxSlotParams; NUM_FX_SLOTS],
     pub tempo_bpm: f32,
 }
 
@@ -65,6 +67,7 @@ impl Default for SynthParams {
             modseqs: [ModSeqParams::default(); 4],
             modseq_steps: ModSeqStepBank::default(),
             mod_matrix: ModMatrixState::default(),
+            fx_slots: [FxSlotParams::default(); NUM_FX_SLOTS],
             tempo_bpm: 120.0,
         }
     }

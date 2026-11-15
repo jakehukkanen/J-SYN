@@ -1235,8 +1235,8 @@ fn test_modseq_stamps_and_mseg_curve() {
     assert!((evaluate_modseq_curve(&steps, 16, 10.25 / 16.0) - 0.8).abs() < 1e-4);
     assert!(evaluate_modseq_curve(&steps, 16, 10.75 / 16.0).abs() < 1e-4);
 
-    // 2. Verify all 8 LFO presets & multi-node MSEG curve + zero-allocation audio-thread evaluation
-    assert_eq!(LfoPreset::ALL.len(), 8);
+    // 2. Verify all 9 LFO presets (including Sine) & multi-node MSEG curve + zero-allocation evaluation
+    assert_eq!(LfoPreset::ALL.len(), 9);
     for &preset in &LfoPreset::ALL {
         let curve = preset.to_mseg();
         for k in 0..=20 {
@@ -1244,6 +1244,14 @@ fn test_modseq_stamps_and_mseg_curve() {
             assert!(v.is_finite() && (0.0..=1.0).contains(&v));
         }
     }
+    let sine_curve = LfoPreset::Sine.to_mseg();
+    assert!((evaluate_mseg_curve(&sine_curve, 0.0) - 0.5).abs() < 1e-4);
+    assert!((evaluate_mseg_curve(&sine_curve, 0.25) - 1.0).abs() < 1e-4);
+    assert!((evaluate_mseg_curve(&sine_curve, 0.5) - 0.5).abs() < 1e-4);
+    assert!((evaluate_mseg_curve(&sine_curve, 0.75) - 0.0).abs() < 1e-4);
+    assert!((evaluate_mseg_curve(&sine_curve, 1.0) - 0.5).abs() < 1e-4);
+    let mid_rise = evaluate_mseg_curve(&sine_curve, 0.125);
+    assert!(mid_rise > 0.75 && mid_rise < 0.95, "Sine 1/8th phase expected ~0.85, got {mid_rise}");
 
     let mut mseg = MsegCurve {
         nodes: [MsegNode::default(); MAX_MSEG_NODES],
@@ -1471,5 +1479,102 @@ fn mod_matrix_modseq_rate_modulation_free_and_sync() {
     assert!(
         sync_mono_fast > sync_mono_base * 1.85 && sync_mono_fast < sync_mono_base * 2.15,
         "Expected TempoSync MonoGlobal ~2x speedup: base={sync_mono_base}, fast={sync_mono_fast}"
+    );
+}
+
+#[test]
+fn master_fx_rack_8_slots_stacking_and_modulation() {
+    use j_syn_dsp::{
+        FxSlotParams, FxType, ModDestination, ModMatrixSource, ModSlot, FX_SCOPE_LEN, NUM_FX_SLOTS,
+    };
+
+    assert_eq!(FxSlotParams::init_patch_slot(0).fx_type, FxType::Ott);
+    assert_eq!(FxSlotParams::init_patch_slot(1).fx_type, FxType::Distortion);
+    assert_eq!(FxSlotParams::init_patch_slot(2).fx_type, FxType::Delay);
+    assert_eq!(FxSlotParams::init_patch_slot(3).fx_type, FxType::JSatClipper);
+    assert_eq!(FxSlotParams::init_patch_slot(4).fx_type, FxType::Reverb);
+    assert_eq!(FxSlotParams::init_patch_slot(5).fx_type, FxType::Off);
+    assert_eq!(ModDestination::fx_param(3, 1), ModDestination::Fx4P2);
+    assert!(ModDestination::Fx4P2.is_fx_slot(3));
+    assert!(!ModDestination::Fx4P2.is_fx_slot(2));
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    // 1. Full 8-slot init chain runs cleanly & records live telemetry scopes
+    let mut init_params = SynthParams::default();
+    init_params.fx_slots = std::array::from_fn(FxSlotParams::init_patch_slot);
+    init_params.fx_slots[5] = FxSlotParams {
+        fx_type: FxType::Chorus,
+        enabled: true,
+        stack: 1,
+        params: FxSlotParams::default_params_for_type(FxType::Chorus),
+    };
+
+    let mut eng = SynthEngine::new(sample_rate);
+    eng.note_on(0, 57, 1.0, None, &init_params);
+    let mut max_abs = 0.0_f32;
+    for _ in 0..8_192 {
+        let (l, r) = eng.process_sample(&init_params, &bank);
+        assert!(l.is_finite() && r.is_finite());
+        max_abs = max_abs.max(l.abs()).max(r.abs());
+    }
+    assert!(max_abs > 0.01 && max_abs <= 2.0, "Unexpected init FX output peak {max_abs}");
+
+    let mut pre_buf = [0.0_f32; FX_SCOPE_LEN];
+    let mut post_buf = [0.0_f32; FX_SCOPE_LEN];
+    let _ = eng.telemetry().fx_scopes[3].read_snapshot(&mut pre_buf, &mut post_buf);
+    assert!(pre_buf.iter().any(|&v| v > 0.0), "Expected live FX scope telemetry");
+
+    // 2. Series STACK 4 vs STACK 1 changes output energy and J-SAT ceiling clipping limits post peak
+    let run_peak = |stack: u8, ceil_norm: f32, mod_wheel: f32| -> f32 {
+        let mut p = SynthParams::default();
+        p.fx_slots = [FxSlotParams::default(); NUM_FX_SLOTS];
+        p.fx_slots[0] = FxSlotParams {
+            fx_type: FxType::Distortion,
+            enabled: true,
+            stack,
+            params: [0.0, 0.75, 0.5, 1.0],
+        };
+        p.fx_slots[1] = FxSlotParams {
+            fx_type: FxType::JSatClipper,
+            enabled: true,
+            stack: 1,
+            // Drive +12 dB (0.50), Ceiling configurable, Knee 0% (hard clip), Mix 100%
+            params: [0.50, ceil_norm, 0.0, 1.0],
+        };
+        p.mod_matrix.slots[0] = ModSlot {
+            source: ModMatrixSource::ModWheel,
+            destination: ModDestination::Fx2P2,
+            depth: 0.7,
+            bipolar: false,
+            enabled: true,
+        };
+        let mut e = SynthEngine::new(sample_rate);
+        e.set_mod_wheel(mod_wheel);
+        e.note_on(0, 48, 1.0, None, &p);
+        let mut pk = 0.0_f32;
+        for i in 0..4_096 {
+            let (l, r) = e.process_sample(&p, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            if i > 256 {
+                pk = pk.max(l.abs()).max(r.abs());
+            }
+        }
+        pk
+    };
+
+    let low_ceil_peak = run_peak(1, 0.15, 0.0);
+    let mod_raised_peak = run_peak(1, 0.15, 1.0);
+    assert!(
+        mod_raised_peak > low_ceil_peak * 1.5,
+        "ModWheel -> Fx2P2 (Ceiling) must raise clipped output peak: low={low_ceil_peak}, mod={mod_raised_peak}"
+    );
+
+    let stack1_pk = run_peak(1, 1.0, 0.0);
+    let stack4_pk = run_peak(4, 1.0, 0.0);
+    assert!(
+        (stack4_pk - stack1_pk).abs() > 1e-4,
+        "Series STACK 4 should alter FX output compared to STACK 1 ({stack1_pk} vs {stack4_pk})"
     );
 }

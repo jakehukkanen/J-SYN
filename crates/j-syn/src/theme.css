@@ -177,6 +177,8 @@ dropdown {
   border-width: 1px;
   border-color: #52463d;
   border-radius: 3px;
+  child-top: 0px;
+  child-bottom: 0px;
 }
 
 dropdown:hover {
@@ -185,10 +187,12 @@ dropdown:hover {
 }
 
 dropdown .title {
+  width: 1s;
+  height: 1s;
   child-left: 5px;
   child-right: 5px;
-  child-top: 1s;
-  child-bottom: 1s;
+  child-top: 0px;
+  child-bottom: 0px;
 }
 
 dropdown popup {
@@ -759,4 +763,62 @@ led-toggle:checked .switch-label {
 
 .snap-btn:checked .snap-btn-label {
   color: #fff6e6;
+}
+
+/* Milestone 4: Master FX Rack */
+.fx-compact-card {
+  child-left: 6px;
+  child-right: 6px;
+  child-top: 5px;
+  child-bottom: 5px;
+}
+
+.fx-full-card {
+  child-left: 8px;
+  child-right: 8px;
+  child-top: 6px;
+  child-bottom: 6px;
+}
+
+.fx-rack-banner {
+  background-color: #241f1a;
+  border-width: 1px;
+  border-color: #463b32;
+  border-radius: 4px;
+  child-left: 10px;
+  child-right: 10px;
+}
+
+.fx-rack-sub {
+  font-size: 8.5;
+  font-weight: bold;
+  color: #a99582;
+}
+
+.fx-move-btn {
+  background-color: #312923;
+  border-width: 1px;
+  border-color: #4e4238;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.fx-move-btn:hover {
+  background-color: #443930;
+  border-color: #f5b349;
+}
+
+.fx-move-btn.fx-move-disabled {
+  background-color: #1f1a16;
+  border-color: #312a24;
+}
+
+.fx-move-label {
+  font-size: 8;
+  font-weight: bold;
+  color: #e6d7c4;
+}
+
+.fx-move-btn.fx-move-disabled .fx-move-label {
+  color: #5b5046;
 }

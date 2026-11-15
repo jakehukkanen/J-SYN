@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub const NUM_MOD_SLOTS: usize = 32;
 pub const NUM_ACTIVE_SOURCES: usize = 12;
-pub const NUM_MOD_DESTS: usize = 67;
+pub const NUM_MOD_DESTS: usize = 99;
 
 /// Modulation sources assignable in any matrix slot.
 #[repr(u8)]
@@ -206,6 +206,38 @@ pub enum ModDestination {
     ModSeq2Rate = 64,
     ModSeq3Rate = 65,
     ModSeq4Rate = 66,
+    Fx1P1 = 67,
+    Fx1P2 = 68,
+    Fx1P3 = 69,
+    Fx1P4 = 70,
+    Fx2P1 = 71,
+    Fx2P2 = 72,
+    Fx2P3 = 73,
+    Fx2P4 = 74,
+    Fx3P1 = 75,
+    Fx3P2 = 76,
+    Fx3P3 = 77,
+    Fx3P4 = 78,
+    Fx4P1 = 79,
+    Fx4P2 = 80,
+    Fx4P3 = 81,
+    Fx4P4 = 82,
+    Fx5P1 = 83,
+    Fx5P2 = 84,
+    Fx5P3 = 85,
+    Fx5P4 = 86,
+    Fx6P1 = 87,
+    Fx6P2 = 88,
+    Fx6P3 = 89,
+    Fx6P4 = 90,
+    Fx7P1 = 91,
+    Fx7P2 = 92,
+    Fx7P3 = 93,
+    Fx7P4 = 94,
+    Fx8P1 = 95,
+    Fx8P2 = 96,
+    Fx8P3 = 97,
+    Fx8P4 = 98,
 }
 
 impl ModDestination {
@@ -287,7 +319,39 @@ impl ModDestination {
             63 => Self::ModSeq1Rate,
             64 => Self::ModSeq2Rate,
             65 => Self::ModSeq3Rate,
-            _ => Self::ModSeq4Rate,
+            66 => Self::ModSeq4Rate,
+            67 => Self::Fx1P1,
+            68 => Self::Fx1P2,
+            69 => Self::Fx1P3,
+            70 => Self::Fx1P4,
+            71 => Self::Fx2P1,
+            72 => Self::Fx2P2,
+            73 => Self::Fx2P3,
+            74 => Self::Fx2P4,
+            75 => Self::Fx3P1,
+            76 => Self::Fx3P2,
+            77 => Self::Fx3P3,
+            78 => Self::Fx3P4,
+            79 => Self::Fx4P1,
+            80 => Self::Fx4P2,
+            81 => Self::Fx4P3,
+            82 => Self::Fx4P4,
+            83 => Self::Fx5P1,
+            84 => Self::Fx5P2,
+            85 => Self::Fx5P3,
+            86 => Self::Fx5P4,
+            87 => Self::Fx6P1,
+            88 => Self::Fx6P2,
+            89 => Self::Fx6P3,
+            90 => Self::Fx6P4,
+            91 => Self::Fx7P1,
+            92 => Self::Fx7P2,
+            93 => Self::Fx7P3,
+            94 => Self::Fx7P4,
+            95 => Self::Fx8P1,
+            96 => Self::Fx8P2,
+            97 => Self::Fx8P3,
+            _ => Self::Fx8P4,
         })
     }
 
@@ -465,6 +529,51 @@ impl ModDestination {
         }
     }
 
+    #[inline]
+    pub const fn fx_param(slot: usize, param: usize) -> Self {
+        match (slot, param) {
+            (0, 0) => Self::Fx1P1,
+            (0, 1) => Self::Fx1P2,
+            (0, 2) => Self::Fx1P3,
+            (0, 3) => Self::Fx1P4,
+            (1, 0) => Self::Fx2P1,
+            (1, 1) => Self::Fx2P2,
+            (1, 2) => Self::Fx2P3,
+            (1, 3) => Self::Fx2P4,
+            (2, 0) => Self::Fx3P1,
+            (2, 1) => Self::Fx3P2,
+            (2, 2) => Self::Fx3P3,
+            (2, 3) => Self::Fx3P4,
+            (3, 0) => Self::Fx4P1,
+            (3, 1) => Self::Fx4P2,
+            (3, 2) => Self::Fx4P3,
+            (3, 3) => Self::Fx4P4,
+            (4, 0) => Self::Fx5P1,
+            (4, 1) => Self::Fx5P2,
+            (4, 2) => Self::Fx5P3,
+            (4, 3) => Self::Fx5P4,
+            (5, 0) => Self::Fx6P1,
+            (5, 1) => Self::Fx6P2,
+            (5, 2) => Self::Fx6P3,
+            (5, 3) => Self::Fx6P4,
+            (6, 0) => Self::Fx7P1,
+            (6, 1) => Self::Fx7P2,
+            (6, 2) => Self::Fx7P3,
+            (6, 3) => Self::Fx7P4,
+            (7, 0) => Self::Fx8P1,
+            (7, 1) => Self::Fx8P2,
+            (7, 2) => Self::Fx8P3,
+            _ => Self::Fx8P4,
+        }
+    }
+
+    #[inline]
+    pub const fn is_fx_slot(self, slot: usize) -> bool {
+        let idx = self as usize;
+        let base = 67 + slot * 4;
+        slot < 8 && idx >= base && idx < base + 4
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Osc1WtPos => "OSC1 WT",
@@ -534,6 +643,38 @@ impl ModDestination {
             Self::ModSeq2Rate => "MS2 RATE",
             Self::ModSeq3Rate => "MS3 RATE",
             Self::ModSeq4Rate => "MS4 RATE",
+            Self::Fx1P1 => "FX1 P1",
+            Self::Fx1P2 => "FX1 P2",
+            Self::Fx1P3 => "FX1 P3",
+            Self::Fx1P4 => "FX1 P4",
+            Self::Fx2P1 => "FX2 P1",
+            Self::Fx2P2 => "FX2 P2",
+            Self::Fx2P3 => "FX2 P3",
+            Self::Fx2P4 => "FX2 P4",
+            Self::Fx3P1 => "FX3 P1",
+            Self::Fx3P2 => "FX3 P2",
+            Self::Fx3P3 => "FX3 P3",
+            Self::Fx3P4 => "FX3 P4",
+            Self::Fx4P1 => "FX4 P1",
+            Self::Fx4P2 => "FX4 P2",
+            Self::Fx4P3 => "FX4 P3",
+            Self::Fx4P4 => "FX4 P4",
+            Self::Fx5P1 => "FX5 P1",
+            Self::Fx5P2 => "FX5 P2",
+            Self::Fx5P3 => "FX5 P3",
+            Self::Fx5P4 => "FX5 P4",
+            Self::Fx6P1 => "FX6 P1",
+            Self::Fx6P2 => "FX6 P2",
+            Self::Fx6P3 => "FX6 P3",
+            Self::Fx6P4 => "FX6 P4",
+            Self::Fx7P1 => "FX7 P1",
+            Self::Fx7P2 => "FX7 P2",
+            Self::Fx7P3 => "FX7 P3",
+            Self::Fx7P4 => "FX7 P4",
+            Self::Fx8P1 => "FX8 P1",
+            Self::Fx8P2 => "FX8 P2",
+            Self::Fx8P3 => "FX8 P3",
+            Self::Fx8P4 => "FX8 P4",
         }
     }
 }
@@ -634,12 +775,77 @@ impl ModMatrixState {
     }
 }
 
+pub const FX_SCOPE_LEN: usize = 128;
+
+/// Lock-free atomic ring buffer storing downsampled pre/post peak waveforms & activity for an FX slot.
+pub struct FxScopeRing {
+    pre_peaks: [AtomicU32; FX_SCOPE_LEN],
+    post_peaks: [AtomicU32; FX_SCOPE_LEN],
+    write_idx: AtomicU32,
+    activity_bits: AtomicU32,
+}
+
+impl Default for FxScopeRing {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FxScopeRing {
+    pub fn new() -> Self {
+        Self {
+            pre_peaks: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
+            post_peaks: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
+            write_idx: AtomicU32::new(0),
+            activity_bits: AtomicU32::new(0.0_f32.to_bits()),
+        }
+    }
+
+    #[inline]
+    pub fn push(&self, pre_peak: f32, post_peak: f32, activity: f32) {
+        let idx = (self.write_idx.load(Ordering::Relaxed) as usize) % FX_SCOPE_LEN;
+        self.pre_peaks[idx].store(pre_peak.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
+        self.post_peaks[idx].store(post_peak.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
+        self.write_idx
+            .store(((idx + 1) % FX_SCOPE_LEN) as u32, Ordering::Relaxed);
+        self.activity_bits
+            .store(activity.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn clear(&self) {
+        for v in &self.pre_peaks {
+            v.store(0.0_f32.to_bits(), Ordering::Relaxed);
+        }
+        for v in &self.post_peaks {
+            v.store(0.0_f32.to_bits(), Ordering::Relaxed);
+        }
+        self.activity_bits
+            .store(0.0_f32.to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn read_snapshot(
+        &self,
+        pre_out: &mut [f32; FX_SCOPE_LEN],
+        post_out: &mut [f32; FX_SCOPE_LEN],
+    ) -> f32 {
+        let head = (self.write_idx.load(Ordering::Relaxed) as usize) % FX_SCOPE_LEN;
+        for i in 0..FX_SCOPE_LEN {
+            let idx = (head + i) % FX_SCOPE_LEN;
+            pre_out[i] = f32::from_bits(self.pre_peaks[idx].load(Ordering::Relaxed));
+            post_out[i] = f32::from_bits(self.post_peaks[idx].load(Ordering::Relaxed));
+        }
+        f32::from_bits(self.activity_bits.load(Ordering::Relaxed))
+    }
+}
+
 /// Lock-free atomic telemetry published by the audio thread for 60 Hz UI mod-ring animations.
 pub struct ModUiTelemetry {
     pub dest_offsets: [AtomicU32; NUM_MOD_DESTS],
     pub source_levels: [AtomicU32; NUM_ACTIVE_SOURCES],
     pub modseq_phases: [AtomicU32; 4],
     pub env_levels: [AtomicU32; 4],
+    pub fx_scopes: [FxScopeRing; 8],
 }
 
 impl Default for ModUiTelemetry {
@@ -655,6 +861,7 @@ impl ModUiTelemetry {
             source_levels: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             modseq_phases: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             env_levels: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
+            fx_scopes: std::array::from_fn(|_| FxScopeRing::new()),
         }
     }
 

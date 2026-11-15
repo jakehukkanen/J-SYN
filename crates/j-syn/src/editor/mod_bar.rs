@@ -1,7 +1,7 @@
 //! Drag-and-drop Modulation Source Pill bar, live telemetry 60 Hz redraw ticker,
 //! and inline modulation slot inspector (`UNI/BIP`, depth readout, slot cycle, remove).
 
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -18,6 +18,7 @@ use super::{BottomTab, UiData, UiEvent};
 use crate::JSynPluginParams;
 
 const UNSET_U8: u8 = 255;
+pub(crate) const FX_VIEW_TAG: u8 = 5;
 
 /// Converts `BottomTab` to the visibility tag used for drop-target hit testing (`1..=4`, `0` = always visible).
 #[inline]
@@ -37,11 +38,12 @@ pub(crate) struct ModUiState {
     dragging_source: AtomicU8,
     hover_dest: AtomicU8,
     active_bottom_tab: AtomicU8,
+    active_view_mode: AtomicU8,
     inspected_dest: AtomicU8,
     inspected_slot: AtomicU8,
     active_stamp: AtomicU8,
     mseg_snap: AtomicBool,
-    last_enabled_mask: AtomicU16,
+    last_enabled_mask: AtomicU64,
     drop_rects: Mutex<[(f32, f32, f32, f32, u8); NUM_MOD_DESTS]>,
 }
 
@@ -54,11 +56,12 @@ impl ModUiState {
             dragging_source: AtomicU8::new(0),
             hover_dest: AtomicU8::new(UNSET_U8),
             active_bottom_tab: AtomicU8::new(bottom_tab_tag(BottomTab::VoiceEnv)),
+            active_view_mode: AtomicU8::new(0),
             inspected_dest: AtomicU8::new(UNSET_U8),
             inspected_slot: AtomicU8::new(UNSET_U8),
             active_stamp: AtomicU8::new(ModSeqStepShape::RampDown as u8),
             mseg_snap: AtomicBool::new(false),
-            last_enabled_mask: AtomicU16::new(initial_mask),
+            last_enabled_mask: AtomicU64::new(initial_mask),
             drop_rects: Mutex::new([(0.0, 0.0, 0.0, 0.0, UNSET_U8); NUM_MOD_DESTS]),
         }
     }
@@ -68,10 +71,10 @@ impl ModUiState {
         ModSeqStepShape::from_u8(self.active_stamp.load(Ordering::Relaxed))
     }
 
-    /// Packs module enable states (OSC1..4, Noise, F1..2, INS1..2, OSC1..4 unison>1) into a
-    /// bitmask so host automation or control changes trigger dim/undim updates automatically.
-    pub fn compute_enabled_mask(params: &JSynPluginParams) -> u16 {
-        let mut mask = 0u16;
+    /// Packs module enable states (OSC1..4, Noise, F1..2, INS1..2, OSC1..4 unison>1, and FX1..8
+    /// enabled/type/stack) into a `u64` bitmask so host automation or swaps refresh the UI.
+    pub fn compute_enabled_mask(params: &JSynPluginParams) -> u64 {
+        let mut mask = 0u64;
         for (i, osc) in params.oscs.iter().enumerate() {
             if osc.enabled.value() {
                 mask |= 1 << i;
@@ -94,6 +97,13 @@ impl ModUiState {
         }
         if params.routing.inserts[1].mode.value() != crate::InsertModeParam::Off {
             mask |= 1 << 8;
+        }
+        for (i, fx) in params.fx_slots.iter().enumerate() {
+            let en_bit = fx.enabled.value() as u64;
+            let ty_bits = (fx.fx_type.value() as u64) & 0x7;
+            let stack_bits = ((fx.stack.value().clamp(1, 4) - 1) as u64) & 0x3;
+            let packed = en_bit | (ty_bits << 1) | (stack_bits << 4);
+            mask |= packed << (13 + i * 6);
         }
         mask
     }
@@ -161,14 +171,27 @@ impl ModUiState {
         }
     }
 
+    pub fn set_view_mode(&self, mode: u8) {
+        self.active_view_mode.store(mode, Ordering::Relaxed);
+    }
+
     fn hit_test_cursor(&self, x: f32, y: f32) -> Option<usize> {
+        let view_mode = self.active_view_mode.load(Ordering::Relaxed);
+        if view_mode == 2 {
+            return None;
+        }
         let active_tab = self.active_bottom_tab.load(Ordering::Relaxed);
         let rects = self.drop_rects.lock().ok()?;
         for (idx, &(rx, ry, rw, rh, tag)) in rects.iter().enumerate() {
             if rw <= 1.0 || rh <= 1.0 {
                 continue;
             }
-            if tag != 0 && tag != active_tab {
+            let visible = if view_mode == 1 {
+                tag == FX_VIEW_TAG
+            } else {
+                tag == 0 || tag == active_tab
+            };
+            if !visible {
                 continue;
             }
             if x >= rx && x <= rx + rw && y >= ry && y <= ry + rh {

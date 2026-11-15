@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::fx::FxRackState;
 use crate::mod_matrix::{ModDestination, ModUiTelemetry, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS};
 use crate::modseq::{ModSeqRetrig, ModSeqState};
 use crate::oscillator::EngineMode;
@@ -36,6 +37,7 @@ pub struct SynthEngine {
     smoothed_filter_drive: [f32; 2],
     smoothed_master_gain: f32,
     rng_state: u32,
+    fx_rack: FxRackState,
 }
 
 impl SynthEngine {
@@ -66,6 +68,7 @@ impl SynthEngine {
             smoothed_filter_drive: [0.0; 2],
             smoothed_master_gain: 0.707_106_77,
             rng_state: 0x9E37_79B9,
+            fx_rack: FxRackState::new(sr),
         };
         engine.set_sample_rate(sr);
         engine
@@ -75,6 +78,7 @@ impl SynthEngine {
         let sr = sample_rate.max(1000.0);
         self.sample_rate = sr;
         self.control_tick_period = (sr / 1500.0).round().max(1.0) as u32;
+        self.fx_rack.set_sample_rate(sr);
         for v in &mut self.voices {
             v.inserts[0].set_sample_rate(sr);
             v.inserts[1].set_sample_rate(sr);
@@ -86,6 +90,7 @@ impl SynthEngine {
     }
 
     pub fn reset(&mut self) {
+        self.fx_rack.reset();
         for v in &mut self.voices {
             v.reset();
         }
@@ -485,17 +490,24 @@ impl SynthEngine {
             self.publish_telemetry(params);
         }
 
-        // Polyphonic headroom scaling (~-9 dB) * master gain
+        // Polyphonic headroom scaling (~-9 dB) -> Master FX Rack -> master gain
         const HEADROOM: f32 = 0.35;
-        let out_gain = HEADROOM * self.smoothed_master_gain;
-        (mix_l * out_gain, mix_r * out_gain)
+        let pre_l = mix_l * HEADROOM;
+        let pre_r = mix_r * HEADROOM;
+        let fx_mod = self.current_global_fx_mod_offsets(params);
+        let (fx_l, fx_r) = self.fx_rack.process_sample(
+            pre_l,
+            pre_r,
+            &params.fx_slots,
+            &fx_mod,
+            params.tempo_bpm,
+            Some(&self.telemetry),
+        );
+        (fx_l * self.smoothed_master_gain, fx_r * self.smoothed_master_gain)
     }
 
     #[inline]
-    fn current_global_modseq_rate_mods(&self, params: &SynthParams) -> [f32; 4] {
-        if let Some(v) = self.voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {
-            return std::array::from_fn(|i| v.mod_offsets[ModDestination::modseq_rate(i).index()]);
-        }
+    fn evaluate_idle_offsets(&self, params: &SynthParams) -> [f32; NUM_MOD_DESTS] {
         let mut idle_sources = [0.0_f32; NUM_ACTIVE_SOURCES];
         for i in 0..4 {
             if params.modseqs[i].retrig == ModSeqRetrig::MonoGlobal {
@@ -508,6 +520,23 @@ impl SynthEngine {
         params
             .mod_matrix
             .evaluate_destinations(&idle_sources, &mut idle_offsets);
+        idle_offsets
+    }
+
+    #[inline]
+    fn current_global_fx_mod_offsets(&self, params: &SynthParams) -> [f32; NUM_MOD_DESTS] {
+        if let Some(v) = self.voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {
+            return v.mod_offsets;
+        }
+        self.evaluate_idle_offsets(params)
+    }
+
+    #[inline]
+    fn current_global_modseq_rate_mods(&self, params: &SynthParams) -> [f32; 4] {
+        if let Some(v) = self.voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {
+            return std::array::from_fn(|i| v.mod_offsets[ModDestination::modseq_rate(i).index()]);
+        }
+        let idle_offsets = self.evaluate_idle_offsets(params);
         std::array::from_fn(|i| idle_offsets[ModDestination::modseq_rate(i).index()])
     }
 

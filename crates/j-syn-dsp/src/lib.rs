@@ -4,6 +4,7 @@ pub mod adaa;
 pub mod engine;
 pub mod envelope;
 pub mod filter;
+pub mod fx;
 pub mod insert;
 pub mod mod_matrix;
 pub mod modseq;
@@ -19,13 +20,16 @@ pub use filter::{
     evaluate_filter_response_db, fast_tanh, FilterMode, FilterParams, FilterSlope, FilterState,
     FilterSvfCore, StereoZdfSvf, COMB_BUF_LEN,
 };
+pub use fx::{
+    FxRackState, FxSlotParams, FxType, DELAY_SYNC_LABELS, MAX_FX_STACK, NUM_FX_SLOTS,
+};
 pub use insert::{
     FilterRouting, InsertMode, InsertParams, InsertPosition, InsertShaperState, InsertState,
     RoutingParams, VoiceFeedbackState,
 };
 pub use mod_matrix::{
-    ModDestination, ModMatrixSource, ModMatrixState, ModSlot, ModUiTelemetry, NUM_ACTIVE_SOURCES,
-    NUM_MOD_DESTS, NUM_MOD_SLOTS,
+    FxScopeRing, ModDestination, ModMatrixSource, ModMatrixState, ModSlot, ModUiTelemetry,
+    FX_SCOPE_LEN, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS, NUM_MOD_SLOTS,
 };
 pub use modseq::{
     evaluate_modseq_curve, evaluate_mseg_curve, evaluate_step_shape, LfoPreset, ModSeqMode,

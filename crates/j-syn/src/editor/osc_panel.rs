@@ -202,7 +202,7 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).octave,
                     "OCT",
                     9,
-                    0.78,
+                    0.72,
                 );
                 build_inline_pill_cell_mod(
                     cx,
@@ -210,7 +210,7 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).semi,
                     "SEMI",
                     25,
-                    0.88,
+                    0.84,
                     ModDestination::osc_semi(osc_idx),
                     ui_pills.clone(),
                     0,
@@ -221,7 +221,7 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).fine,
                     "FINE",
                     201,
-                    1.05,
+                    0.98,
                     ModDestination::osc_fine(osc_idx),
                     ui_pills.clone(),
                     0,
@@ -232,7 +232,7 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).phase,
                     "PHASE",
                     361,
-                    1.08,
+                    1.04,
                     ModDestination::osc_phase(osc_idx),
                     ui_pills.clone(),
                     0,
@@ -243,7 +243,7 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).unison,
                     "UNI",
                     8,
-                    0.75,
+                    0.68,
                 );
                 build_inline_pill_cell_mod(
                     cx,
@@ -251,7 +251,7 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).detune,
                     "DETUNE",
                     101,
-                    1.23,
+                    1.32,
                     ModDestination::osc_detune(osc_idx),
                     ui_pills.clone(),
                     0,
@@ -262,14 +262,14 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).spread,
                     "SPREAD",
                     101,
-                    1.23,
+                    1.32,
                     ModDestination::osc_spread(osc_idx),
                     ui_pills.clone(),
                     0,
                 );
             })
             .class("osc-inline-strip")
-            .col_between(Pixels(4.0))
+            .col_between(Pixels(6.0))
             .height(Pixels(20.0))
             .width(Stretch(1.0));
 

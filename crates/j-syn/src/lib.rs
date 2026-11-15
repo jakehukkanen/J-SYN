@@ -1048,6 +1048,99 @@ pub struct JSynPluginParams {
 
     #[nested(array, group = "Mod Sequencers")]
     pub modseqs: [ModSeqPluginParams; 4],
+
+    #[nested(array, group = "Master FX")]
+    pub fx_slots: [FxSlotPluginParams; 8],
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FxTypeParam {
+    #[name = "Off"]
+    Off,
+    #[name = "OTT"]
+    Ott,
+    #[name = "Distortion"]
+    Distortion,
+    #[name = "Chorus"]
+    Chorus,
+    #[name = "Delay"]
+    Delay,
+    #[name = "Reverb"]
+    Reverb,
+    #[name = "J-SAT Clipper"]
+    JSatClipper,
+}
+
+impl From<j_syn_dsp::FxType> for FxTypeParam {
+    fn from(v: j_syn_dsp::FxType) -> Self {
+        match v {
+            j_syn_dsp::FxType::Off => Self::Off,
+            j_syn_dsp::FxType::Ott => Self::Ott,
+            j_syn_dsp::FxType::Distortion => Self::Distortion,
+            j_syn_dsp::FxType::Chorus => Self::Chorus,
+            j_syn_dsp::FxType::Delay => Self::Delay,
+            j_syn_dsp::FxType::Reverb => Self::Reverb,
+            j_syn_dsp::FxType::JSatClipper => Self::JSatClipper,
+        }
+    }
+}
+
+impl From<FxTypeParam> for j_syn_dsp::FxType {
+    fn from(v: FxTypeParam) -> Self {
+        match v {
+            FxTypeParam::Off => Self::Off,
+            FxTypeParam::Ott => Self::Ott,
+            FxTypeParam::Distortion => Self::Distortion,
+            FxTypeParam::Chorus => Self::Chorus,
+            FxTypeParam::Delay => Self::Delay,
+            FxTypeParam::Reverb => Self::Reverb,
+            FxTypeParam::JSatClipper => Self::JSatClipper,
+        }
+    }
+}
+
+#[derive(Params)]
+pub struct FxSlotPluginParams {
+    #[id = "fx_en"]
+    pub enabled: BoolParam,
+    #[id = "fx_type"]
+    pub fx_type: EnumParam<FxTypeParam>,
+    #[id = "fx_stack"]
+    pub stack: IntParam,
+    #[id = "fx_p1"]
+    pub p1: FloatParam,
+    #[id = "fx_p2"]
+    pub p2: FloatParam,
+    #[id = "fx_p3"]
+    pub p3: FloatParam,
+    #[id = "fx_p4"]
+    pub p4: FloatParam,
+}
+
+impl FxSlotPluginParams {
+    pub fn new_slot(slot_idx: usize) -> Self {
+        let init = j_syn_dsp::FxSlotParams::init_patch_slot(slot_idx);
+        Self {
+            enabled: BoolParam::new("Enabled", init.enabled),
+            fx_type: EnumParam::new("Type", FxTypeParam::from(init.fx_type)),
+            stack: IntParam::new(
+                "Stack",
+                init.stack as i32,
+                IntRange::Linear {
+                    min: 1,
+                    max: j_syn_dsp::MAX_FX_STACK as i32,
+                },
+            ),
+            p1: FloatParam::new("Param 1", init.params[0], FloatRange::Linear { min: 0.0, max: 1.0 }),
+            p2: FloatParam::new("Param 2", init.params[1], FloatRange::Linear { min: 0.0, max: 1.0 }),
+            p3: FloatParam::new("Param 3", init.params[2], FloatRange::Linear { min: 0.0, max: 1.0 }),
+            p4: FloatParam::new("Param 4", init.params[3], FloatRange::Linear { min: 0.0, max: 1.0 }),
+        }
+    }
+
+    pub fn params_array(&self) -> [&FloatParam; 4] {
+        [&self.p1, &self.p2, &self.p3, &self.p4]
+    }
 }
 
 impl Default for JSynPluginParams {
@@ -1114,6 +1207,7 @@ impl Default for JSynPluginParams {
             routing: RoutingPluginParams::default(),
             mod_envs: std::array::from_fn(|_| ModEnvPluginParams::default()),
             modseqs: std::array::from_fn(|_| ModSeqPluginParams::default()),
+            fx_slots: std::array::from_fn(|i| FxSlotPluginParams::new_slot(i)),
         }
     }
 }
@@ -1260,6 +1354,17 @@ impl Plugin for JSynPlugin {
             ],
             modseq_steps,
             mod_matrix,
+            fx_slots: std::array::from_fn(|i| j_syn_dsp::FxSlotParams {
+                fx_type: self.params.fx_slots[i].fx_type.value().into(),
+                enabled: self.params.fx_slots[i].enabled.value(),
+                stack: self.params.fx_slots[i].stack.value().clamp(1, 4) as u8,
+                params: [
+                    self.params.fx_slots[i].p1.value(),
+                    self.params.fx_slots[i].p2.value(),
+                    self.params.fx_slots[i].p3.value(),
+                    self.params.fx_slots[i].p4.value(),
+                ],
+            }),
             tempo_bpm,
         };
 

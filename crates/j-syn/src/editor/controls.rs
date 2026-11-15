@@ -157,6 +157,8 @@ where
                     })
                     .width(Stretch(1.0))
                     .height(Stretch(1.0))
+                    .child_top(Pixels(0.0))
+                    .child_bottom(Pixels(0.0))
                     .overflow(Overflow::Hidden)
                 },
                 move |cx| {
@@ -231,6 +233,8 @@ where
                     })
                     .width(Stretch(1.0))
                     .height(Stretch(1.0))
+                    .child_top(Pixels(0.0))
+                    .child_bottom(Pixels(0.0))
                     .overflow(Overflow::Hidden)
                 },
                 move |cx| {
@@ -304,6 +308,8 @@ pub(super) fn build_wavetable_dropdown(
                     })
                     .width(Stretch(1.0))
                     .height(Stretch(1.0))
+                    .child_top(Pixels(0.0))
+                    .child_bottom(Pixels(0.0))
                     .overflow(Overflow::Hidden)
                 },
                 move |cx| {
@@ -409,6 +415,8 @@ pub(super) fn build_ui_scale_dropdown(cx: &mut Context) {
                         })
                         .width(Stretch(1.0))
                         .height(Stretch(1.0))
+                        .child_top(Pixels(0.0))
+                        .child_bottom(Pixels(0.0))
                         .overflow(Overflow::Hidden)
                     },
                     move |cx| {

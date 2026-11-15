@@ -29,6 +29,7 @@ use crate::JSynPluginParams;
 
 mod controls;
 mod filter_panel;
+mod fx_rack;
 mod insert_panel;
 mod mod_bar;
 mod modseq_tab;
@@ -63,6 +64,7 @@ pub(super) const CORAL_RGB: (u8, u8, u8) = (235, 140, 85);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MainViewMode {
     Main,
+    Fx,
     Matrix,
 }
 
@@ -128,6 +130,11 @@ impl Model for UiData {
         event.map(|ui_event, meta| match ui_event {
             UiEvent::SelectViewMode(mode) => {
                 self.view_mode = *mode;
+                self.mod_ui.set_view_mode(match mode {
+                    MainViewMode::Main => 0,
+                    MainViewMode::Fx => 1,
+                    MainViewMode::Matrix => 2,
+                });
                 self.tooltip.visible = false;
                 self.mod_ui.clear_drag();
                 meta.consume();
@@ -250,6 +257,16 @@ fn build_header_bar(
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Main))
             .width(Pixels(54.0))
+            .height(Pixels(22.0));
+
+            Button::new(
+                cx,
+                |cx| cx.emit(UiEvent::SelectViewMode(MainViewMode::Fx)),
+                |cx| bold_label(cx, "FX", "view-switch-label").hoverable(false),
+            )
+            .class("view-switch-btn")
+            .checked(UiData::view_mode.map(|m| *m == MainViewMode::Fx))
+            .width(Pixels(44.0))
             .height(Pixels(22.0));
 
             Button::new(
@@ -413,23 +430,14 @@ fn build_filter_column(
     .height(Stretch(1.0));
 }
 
-fn build_fx_column(cx: &mut Context) {
-    VStack::new(cx, |cx| {
-        for (title, subtitle) in [
-            ("FX 1: OTT", "MULTIBAND UPWARD/DOWNWARD (M4)"),
-            ("FX 2: DISTORTION", "TUBE / DIODE / CLIPPER (M4)"),
-            ("FX 3: DELAY / CHORUS", "SYNC DELAY / DIMENSION (M4)"),
-            ("FX 4: REVERB", "ALGORITHMIC HALL / SHIMMER (M4)"),
-            ("FX 5: CLIPPER (J-SAT)", "ADAA CLIPPER / LIMITER (M4)"),
-        ] {
-            VStack::new(cx, |cx| {
-                build_module_header(cx, title, 18.0);
-                build_placeholder_bay(cx, title, subtitle);
-            })
-            .class("hardware-module")
-            .width(Stretch(1.0))
-            .height(Stretch(1.0));
-        }
+fn build_fx_column(
+    cx: &mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
+) {
+    VStack::new(cx, move |cx| {
+        fx_rack::build_main_fx_column(cx, params, gui_context, mod_ui);
     })
     .row_between(Pixels(4.0))
     .width(Stretch(1.0))
@@ -674,15 +682,23 @@ pub(crate) fn create(
                                     );
                                     build_filter_column(
                                         cx,
-                                        params_c,
-                                        gui_c,
-                                        mod_ui_c,
+                                        params_c.clone(),
+                                        gui_c.clone(),
+                                        mod_ui_c.clone(),
                                     );
-                                    build_fx_column(cx);
+                                    build_fx_column(cx, params_c, gui_c, mod_ui_c);
                                 })
                                 .col_between(Pixels(8.0))
                                 .width(Stretch(1.0))
                                 .height(Stretch(1.0));
+                            }
+                            MainViewMode::Fx => {
+                                fx_rack::build_fx_rack_view(
+                                    cx,
+                                    params_m.clone(),
+                                    gui_m.clone(),
+                                    mod_ui_m.clone(),
+                                );
                             }
                             MainViewMode::Matrix => {
                                 build_matrix_view(cx, mod_ui_m.clone());

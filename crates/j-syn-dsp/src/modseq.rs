@@ -134,11 +134,12 @@ pub enum LfoPreset {
     ConvexArc,
     SCurve,
     Triangle,
+    Sine,
     VShape,
 }
 
 impl LfoPreset {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Flat,
         Self::RampUp,
         Self::RampDown,
@@ -146,6 +147,7 @@ impl LfoPreset {
         Self::ConvexArc,
         Self::SCurve,
         Self::Triangle,
+        Self::Sine,
         Self::VShape,
     ];
 
@@ -158,6 +160,7 @@ impl LfoPreset {
             Self::ConvexArc => "CONVX",
             Self::SCurve => "S-CRV",
             Self::Triangle => "TRI",
+            Self::Sine => "SINE",
             Self::VShape => "V-SHP",
         }
     }
@@ -201,6 +204,14 @@ impl LfoPreset {
                 nodes[1] = MsegNode { time_x: 0.5, level_y: 1.0, tension: 0.0 };
                 nodes[2] = MsegNode { time_x: 1.0, level_y: 0.0, tension: 0.0 };
                 3
+            }
+            Self::Sine => {
+                nodes[0] = MsegNode { time_x: 0.0, level_y: 0.5, tension: -0.35 };
+                nodes[1] = MsegNode { time_x: 0.25, level_y: 1.0, tension: 0.33 };
+                nodes[2] = MsegNode { time_x: 0.5, level_y: 0.5, tension: -0.35 };
+                nodes[3] = MsegNode { time_x: 0.75, level_y: 0.0, tension: 0.33 };
+                nodes[4] = MsegNode { time_x: 1.0, level_y: 0.5, tension: 0.0 };
+                5
             }
             Self::VShape => {
                 nodes[0] = MsegNode { time_x: 0.0, level_y: 1.0, tension: 0.0 };

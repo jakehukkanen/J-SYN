@@ -1290,7 +1290,7 @@ pub(super) fn build_modseq_tab(
                                                     .child_bottom(Stretch(1.0));
 
                                                     LfoPresetBar::new(cx, seq_idx, p_mode.clone())
-                                                        .width(Pixels(278.0))
+                                                        .width(Pixels(306.0))
                                                         .height(Pixels(18.0));
 
                                                     let p_rst = p_mode;
