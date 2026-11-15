@@ -7,11 +7,35 @@ use nih_plug::prelude::GuiContext;
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
-    bold_label, build_enum_dropdown, build_flex_knob_cell_mod, build_module_header,
+    bold_label, build_enum_dropdown, build_flex_knob_cell_mod_dim, build_module_header,
 };
 use super::mod_bar::ModUiState;
 use super::{AMBER_RGB, CORAL_RGB, UiData};
 use crate::{InsertModeParam, InsertPosParam, JSynPluginParams};
+
+#[inline]
+fn insert0_enabled(p: &JSynPluginParams) -> bool {
+    p.routing.inserts[0].mode.value() != InsertModeParam::Off
+}
+
+#[inline]
+fn insert1_enabled(p: &JSynPluginParams) -> bool {
+    p.routing.inserts[1].mode.value() != InsertModeParam::Off
+}
+
+#[inline]
+fn insert_slot_check(slot_idx: usize) -> fn(&JSynPluginParams) -> bool {
+    if slot_idx == 0 {
+        insert0_enabled
+    } else {
+        insert1_enabled
+    }
+}
+
+#[inline]
+fn any_insert_enabled(p: &JSynPluginParams) -> bool {
+    insert0_enabled(p) || insert1_enabled(p)
+}
 
 pub(super) const INSERT_MODE_ITEMS: &[(&str, InsertModeParam)] = &[
     ("Off", InsertModeParam::Off),
@@ -40,6 +64,9 @@ fn build_insert_slot_row(
     mod_ui: Arc<ModUiState>,
     accent: (u8, u8, u8),
 ) {
+    let slot_check = insert_slot_check(slot_idx);
+    let p_row_dim = params.clone();
+    let p_knob_dim = params.clone();
     HStack::new(cx, move |cx| {
         VStack::new(cx, {
             let params = params.clone();
@@ -97,7 +124,7 @@ fn build_insert_slot_row(
         HStack::new(cx, {
             let mod_ui = mod_ui.clone();
             move |cx| {
-                build_flex_knob_cell_mod(
+                build_flex_knob_cell_mod_dim(
                     cx,
                     UiData::params,
                     move |p| &p.routing.inserts[slot_idx].drive,
@@ -108,12 +135,19 @@ fn build_insert_slot_row(
                     ModDestination::insert_drive(slot_idx),
                     mod_ui.clone(),
                     0,
+                    p_knob_dim,
+                    slot_check,
                 );
             }
         })
         .width(Pixels(54.0))
         .height(Auto);
     })
+    .class("insert-slot-row")
+    .toggle_class(
+        "slot-disabled",
+        UiData::mod_ui_rev.map(move |_| !slot_check(&p_row_dim)),
+    )
     .col_between(Pixels(6.0))
     .child_top(Stretch(1.0))
     .child_bottom(Stretch(1.0))
@@ -127,6 +161,7 @@ pub(super) fn build_insert_panel(
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
+    let p_card_dim = params.clone();
     VStack::new(cx, move |cx| {
         build_module_header(cx, "INSERT SHAPERS", 18.0);
 
@@ -142,6 +177,10 @@ pub(super) fn build_insert_panel(
         build_insert_slot_row(cx, 1, "INS 2", params, gui_context, mod_ui, CORAL_RGB);
     })
     .class("hardware-module")
+    .toggle_class(
+        "module-disabled",
+        UiData::mod_ui_rev.map(move |_| !any_insert_enabled(&p_card_dim)),
+    )
     .row_between(Pixels(4.0))
     .width(Stretch(1.0))
     .height(Stretch(1.0));

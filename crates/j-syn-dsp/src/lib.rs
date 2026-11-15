@@ -28,9 +28,10 @@ pub use mod_matrix::{
     NUM_MOD_DESTS, NUM_MOD_SLOTS,
 };
 pub use modseq::{
-    evaluate_modseq_curve, evaluate_mseg_curve, ModSeqMode, ModSeqParams, ModSeqPlayMode,
-    ModSeqRate, ModSeqRetrig, ModSeqShapePreset, ModSeqState, ModSeqStep, ModSeqStepBank,
-    ModSeqStepShape, ModSeqSyncMode, MsegCurve, MsegNode, MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
+    evaluate_modseq_curve, evaluate_mseg_curve, evaluate_step_shape, LfoPreset, ModSeqMode,
+    ModSeqParams, ModSeqPlayMode, ModSeqRate, ModSeqRetrig, ModSeqShapePreset, ModSeqState,
+    ModSeqStep, ModSeqStepBank, ModSeqStepShape, ModSeqSyncMode, MsegCurve, MsegNode,
+    MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
 };
 pub use noise::{NoiseParams, NoiseState, NoiseType};
 pub use oscillator::{

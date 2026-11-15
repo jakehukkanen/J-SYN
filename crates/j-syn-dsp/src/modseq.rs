@@ -21,50 +21,195 @@ pub enum ModSeqMode {
 pub enum ModSeqStepShape {
     #[default]
     Linear = 0,
-    Sine = 1,
-    RampDown = 2,
-    RampUp = 3,
-    Triangle = 4,
-    Pulse = 5,
-    Exp = 6,
-    Flat = 7,
+    Flat = 1,
+    RampUp = 2,
+    RampDown = 3,
+    ExpUp = 4,
+    ExpDown = 5,
+    LogUp = 6,
+    LogDown = 7,
+    SineArchUp = 8,
+    SineArchDown = 9,
+    Triangle = 10,
+    Pulse = 11,
+    SCurve = 12,
+    RampDown2x = 13,
+    TriSine2x = 14,
+    Square2x = 15,
+    RampDown3x = 16,
+    TriSine3x = 17,
+    Square3x = 18,
 }
 
 impl ModSeqStepShape {
-    pub const STAMPS: [Self; 7] = [
-        Self::Sine,
-        Self::RampDown,
+    /// Ordered 2x9 graphical palette tiles (Row 1: 9 single curves, Row 2: 3 single + 6 subdivided 2x/3x bursts).
+    pub const PALETTE: [Self; 18] = [
+        Self::Flat,
         Self::RampUp,
+        Self::RampDown,
+        Self::ExpUp,
+        Self::ExpDown,
+        Self::LogUp,
+        Self::LogDown,
+        Self::SineArchUp,
+        Self::SineArchDown,
         Self::Triangle,
         Self::Pulse,
-        Self::Exp,
-        Self::Flat,
+        Self::SCurve,
+        Self::RampDown2x,
+        Self::TriSine2x,
+        Self::Square2x,
+        Self::RampDown3x,
+        Self::TriSine3x,
+        Self::Square3x,
     ];
+
+    pub const STAMPS: [Self; 18] = Self::PALETTE;
 
     pub fn from_u8(v: u8) -> Self {
         match v {
-            1 => Self::Sine,
-            2 => Self::RampDown,
-            3 => Self::RampUp,
-            4 => Self::Triangle,
-            5 => Self::Pulse,
-            6 => Self::Exp,
-            7 => Self::Flat,
+            1 => Self::Flat,
+            2 => Self::RampUp,
+            3 => Self::RampDown,
+            4 => Self::ExpUp,
+            5 => Self::ExpDown,
+            6 => Self::LogUp,
+            7 => Self::LogDown,
+            8 => Self::SineArchUp,
+            9 => Self::SineArchDown,
+            10 => Self::Triangle,
+            11 => Self::Pulse,
+            12 => Self::SCurve,
+            13 => Self::RampDown2x,
+            14 => Self::TriSine2x,
+            15 => Self::Square2x,
+            16 => Self::RampDown3x,
+            17 => Self::TriSine3x,
+            18 => Self::Square3x,
             _ => Self::Linear,
+        }
+    }
+
+    #[inline]
+    pub fn subdivision(self) -> u8 {
+        match self {
+            Self::RampDown2x | Self::TriSine2x | Self::Square2x => 2,
+            Self::RampDown3x | Self::TriSine3x | Self::Square3x => 3,
+            _ => 1,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Linear => "LIN",
-            Self::Sine => "SINE",
-            Self::RampDown => "RAMP -",
-            Self::RampUp => "RAMP +",
-            Self::Triangle => "TRI",
-            Self::Pulse => "PULSE",
-            Self::Exp => "EXP",
             Self::Flat => "FLAT",
+            Self::RampUp => "RAMP UP",
+            Self::RampDown => "RAMP DN",
+            Self::ExpUp => "EXP UP",
+            Self::ExpDown => "EXP DN",
+            Self::LogUp => "LOG UP",
+            Self::LogDown => "LOG DN",
+            Self::SineArchUp => "ARCH UP",
+            Self::SineArchDown => "ARCH DN",
+            Self::Triangle => "TRI",
+            Self::Pulse => "SQUARE",
+            Self::SCurve => "S-CURVE",
+            Self::RampDown2x => "2x RAMP",
+            Self::TriSine2x => "2x SINE",
+            Self::Square2x => "2x SQR",
+            Self::RampDown3x => "3x RAMP",
+            Self::TriSine3x => "3x SINE",
+            Self::Square3x => "3x SQR",
         }
+    }
+}
+
+/// Cure Scream-style breakpoint preset templates for `LFO` (MSEG) mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LfoPreset {
+    Flat,
+    RampUp,
+    RampDown,
+    ConcaveArc,
+    ConvexArc,
+    SCurve,
+    Triangle,
+    VShape,
+}
+
+impl LfoPreset {
+    pub const ALL: [Self; 8] = [
+        Self::Flat,
+        Self::RampUp,
+        Self::RampDown,
+        Self::ConcaveArc,
+        Self::ConvexArc,
+        Self::SCurve,
+        Self::Triangle,
+        Self::VShape,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Flat => "FLAT",
+            Self::RampUp => "RAMP+",
+            Self::RampDown => "RAMP-",
+            Self::ConcaveArc => "CONCV",
+            Self::ConvexArc => "CONVX",
+            Self::SCurve => "S-CRV",
+            Self::Triangle => "TRI",
+            Self::VShape => "V-SHP",
+        }
+    }
+
+    pub fn to_mseg(self) -> MsegCurve {
+        let mut nodes = [MsegNode::default(); MAX_MSEG_NODES];
+        let num_nodes = match self {
+            Self::Flat => {
+                nodes[0] = MsegNode { time_x: 0.0, level_y: 0.5, tension: 0.0 };
+                nodes[1] = MsegNode { time_x: 1.0, level_y: 0.5, tension: 0.0 };
+                2
+            }
+            Self::RampUp => {
+                nodes[0] = MsegNode { time_x: 0.0, level_y: 0.0, tension: 0.0 };
+                nodes[1] = MsegNode { time_x: 1.0, level_y: 1.0, tension: 0.0 };
+                2
+            }
+            Self::RampDown => {
+                nodes[0] = MsegNode { time_x: 0.0, level_y: 1.0, tension: 0.0 };
+                nodes[1] = MsegNode { time_x: 1.0, level_y: 0.0, tension: 0.0 };
+                2
+            }
+            Self::ConcaveArc => {
+                nodes[0] = MsegNode { time_x: 0.0, level_y: 0.0, tension: 0.55 };
+                nodes[1] = MsegNode { time_x: 1.0, level_y: 1.0, tension: 0.0 };
+                2
+            }
+            Self::ConvexArc => {
+                nodes[0] = MsegNode { time_x: 0.0, level_y: 0.0, tension: -0.55 };
+                nodes[1] = MsegNode { time_x: 1.0, level_y: 1.0, tension: 0.0 };
+                2
+            }
+            Self::SCurve => {
+                nodes[0] = MsegNode { time_x: 0.0, level_y: 0.0, tension: 0.42 };
+                nodes[1] = MsegNode { time_x: 0.5, level_y: 0.5, tension: -0.42 };
+                nodes[2] = MsegNode { time_x: 1.0, level_y: 1.0, tension: 0.0 };
+                3
+            }
+            Self::Triangle => {
+                nodes[0] = MsegNode { time_x: 0.0, level_y: 0.0, tension: 0.0 };
+                nodes[1] = MsegNode { time_x: 0.5, level_y: 1.0, tension: 0.0 };
+                nodes[2] = MsegNode { time_x: 1.0, level_y: 0.0, tension: 0.0 };
+                3
+            }
+            Self::VShape => {
+                nodes[0] = MsegNode { time_x: 0.0, level_y: 1.0, tension: 0.0 };
+                nodes[1] = MsegNode { time_x: 0.5, level_y: 0.0, tension: 0.0 };
+                nodes[2] = MsegNode { time_x: 1.0, level_y: 1.0, tension: 0.0 };
+                3
+            }
+        };
+        MsegCurve { nodes, num_nodes }
     }
 }
 
@@ -95,7 +240,13 @@ impl ModSeqStep {
     pub fn stamped(shape: ModSeqStepShape, depth: f32, tension: f32) -> Self {
         let d = depth.clamp(0.0, 1.0);
         let end = match shape {
-            ModSeqStepShape::Flat | ModSeqStepShape::RampUp | ModSeqStepShape::Linear => d,
+            ModSeqStepShape::Flat
+            | ModSeqStepShape::RampUp
+            | ModSeqStepShape::ExpUp
+            | ModSeqStepShape::LogUp
+            | ModSeqStepShape::SineArchDown
+            | ModSeqStepShape::SCurve
+            | ModSeqStepShape::Linear => d,
             _ => 0.0,
         };
         Self {
@@ -443,6 +594,80 @@ impl Default for ModSeqParams {
     }
 }
 
+/// Evaluates a single `ModSeqStep` at normalized step-local phase `local_t` in `[0.0, 1.0]`. Zero allocations.
+#[inline]
+pub fn evaluate_step_shape(step: ModSeqStep, local_t: f32) -> f32 {
+    let t = local_t.clamp(0.0, 1.0);
+    let d = step.start_level.clamp(0.0, 1.0);
+    let exp = 2.0_f32.powf(step.tension.clamp(-1.0, 1.0) * 2.2);
+    let ct = t.powf(exp);
+
+    match step.shape {
+        ModSeqStepShape::Linear => {
+            (step.start_level + (step.end_level - step.start_level) * ct).clamp(0.0, 1.0)
+        }
+        ModSeqStepShape::Flat => d,
+        ModSeqStepShape::RampUp => (d * ct).clamp(0.0, 1.0),
+        ModSeqStepShape::RampDown => (d * (1.0 - ct)).clamp(0.0, 1.0),
+        ModSeqStepShape::ExpUp => (d * t.powf(2.6 * exp)).clamp(0.0, 1.0),
+        ModSeqStepShape::ExpDown => (d * (1.0 - t).powf(2.6 * exp)).clamp(0.0, 1.0),
+        ModSeqStepShape::LogUp => {
+            let p = (2.6 / exp).clamp(0.15, 16.0);
+            (d * (1.0 - (1.0 - t).powf(p))).clamp(0.0, 1.0)
+        }
+        ModSeqStepShape::LogDown => {
+            let p = (2.6 / exp).clamp(0.15, 16.0);
+            (d * (1.0 - t.powf(p))).clamp(0.0, 1.0)
+        }
+        ModSeqStepShape::SineArchUp => (d * (PI * ct).sin().clamp(0.0, 1.0)).clamp(0.0, 1.0),
+        ModSeqStepShape::SineArchDown => (d * (1.0 - (PI * ct).sin().clamp(0.0, 1.0))).clamp(0.0, 1.0),
+        ModSeqStepShape::Triangle => {
+            let tri = if ct < 0.5 { ct * 2.0 } else { (1.0 - ct) * 2.0 };
+            (d * tri).clamp(0.0, 1.0)
+        }
+        ModSeqStepShape::Pulse => {
+            if ct < 0.5 {
+                d
+            } else {
+                0.0
+            }
+        }
+        ModSeqStepShape::SCurve => (d * (0.5 - 0.5 * (PI * ct).cos())).clamp(0.0, 1.0),
+        ModSeqStepShape::RampDown2x => {
+            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 2.0).fract().powf(exp);
+            (d * (1.0 - sub_ct)).clamp(0.0, 1.0)
+        }
+        ModSeqStepShape::TriSine2x => {
+            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 2.0).fract().powf(exp);
+            (d * (0.5 - 0.5 * (2.0 * PI * sub_ct).cos())).clamp(0.0, 1.0)
+        }
+        ModSeqStepShape::Square2x => {
+            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 2.0).fract().powf(exp);
+            if sub_ct < 0.5 {
+                d
+            } else {
+                0.0
+            }
+        }
+        ModSeqStepShape::RampDown3x => {
+            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 3.0).fract().powf(exp);
+            (d * (1.0 - sub_ct)).clamp(0.0, 1.0)
+        }
+        ModSeqStepShape::TriSine3x => {
+            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 3.0).fract().powf(exp);
+            (d * (0.5 - 0.5 * (2.0 * PI * sub_ct).cos())).clamp(0.0, 1.0)
+        }
+        ModSeqStepShape::Square3x => {
+            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 3.0).fract().powf(exp);
+            if sub_ct < 0.5 {
+                d
+            } else {
+                0.0
+            }
+        }
+    }
+}
+
 /// Evaluates the shaped Performer step curve at normalized cycle phase `phase` in `[0.0, 1.0)`.
 #[inline]
 pub fn evaluate_modseq_curve(
@@ -454,39 +679,7 @@ pub fn evaluate_modseq_curve(
     let scaled = phase.clamp(0.0, 0.999_999) * (n as f32);
     let step_idx = (scaled.floor() as usize).min(n - 1);
     let local_t = (scaled - (step_idx as f32)).clamp(0.0, 1.0);
-    let step = steps[step_idx];
-
-    let exp = 2.0_f32.powf(step.tension.clamp(-1.0, 1.0) * 2.5);
-    let curved_t = local_t.powf(exp);
-    match step.shape {
-        ModSeqStepShape::Linear => {
-            (step.start_level + (step.end_level - step.start_level) * curved_t).clamp(0.0, 1.0)
-        }
-        ModSeqStepShape::Sine => {
-            (step.start_level * (0.5 - 0.5 * (2.0 * PI * curved_t).cos())).clamp(0.0, 1.0)
-        }
-        ModSeqStepShape::RampDown => (step.start_level * (1.0 - curved_t)).clamp(0.0, 1.0),
-        ModSeqStepShape::RampUp => (step.start_level * curved_t).clamp(0.0, 1.0),
-        ModSeqStepShape::Triangle => {
-            let tri = if curved_t < 0.5 {
-                curved_t * 2.0
-            } else {
-                (1.0 - curved_t) * 2.0
-            };
-            (step.start_level * tri).clamp(0.0, 1.0)
-        }
-        ModSeqStepShape::Pulse => {
-            if curved_t < 0.5 {
-                step.start_level.clamp(0.0, 1.0)
-            } else {
-                0.0
-            }
-        }
-        ModSeqStepShape::Exp => {
-            (step.start_level * (1.0 - local_t).powf(2.6 * exp)).clamp(0.0, 1.0)
-        }
-        ModSeqStepShape::Flat => step.start_level.clamp(0.0, 1.0),
-    }
+    evaluate_step_shape(steps[step_idx], local_t)
 }
 
 /// Evaluates a continuous multi-segment `MSEG` curve at normalized phase in `[0.0, 1.0]`.

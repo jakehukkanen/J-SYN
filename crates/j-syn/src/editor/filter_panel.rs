@@ -10,11 +10,30 @@ use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::RawParamEvent;
 
-use super::controls::{bold_label, build_enum_dropdown, build_flex_knob_cell_mod};
+use super::controls::{bold_label, build_enum_dropdown, build_flex_knob_cell_mod_dim};
 use super::mod_bar::ModUiState;
-use super::widgets::{LedToggleSwitch, RotaryKnob};
+use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
 use super::UiData;
 use crate::{FilterModeParam, FilterPluginParams, FilterSlopeParam, JSynPluginParams};
+
+#[inline]
+fn filter0_enabled(p: &JSynPluginParams) -> bool {
+    p.filters[0].enabled.value()
+}
+
+#[inline]
+fn filter1_enabled(p: &JSynPluginParams) -> bool {
+    p.filters[1].enabled.value()
+}
+
+#[inline]
+fn filter_enabled_fn(filter_idx: usize) -> fn(&JSynPluginParams) -> bool {
+    if filter_idx == 0 {
+        filter0_enabled
+    } else {
+        filter1_enabled
+    }
+}
 
 const FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
     ("LP", FilterModeParam::Lp),
@@ -148,10 +167,19 @@ impl View for FilterResponseScope {
 
         let dpx = cx.scale_factor();
         let radius = 4.0 * dpx;
+        let dsp_params = self.params.filters[self.filter_idx].to_dsp();
+        let enabled = dsp_params.enabled;
 
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-        canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(22, 19, 16)));
+        canvas.fill_path(
+            &bg,
+            &vg::Paint::color(if enabled {
+                vg::Color::rgb(22, 19, 16)
+            } else {
+                vg::Color::rgb(18, 16, 14)
+            }),
+        );
 
         let pad_x = 5.0 * dpx;
         let pad_y = 4.0 * dpx;
@@ -162,7 +190,8 @@ impl View for FilterResponseScope {
         let inner_bottom = inner_y + inner_h;
 
         // Vertical logarithmic frequency grid (100 Hz, 1 kHz, 10 kHz)
-        let mut grid_paint = vg::Paint::color(vg::Color::rgba(95, 82, 68, 70));
+        let mut grid_paint =
+            vg::Paint::color(vg::Color::rgba(95, 82, 68, if enabled { 70 } else { 30 }));
         grid_paint.set_line_width(1.0 * dpx);
         for freq in [100.0_f32, 1_000.0_f32, 10_000.0_f32] {
             let x = inner_x + freq_to_norm(freq) * inner_w;
@@ -173,17 +202,23 @@ impl View for FilterResponseScope {
         }
 
         // Horizontal dB grid (+12, 0, -12, -24 dB)
-        for &(db, alpha) in &[(-24.0_f32, 55_u8), (-12.0, 55), (0.0, 110), (12.0, 55)] {
+        for &(db, base_alpha) in &[(-24.0_f32, 55_u8), (-12.0, 55), (0.0, 110), (12.0, 55)] {
             let y = db_to_y(db, inner_y, inner_h);
             let mut line = vg::Path::new();
             line.move_to(inner_x, y);
             line.line_to(inner_x + inner_w, y);
+            let alpha = if enabled {
+                base_alpha
+            } else if base_alpha > 60 {
+                55
+            } else {
+                30
+            };
             let mut p = vg::Paint::color(vg::Color::rgba(110, 96, 80, alpha));
             p.set_line_width(1.0 * dpx);
             canvas.stroke_path(&line, &p);
         }
 
-        let dsp_params = self.params.filters[self.filter_idx].to_dsp();
         const CURVE_PTS: usize = 96;
         let floor_y = inner_bottom - 0.5 * dpx;
         let mut curve = vg::Path::new();
@@ -241,17 +276,17 @@ impl View for FilterResponseScope {
         }
 
         let (r, g, b) = self.accent;
-        let fill_color = if dsp_params.enabled {
+        let fill_color = if enabled {
             vg::Color::rgba(r, g, b, 30)
         } else {
-            vg::Color::rgba(140, 120, 98, 12)
+            vg::Color::rgba(85, 76, 68, 8)
         };
         canvas.fill_path(&fill, &vg::Paint::color(fill_color));
 
-        let stroke_color = if dsp_params.enabled {
+        let stroke_color = if enabled {
             vg::Color::rgba(r, g, b, 240)
         } else {
-            vg::Color::rgba(140, 120, 98, 130)
+            vg::Color::rgba(92, 84, 76, 95)
         };
         let mut curve_paint = vg::Paint::color(stroke_color);
         curve_paint.set_line_width(1.7 * dpx);
@@ -276,13 +311,24 @@ impl View for FilterResponseScope {
             if f2_raw_y < inner_bottom - 1.0 * dpx {
                 let mut dot2 = vg::Path::new();
                 dot2.circle(f2_x, f2_raw_y, 2.4 * dpx);
-                canvas.fill_path(&dot2, &vg::Paint::color(vg::Color::rgba(246, 239, 230, 200)));
+                canvas.fill_path(
+                    &dot2,
+                    &vg::Paint::color(if enabled {
+                        vg::Color::rgba(246, 239, 230, 200)
+                    } else {
+                        vg::Color::rgba(110, 100, 90, 85)
+                    }),
+                );
             }
         }
 
         let mut border = vg::Path::new();
         border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-        let mut border_paint = vg::Paint::color(vg::Color::rgb(68, 58, 50));
+        let mut border_paint = vg::Paint::color(if enabled {
+            vg::Color::rgb(68, 58, 50)
+        } else {
+            vg::Color::rgb(48, 42, 36)
+        });
         border_paint.set_line_width(1.0 * dpx);
         canvas.stroke_path(&border, &border_paint);
     }
@@ -317,6 +363,7 @@ fn build_filter_aux_knob_cell(
         .height(Pixels(14.0));
 
         let p_tt = params_for_tt.clone();
+        let filter_check = filter_enabled_fn(filter_idx);
         RotaryKnob::new_with_mod_formatter(
             cx,
             UiData::params,
@@ -346,6 +393,7 @@ fn build_filter_aux_knob_cell(
                 }
             }),
         )
+        .enabled_by(params, filter_check)
         .width(Pixels(knob_sz))
         .height(Pixels(knob_sz))
         .left(Stretch(1.0))
@@ -370,6 +418,8 @@ pub(super) fn build_filter_panel(
     } else {
         "FILTER 2"
     };
+    let filter_check = filter_enabled_fn(filter_idx);
+    let p_dim = params.clone();
 
     VStack::new(cx, move |cx| {
         HStack::new(cx, {
@@ -420,7 +470,7 @@ pub(super) fn build_filter_panel(
             let params = params.clone();
             let mod_ui = mod_ui.clone();
             move |cx| {
-                build_flex_knob_cell_mod(
+                build_flex_knob_cell_mod_dim(
                     cx,
                     UiData::params,
                     move |p| &p.filters[filter_idx].cutoff,
@@ -431,8 +481,10 @@ pub(super) fn build_filter_panel(
                     ModDestination::filter_cutoff(filter_idx),
                     mod_ui.clone(),
                     0,
+                    params.clone(),
+                    filter_check,
                 );
-                build_flex_knob_cell_mod(
+                build_flex_knob_cell_mod_dim(
                     cx,
                     UiData::params,
                     move |p| &p.filters[filter_idx].resonance,
@@ -443,8 +495,10 @@ pub(super) fn build_filter_panel(
                     ModDestination::filter_res(filter_idx),
                     mod_ui.clone(),
                     0,
+                    params.clone(),
+                    filter_check,
                 );
-                build_flex_knob_cell_mod(
+                build_flex_knob_cell_mod_dim(
                     cx,
                     UiData::params,
                     move |p| &p.filters[filter_idx].drive,
@@ -455,6 +509,8 @@ pub(super) fn build_filter_panel(
                     ModDestination::filter_drive(filter_idx),
                     mod_ui.clone(),
                     0,
+                    params.clone(),
+                    filter_check,
                 );
                 build_filter_aux_knob_cell(
                     cx,
@@ -471,6 +527,10 @@ pub(super) fn build_filter_panel(
         .height(Auto);
     })
     .class("hardware-module")
+    .toggle_class(
+        "module-disabled",
+        UiData::mod_ui_rev.map(move |_| !filter_check(&p_dim)),
+    )
     .row_between(Pixels(4.0))
     .width(Stretch(1.0))
     .height(Pixels(188.0));

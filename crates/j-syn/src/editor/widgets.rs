@@ -78,6 +78,25 @@ pub struct RotaryKnob {
     accent_rgb: (u8, u8, u8),
     mod_binding: Option<ModTargetBinding>,
     value_formatter: Option<ValueFormatter>,
+    enabled_state: Option<(Arc<crate::JSynPluginParams>, fn(&crate::JSynPluginParams) -> bool)>,
+}
+
+pub(super) trait KnobDimExt {
+    fn enabled_by(
+        self,
+        params: Arc<crate::JSynPluginParams>,
+        check: fn(&crate::JSynPluginParams) -> bool,
+    ) -> Self;
+}
+
+impl KnobDimExt for Handle<'_, RotaryKnob> {
+    fn enabled_by(
+        self,
+        params: Arc<crate::JSynPluginParams>,
+        check: fn(&crate::JSynPluginParams) -> bool,
+    ) -> Self {
+        self.modify(move |knob| knob.enabled_state = Some((params, check)))
+    }
 }
 
 impl RotaryKnob {
@@ -186,6 +205,7 @@ impl RotaryKnob {
             accent_rgb,
             mod_binding,
             value_formatter,
+            enabled_state: None,
         }
         .build(
             cx,
@@ -481,6 +501,11 @@ impl View for RotaryKnob {
             }
         }
 
+        let is_enabled = self
+            .enabled_state
+            .as_ref()
+            .is_none_or(|(p, check)| check(p));
+
         let num_ticks = 9;
         for i in 0..num_ticks {
             let t = i as f32 / (num_ticks - 1) as f32;
@@ -491,10 +516,16 @@ impl View for RotaryKnob {
             tick.move_to(center_x + a.cos() * r_in, center_y + a.sin() * r_in);
             tick.line_to(center_x + a.cos() * r_out, center_y + a.sin() * r_out);
             let is_major = i == 0 || i == num_ticks - 1 || i == num_ticks / 2;
-            let mut paint = if is_major {
-                vg::Paint::color(vg::Color::rgba(218, 198, 175, 200))
+            let mut paint = if is_enabled {
+                if is_major {
+                    vg::Paint::color(vg::Color::rgba(218, 198, 175, 200))
+                } else {
+                    vg::Paint::color(vg::Color::rgba(155, 138, 120, 135))
+                }
+            } else if is_major {
+                vg::Paint::color(vg::Color::rgba(115, 105, 95, 85))
             } else {
-                vg::Paint::color(vg::Color::rgba(155, 138, 120, 135))
+                vg::Paint::color(vg::Color::rgba(90, 82, 74, 55))
             };
             paint.set_line_width((if is_major { 1.1 } else { 0.8 }) * dpx);
             canvas.stroke_path(&tick, &paint);
@@ -507,7 +538,11 @@ impl View for RotaryKnob {
         track_paint.set_line_cap(vg::LineCap::Round);
         canvas.stroke_path(&track_path, &track_paint);
 
-        let (ar, ag, ab) = self.accent_rgb;
+        let (ar, ag, ab) = if is_enabled {
+            self.accent_rgb
+        } else {
+            (92, 84, 78)
+        };
         let (arc_a0, arc_a1) = if self.bipolar {
             let mid_angle = start_angle + 0.5 * sweep_angle;
             if val_angle >= mid_angle {
@@ -520,16 +555,19 @@ impl View for RotaryKnob {
         };
 
         if (arc_a1 - arc_a0).abs() > 0.015 {
-            let mut glow_path = vg::Path::new();
-            glow_path.arc(center_x, center_y, arc_r, arc_a0, arc_a1, vg::Solidity::Hole);
-            let mut glow_paint = vg::Paint::color(vg::Color::rgba(ar, ag, ab, 80));
-            glow_paint.set_line_width(5.5 * dpx);
-            glow_paint.set_line_cap(vg::LineCap::Round);
-            canvas.stroke_path(&glow_path, &glow_paint);
+            if is_enabled {
+                let mut glow_path = vg::Path::new();
+                glow_path.arc(center_x, center_y, arc_r, arc_a0, arc_a1, vg::Solidity::Hole);
+                let mut glow_paint = vg::Paint::color(vg::Color::rgba(ar, ag, ab, 80));
+                glow_paint.set_line_width(5.5 * dpx);
+                glow_paint.set_line_cap(vg::LineCap::Round);
+                canvas.stroke_path(&glow_path, &glow_paint);
+            }
 
             let mut val_path = vg::Path::new();
             val_path.arc(center_x, center_y, arc_r, arc_a0, arc_a1, vg::Solidity::Hole);
-            let mut val_paint = vg::Paint::color(vg::Color::rgba(ar, ag, ab, 250));
+            let mut val_paint =
+                vg::Paint::color(vg::Color::rgba(ar, ag, ab, if is_enabled { 250 } else { 150 }));
             val_paint.set_line_width(2.4 * dpx);
             val_paint.set_line_cap(vg::LineCap::Round);
             canvas.stroke_path(&val_path, &val_paint);
@@ -542,7 +580,7 @@ impl View for RotaryKnob {
             center_y + 2.4 * dpx,
             body_r * 0.5,
             body_r * 1.12,
-            vg::Color::rgba(14, 11, 8, 200),
+            vg::Color::rgba(14, 11, 8, if is_enabled { 200 } else { 110 }),
             vg::Color::rgba(14, 11, 8, 0),
         );
         canvas.fill_path(&shadow_path, &shadow_paint);
@@ -554,28 +592,37 @@ impl View for RotaryKnob {
             center_y - body_r,
             center_x,
             center_y + body_r,
-            vg::Color::rgb(112, 98, 86),
-            vg::Color::rgb(50, 42, 36),
+            if is_enabled {
+                vg::Color::rgb(112, 98, 86)
+            } else {
+                vg::Color::rgb(70, 62, 56)
+            },
+            if is_enabled {
+                vg::Color::rgb(50, 42, 36)
+            } else {
+                vg::Color::rgb(38, 33, 29)
+            },
         );
         canvas.fill_path(&body_path, &body_paint);
 
         let mut rim_stroke = vg::Paint::color(if self.hovered || self.drag_active {
-            vg::Color::rgba(ar, ag, ab, 210)
+            vg::Color::rgba(ar, ag, ab, if is_enabled { 210 } else { 145 })
         } else {
             vg::Color::rgba(24, 20, 17, 235)
         });
         rim_stroke.set_line_width(1.1 * dpx);
         canvas.stroke_path(&body_path, &rim_stroke);
 
-        let cap_hi = if self.hovered || self.drag_active {
-            vg::Color::rgb(156, 138, 122)
+        let (cap_hi, cap_lo) = if is_enabled {
+            if self.hovered || self.drag_active {
+                (vg::Color::rgb(156, 138, 122), vg::Color::rgb(74, 63, 55))
+            } else {
+                (vg::Color::rgb(138, 122, 108), vg::Color::rgb(62, 53, 46))
+            }
+        } else if self.hovered || self.drag_active {
+            (vg::Color::rgb(98, 88, 80), vg::Color::rgb(54, 47, 42))
         } else {
-            vg::Color::rgb(138, 122, 108)
-        };
-        let cap_lo = if self.hovered || self.drag_active {
-            vg::Color::rgb(74, 63, 55)
-        } else {
-            vg::Color::rgb(62, 53, 46)
+            (vg::Color::rgb(86, 76, 68), vg::Color::rgb(48, 42, 37))
         };
         let mut cap_path = vg::Path::new();
         cap_path.circle(center_x, center_y, cap_r);
@@ -599,7 +646,11 @@ impl View for RotaryKnob {
         let mut ptr_path = vg::Path::new();
         ptr_path.move_to(px0, py0);
         ptr_path.line_to(px1, py1);
-        let mut ptr_paint = vg::Paint::color(vg::Color::rgb(255, 244, 228));
+        let mut ptr_paint = vg::Paint::color(if is_enabled {
+            vg::Color::rgb(255, 244, 228)
+        } else {
+            vg::Color::rgba(155, 142, 130, 140)
+        });
         ptr_paint.set_line_width(1.8 * dpx);
         ptr_paint.set_line_cap(vg::LineCap::Round);
         canvas.stroke_path(&ptr_path, &ptr_paint);
@@ -624,7 +675,11 @@ impl View for RotaryKnob {
 
                 let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
                 for slot in slots.iter().take(count) {
-                    let (sr, sg, sb) = slot.source.color_rgb();
+                    let (sr, sg, sb) = if is_enabled {
+                        slot.source.color_rgb()
+                    } else {
+                        (110, 100, 92)
+                    };
                     let target_norm = (base_norm + slot.depth).clamp(0.0, 1.0);
                     let (lo_norm, hi_norm) = if slot.bipolar {
                         let span = slot.depth.abs();
@@ -638,16 +693,23 @@ impl View for RotaryKnob {
                     if (hi_norm - lo_norm) > 0.004 {
                         let a0 = start_angle + lo_norm * sweep_angle;
                         let a1 = start_angle + hi_norm * sweep_angle;
-                        let mut mglow = vg::Path::new();
-                        mglow.arc(center_x, center_y, mod_ring_r, a0, a1, vg::Solidity::Hole);
-                        let mut mglow_paint = vg::Paint::color(vg::Color::rgba(sr, sg, sb, 75));
-                        mglow_paint.set_line_width(4.2 * dpx);
-                        mglow_paint.set_line_cap(vg::LineCap::Round);
-                        canvas.stroke_path(&mglow, &mglow_paint);
+                        if is_enabled {
+                            let mut mglow = vg::Path::new();
+                            mglow.arc(center_x, center_y, mod_ring_r, a0, a1, vg::Solidity::Hole);
+                            let mut mglow_paint = vg::Paint::color(vg::Color::rgba(sr, sg, sb, 75));
+                            mglow_paint.set_line_width(4.2 * dpx);
+                            mglow_paint.set_line_cap(vg::LineCap::Round);
+                            canvas.stroke_path(&mglow, &mglow_paint);
+                        }
 
                         let mut mpath = vg::Path::new();
                         mpath.arc(center_x, center_y, mod_ring_r, a0, a1, vg::Solidity::Hole);
-                        let mut mpaint = vg::Paint::color(vg::Color::rgba(sr, sg, sb, 248));
+                        let mut mpaint = vg::Paint::color(vg::Color::rgba(
+                            sr,
+                            sg,
+                            sb,
+                            if is_enabled { 248 } else { 155 },
+                        ));
                         mpaint.set_line_width(2.2 * dpx);
                         mpaint.set_line_cap(vg::LineCap::Round);
                         canvas.stroke_path(&mpath, &mpaint);
@@ -662,7 +724,11 @@ impl View for RotaryKnob {
                     let mut end_tick = vg::Path::new();
                     end_tick.move_to(tx0, ty0);
                     end_tick.line_to(tx1, ty1);
-                    let mut tick_paint = vg::Paint::color(vg::Color::rgb(255, 250, 240));
+                    let mut tick_paint = vg::Paint::color(if is_enabled {
+                        vg::Color::rgb(255, 250, 240)
+                    } else {
+                        vg::Color::rgba(165, 154, 144, 165)
+                    });
                     tick_paint.set_line_width(1.7 * dpx);
                     tick_paint.set_line_cap(vg::LineCap::Round);
                     canvas.stroke_path(&end_tick, &tick_paint);
@@ -671,12 +737,23 @@ impl View for RotaryKnob {
                 let live_offset = mb.mod_ui.telemetry.dest_offset(mb.dest);
                 let live_norm = (base_norm + live_offset).clamp(0.0, 1.0);
                 let live_angle = start_angle + live_norm * sweep_angle;
-                let (dr, dg, db) = slots[0].source.color_rgb();
+                let (dr, dg, db) = if is_enabled {
+                    slots[0].source.color_rgb()
+                } else {
+                    (110, 100, 92)
+                };
                 let lx = center_x + live_angle.cos() * mod_ring_r;
                 let ly = center_y + live_angle.sin() * mod_ring_r;
                 let mut dot = vg::Path::new();
                 dot.circle(lx, ly, 2.3 * dpx);
-                canvas.fill_path(&dot, &vg::Paint::color(vg::Color::rgb(255, 248, 232)));
+                canvas.fill_path(
+                    &dot,
+                    &vg::Paint::color(if is_enabled {
+                        vg::Color::rgb(255, 248, 232)
+                    } else {
+                        vg::Color::rgba(165, 154, 144, 165)
+                    }),
+                );
                 let mut dot_ring = vg::Paint::color(vg::Color::rgb(dr, dg, db));
                 dot_ring.set_line_width(1.2 * dpx);
                 canvas.stroke_path(&dot, &dot_ring);
@@ -791,9 +868,11 @@ impl View for LedToggleSwitch {
                     self.param_base.begin_set_parameter(cx);
                     self.param_base.set_normalized_value(cx, def);
                     self.param_base.end_set_parameter(cx);
+                    cx.emit(super::UiEvent::ModUiChanged);
                     cx.needs_redraw();
                 } else {
                     self.toggle(cx);
+                    cx.emit(super::UiEvent::ModUiChanged);
                 }
                 meta.consume();
             }
@@ -907,6 +986,21 @@ impl View for LedToggleSwitch {
     }
 }
 
+#[inline]
+fn format_inline_value(raw: String) -> String {
+    if let Some(v) = raw.strip_suffix(" %") {
+        format!("{v}%")
+    } else if let Some(v) = raw.strip_suffix(" deg") {
+        format!("{v}°")
+    } else if let Some(v) = raw.strip_suffix(" ct") {
+        format!("{v}c")
+    } else if let Some(v) = raw.strip_suffix(" st") {
+        v.to_string()
+    } else {
+        raw
+    }
+}
+
 /// Clickable / draggable compact pill for discrete Enum or Int parameters (with optional modulation bar).
 pub struct ParamStepPill {
     param_base: ParamWidgetBase,
@@ -932,14 +1026,31 @@ impl ParamStepPill {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
-        Self::build_inner(cx, params, params_to_param, num_steps, None)
+        Self::build_inner(cx, params, params_to_param, num_steps, None, None)
     }
 
-    pub fn new_with_mod<'a, L, Params, P, FMap>(
+    pub fn new_inline<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         params: L,
         params_to_param: FMap,
         num_steps: usize,
+        label: &'static str,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self::build_inner(cx, params, params_to_param, num_steps, None, Some(label))
+    }
+
+    pub fn new_inline_with_mod<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        num_steps: usize,
+        label: &'static str,
         dest: ModDestination,
         mod_ui: Arc<ModUiState>,
         tab_tag: u8,
@@ -960,6 +1071,7 @@ impl ParamStepPill {
                 mod_ui,
                 tab_tag,
             }),
+            Some(label),
         )
     }
 
@@ -969,6 +1081,7 @@ impl ParamStepPill {
         params_to_param: FMap,
         num_steps: usize,
         mod_binding: Option<ModTargetBinding>,
+        inline_label: Option<&'static str>,
     ) -> Handle<'a, Self>
     where
         L: Lens<Target = Params> + Clone,
@@ -976,6 +1089,11 @@ impl ParamStepPill {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
+        let class_name = if inline_label.is_some() {
+            "inline-pill"
+        } else {
+            "compact-pill"
+        };
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
             num_steps: num_steps.max(2),
@@ -986,20 +1104,53 @@ impl ParamStepPill {
             mod_depth_drag: None,
             mod_binding,
         }
-        .build(
-            cx,
-            ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
-                let text_lens = param_data.make_lens(|param| {
-                    param.normalized_value_to_string(param.modulated_normalized_value(), true)
-                });
-                bold_label(cx, text_lens, "compact-pill-text")
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0))
-                    .child_space(Stretch(1.0))
-                    .hoverable(false);
-            }),
-        )
-        .class("compact-pill")
+        .build(cx, move |cx| {
+            if let Some(title) = inline_label {
+                HStack::new(
+                    cx,
+                    ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
+                        let text_lens = param_data.make_lens(|param| {
+                            format_inline_value(
+                                param.normalized_value_to_string(
+                                    param.modulated_normalized_value(),
+                                    true,
+                                ),
+                            )
+                        });
+                        bold_label(cx, title, "inline-pill-label")
+                            .width(Auto)
+                            .height(Stretch(1.0))
+                            .child_top(Stretch(1.0))
+                            .child_bottom(Stretch(1.0))
+                            .hoverable(false);
+                        Element::new(cx).width(Stretch(1.0)).hoverable(false);
+                        bold_label(cx, text_lens, "inline-pill-value")
+                            .width(Auto)
+                            .height(Stretch(1.0))
+                            .child_top(Stretch(1.0))
+                            .child_bottom(Stretch(1.0))
+                            .hoverable(false);
+                    }),
+                )
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .child_left(Pixels(2.0))
+                .child_right(Pixels(2.0))
+                .hoverable(false);
+            } else {
+                ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
+                    let text_lens = param_data.make_lens(|param| {
+                        param.normalized_value_to_string(param.modulated_normalized_value(), true)
+                    });
+                    bold_label(cx, text_lens, "compact-pill-text")
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0))
+                        .child_space(Stretch(1.0))
+                        .hoverable(false);
+                })(cx);
+            }
+        })
+        .class(class_name)
     }
 }
 

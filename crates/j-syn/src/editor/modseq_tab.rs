@@ -1,12 +1,13 @@
-//! `MODSEQ` bottom drawer: 4 hybrid 16-step Performer / MSEG curve sequencers (`MSEQ 1`–`MSEQ 4`)
-//! and 4 modulation envelopes (`ENV 1`–`ENV 4`) with interactive `femtovg` curves and live playheads.
+//! `MODSEQ` bottom drawer: 4 hybrid 16-step (`MODSEQ`) / freeform breakpoint (`LFO`) modulators
+//! (`MSEQ 1`–`MSEQ 4`) and 4 modulation envelopes (`ENV 1`–`ENV 4`) with interactive `femtovg` curves.
 
 use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::ModMatrixSource;
 use j_syn_dsp::{
-    evaluate_adsr_preview, evaluate_modseq_curve, evaluate_mseg_curve, AdsrParams, ModSeqStep,
-    ModSeqStepShape, MsegNode, MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
+    evaluate_adsr_preview, evaluate_modseq_curve, evaluate_mseg_curve, evaluate_step_shape,
+    AdsrParams, LfoPreset, ModSeqStep, ModSeqStepShape, MsegNode, MAX_MODSEQ_STEPS,
+    MAX_MSEG_NODES,
 };
 use nih_plug::prelude::{FloatParam, GuiContext, Param};
 use nih_plug_vizia::vizia::prelude::*;
@@ -38,8 +39,8 @@ impl Data for ModSeqSubTab {
 }
 
 const MODE_ITEMS: &[(&str, ModSeqModeParam)] = &[
-    ("Performer", ModSeqModeParam::Performer),
-    ("MSEG", ModSeqModeParam::Mseg),
+    ("MODSEQ", ModSeqModeParam::Performer),
+    ("LFO", ModSeqModeParam::Mseg),
 ];
 
 const SYNC_ITEMS: &[(&str, ModSeqSyncParam)] = &[
@@ -181,7 +182,15 @@ impl ModSeqCurveCanvas {
         None
     }
 
-    fn apply_drag_edit(&self, x: f32, y: f32, bounds: BoundingBox, mode: CanvasDragMode, scale: f32) {
+    fn apply_drag_edit(
+        &self,
+        x: f32,
+        y: f32,
+        bounds: BoundingBox,
+        mode: CanvasDragMode,
+        scale: f32,
+        shift_held: bool,
+    ) {
         let mut bank = self.params.modseq_steps.snapshot();
         match mode {
             CanvasDragMode::StampLevel => {
@@ -215,11 +224,17 @@ impl ModSeqCurveCanvas {
                     (start_tension + dy).clamp(-1.0, 1.0);
             }
             CanvasDragMode::MsegNode { node_idx } => {
-                let (nx, ny) = Self::cursor_norm_xy(bounds, x, y, scale);
+                let (mut nx, mut ny) = Self::cursor_norm_xy(bounds, x, y, scale);
                 let mseg = &mut bank.msegs[self.seq_idx];
                 let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
                 let idx = node_idx.min(n - 1);
-                mseg.nodes[idx].level_y = ny;
+                if self.mod_ui.mseg_snap() || shift_held {
+                    ny = (ny * 8.0).round() / 8.0;
+                    if idx > 0 && idx + 1 < n {
+                        nx = (nx * 16.0).round() / 16.0;
+                    }
+                }
+                mseg.nodes[idx].level_y = ny.clamp(0.0, 1.0);
                 if idx == 0 {
                     mseg.nodes[idx].time_x = 0.0;
                 } else if idx + 1 == n {
@@ -269,7 +284,14 @@ impl View for ModSeqCurveCanvas {
                     if let Some(node_idx) = self.hit_mseg_node(bounds, mx, my, scale) {
                         let mode = CanvasDragMode::MsegNode { node_idx };
                         self.drag_mode = Some(mode);
-                        self.apply_drag_edit(mx, my, bounds, mode, scale);
+                        self.apply_drag_edit(
+                            mx,
+                            my,
+                            bounds,
+                            mode,
+                            scale,
+                            cx.modifiers().shift(),
+                        );
                         cx.capture();
                         cx.needs_redraw();
                         meta.consume();
@@ -331,7 +353,7 @@ impl View for ModSeqCurveCanvas {
                     CanvasDragMode::StampLevel
                 };
                 self.drag_mode = Some(mode);
-                self.apply_drag_edit(mx, my, bounds, mode, scale);
+                self.apply_drag_edit(mx, my, bounds, mode, scale, cx.modifiers().shift());
                 cx.capture();
                 cx.needs_redraw();
                 meta.consume();
@@ -394,7 +416,18 @@ impl View for ModSeqCurveCanvas {
                             cx.needs_redraw();
                         }
                     } else if n < MAX_MSEG_NODES {
-                        let (nx, ny) = Self::cursor_norm_xy(bounds, mx, my, scale);
+                        let (raw_x, raw_y) = Self::cursor_norm_xy(bounds, mx, my, scale);
+                        let snap = self.mod_ui.mseg_snap() || cx.modifiers().shift();
+                        let nx = if snap {
+                            (raw_x * 16.0).round() / 16.0
+                        } else {
+                            raw_x
+                        };
+                        let ny = if snap {
+                            (raw_y * 8.0).round() / 8.0
+                        } else {
+                            raw_y
+                        };
                         let tx = nx.clamp(0.02, 0.98);
                         let mut insert_at = n - 1;
                         for i in 1..n {
@@ -411,7 +444,7 @@ impl View for ModSeqCurveCanvas {
                             }
                             mseg.nodes[insert_at] = MsegNode {
                                 time_x: tx.clamp(left_x, right_x),
-                                level_y: ny,
+                                level_y: ny.clamp(0.0, 1.0),
                                 tension: 0.0,
                             };
                             mseg.num_nodes = n + 1;
@@ -438,7 +471,14 @@ impl View for ModSeqCurveCanvas {
             WindowEvent::MouseMove(x, y) => {
                 if let Some(mode) = self.drag_mode {
                     let bounds = cx.bounds();
-                    self.apply_drag_edit(*x, *y, bounds, mode, cx.scale_factor());
+                    self.apply_drag_edit(
+                        *x,
+                        *y,
+                        bounds,
+                        mode,
+                        cx.scale_factor(),
+                        cx.modifiers().shift(),
+                    );
                     cx.needs_redraw();
                     meta.consume();
                 }
@@ -485,23 +525,58 @@ impl View for ModSeqCurveCanvas {
         let steps = &bank.seqs[self.seq_idx];
         let mseg = &bank.msegs[self.seq_idx];
 
-        // Subtle grid
+        // Subtle grid (in LFO mode with SNAP enabled, show 1/16 x 1/8 snap lines)
         let mut grid_paint = vg::Paint::color(vg::Color::rgba(90, 77, 66, 95));
         grid_paint.set_line_width(0.8 * dpx);
-        for g in 1..4 {
-            let gy = y0 + (g as f32 / 4.0) * h;
+        let mut snap_grid_paint = vg::Paint::color(vg::Color::rgba(90, 77, 66, 48));
+        snap_grid_paint.set_line_width(0.65 * dpx);
+        let snap_on = is_mseg && self.mod_ui.mseg_snap();
+
+        let h_divs = if snap_on { 8 } else { 4 };
+        for g in 1..h_divs {
+            let gy = y0 + (g as f32 / h_divs as f32) * h;
             let mut line = vg::Path::new();
             line.move_to(x0, gy);
             line.line_to(x0 + w, gy);
-            canvas.stroke_path(&line, &grid_paint);
+            let paint = if snap_on && g % 2 != 0 {
+                &snap_grid_paint
+            } else {
+                &grid_paint
+            };
+            canvas.stroke_path(&line, paint);
         }
-        let v_divs = if is_mseg { 4 } else { num_steps };
+        let v_divs = if is_mseg {
+            if snap_on { 16 } else { 4 }
+        } else {
+            num_steps
+        };
         for s in 1..v_divs {
             let gx = x0 + (s as f32 / v_divs as f32) * w;
             let mut line = vg::Path::new();
             line.move_to(gx, y0);
             line.line_to(gx, y0 + h);
-            canvas.stroke_path(&line, &grid_paint);
+            let paint = if snap_on && s % 4 != 0 {
+                &snap_grid_paint
+            } else {
+                &grid_paint
+            };
+            canvas.stroke_path(&line, paint);
+        }
+
+        // Subtle per-step depth bars in MODSEQ mode so stamped amplitudes read at a glance
+        if !is_mseg {
+            let step_w = w / num_steps as f32;
+            for (s, step) in steps.iter().enumerate().take(num_steps) {
+                let lvl = step.start_level.clamp(0.0, 1.0);
+                if lvl > 0.005 {
+                    let bx = x0 + s as f32 * step_w + 1.0 * dpx;
+                    let bw = (step_w - 2.0 * dpx).max(1.0);
+                    let bh = lvl * h;
+                    let mut bar = vg::Path::new();
+                    bar.rounded_rect(bx, y0 + h - bh, bw, bh, 1.5 * dpx);
+                    canvas.fill_path(&bar, &vg::Paint::color(vg::Color::rgba(ar, ag, ab, 20)));
+                }
+            }
         }
 
         // Filled + stroked continuous curve
@@ -571,15 +646,18 @@ impl View for ModSeqCurveCanvas {
                 canvas.fill_path(&inner, &vg::Paint::color(vg::Color::rgb(255, 248, 236)));
             }
         } else {
-            for s in 0..num_steps {
-                let sx0 = x0 + (s as f32 / num_steps as f32) * w;
-                let sx1 = x0 + ((s + 1) as f32 / num_steps as f32) * w;
-                let sy0 = y0 + (1.0 - steps[s].start_level) * h;
-                let sy1 = y0 + (1.0 - steps[s].end_level) * h;
+            let step_w = w / num_steps as f32;
+            for (s, step) in steps.iter().enumerate().take(num_steps) {
+                let sx0 = x0 + s as f32 * step_w;
+                let sx1 = sx0 + step_w;
+                let sy0 = y0 + (1.0 - step.start_level) * h;
+                let sy1 = y0 + (1.0 - step.end_level) * h;
                 let mut dot = vg::Path::new();
-                dot.circle(sx0 + 1.5 * dpx, sy0, 2.0 * dpx);
-                if steps[s].shape == ModSeqStepShape::Linear && (sy1 - sy0).abs() > 2.0 * dpx {
-                    dot.circle(sx1 - 1.5 * dpx, sy1, 1.8 * dpx);
+                if step.shape == ModSeqStepShape::Linear && (sy1 - sy0).abs() > 2.0 * dpx {
+                    dot.circle(sx0 + 1.8 * dpx, sy0, 2.0 * dpx);
+                    dot.circle(sx1 - 1.8 * dpx, sy1, 1.8 * dpx);
+                } else {
+                    dot.circle(sx0 + 0.5 * step_w, sy0, 1.9 * dpx);
                 }
                 canvas.fill_path(&dot, &vg::Paint::color(vg::Color::rgb(255, 244, 228)));
             }
@@ -606,6 +684,374 @@ impl View for ModSeqCurveCanvas {
         let mut ph_ring = vg::Paint::color(vg::Color::rgb(255, 248, 232));
         ph_ring.set_line_width(1.1 * dpx);
         canvas.stroke_path(&ph_dot, &ph_ring);
+    }
+}
+
+#[inline]
+fn grid_tile_rect(
+    bounds: BoundingBox,
+    idx: usize,
+    cols: usize,
+    rows: usize,
+    pad: f32,
+    gap: f32,
+) -> (f32, f32, f32, f32) {
+    let tile_w =
+        ((bounds.w - 2.0 * pad - (cols.saturating_sub(1) as f32) * gap) / cols as f32).max(2.0);
+    let tile_h =
+        ((bounds.h - 2.0 * pad - (rows.saturating_sub(1) as f32) * gap) / rows as f32).max(2.0);
+    let col = idx % cols;
+    let row = idx / cols;
+    (
+        bounds.x + pad + col as f32 * (tile_w + gap),
+        bounds.y + pad + row as f32 * (tile_h + gap),
+        tile_w,
+        tile_h,
+    )
+}
+
+#[inline]
+fn hit_grid_tile(
+    bounds: BoundingBox,
+    x: f32,
+    y: f32,
+    count: usize,
+    cols: usize,
+    rows: usize,
+    pad: f32,
+    gap: f32,
+) -> Option<usize> {
+    (0..count).find(|&idx| {
+        let (tx, ty, tw, th) = grid_tile_rect(bounds, idx, cols, rows, pad, gap);
+        x >= tx && x <= tx + tw && y >= ty && y <= ty + th
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stroke_tile_curve(
+    canvas: &mut Canvas,
+    tx: f32,
+    ty: f32,
+    tw: f32,
+    th: f32,
+    dpx: f32,
+    accent: (u8, u8, u8),
+    bright: bool,
+    samples: usize,
+    eval: impl Fn(f32) -> f32,
+) {
+    let mx = (tw * 0.14).max(2.0 * dpx);
+    let my = (th * 0.18).max(2.0 * dpx);
+    let cw = (tw - 2.0 * mx).max(1.0);
+    let ch = (th - 2.0 * my).max(1.0);
+    let x0 = tx + mx;
+    let y0 = ty + my;
+
+    let mut path = vg::Path::new();
+    for i in 0..=samples {
+        let t = (i as f32 / samples as f32).min(0.999_999);
+        let v = eval(t).clamp(0.0, 1.0);
+        let px = x0 + (i as f32 / samples as f32) * cw;
+        let py = y0 + (1.0 - v) * ch;
+        if i == 0 {
+            path.move_to(px, py);
+        } else {
+            path.line_to(px, py);
+        }
+    }
+    let (ar, ag, ab) = accent;
+    let mut paint = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if bright { 255 } else { 215 }));
+    paint.set_line_width((if bright { 1.5 } else { 1.25 }) * dpx);
+    paint.set_line_cap(vg::LineCap::Round);
+    paint.set_line_join(vg::LineJoin::Round);
+    canvas.stroke_path(&path, &paint);
+}
+
+/// Graphical 8-preset vector strip shown in the `LFO` sub-bar next to `RESET`.
+struct LfoPresetBar {
+    seq_idx: usize,
+    params: Arc<JSynPluginParams>,
+    hovered_idx: Option<usize>,
+}
+
+impl LfoPresetBar {
+    fn new(cx: &mut Context, seq_idx: usize, params: Arc<JSynPluginParams>) -> Handle<'_, Self> {
+        Self {
+            seq_idx,
+            params,
+            hovered_idx: None,
+        }
+        .build(cx, |_| {})
+    }
+}
+
+impl View for LfoPresetBar {
+    fn element(&self) -> Option<&'static str> {
+        Some("lfo-preset-bar")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseMove(x, y) => {
+                let dpx = cx.scale_factor();
+                let next = hit_grid_tile(
+                    cx.bounds(),
+                    *x,
+                    *y,
+                    LfoPreset::ALL.len(),
+                    LfoPreset::ALL.len(),
+                    1,
+                    0.0,
+                    2.0 * dpx,
+                );
+                if next != self.hovered_idx {
+                    self.hovered_idx = next;
+                    cx.needs_redraw();
+                }
+            }
+            WindowEvent::MouseOut => {
+                if self.hovered_idx.take().is_some() {
+                    cx.needs_redraw();
+                }
+            }
+            WindowEvent::MouseDown(MouseButton::Left) => {
+                let dpx = cx.scale_factor();
+                if let Some(idx) = hit_grid_tile(
+                    cx.bounds(),
+                    cx.mouse().cursorx,
+                    cx.mouse().cursory,
+                    LfoPreset::ALL.len(),
+                    LfoPreset::ALL.len(),
+                    1,
+                    0.0,
+                    2.0 * dpx,
+                ) {
+                    let mut bank = self.params.modseq_steps.snapshot();
+                    bank.msegs[self.seq_idx] = LfoPreset::ALL[idx].to_mseg();
+                    self.params.modseq_steps.store_value(bank);
+                    cx.emit(UiEvent::ModUiChanged);
+                    cx.needs_redraw();
+                    meta.consume();
+                }
+            }
+            _ => {}
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let bounds = cx.bounds();
+        if bounds.w <= 4.0 || bounds.h <= 4.0 {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let accent = subtab_accent(ModSeqSubTab::MSeq(self.seq_idx));
+        let gap = 2.0 * dpx;
+
+        for (idx, &preset) in LfoPreset::ALL.iter().enumerate() {
+            let (tx, ty, tw, th) =
+                grid_tile_rect(bounds, idx, LfoPreset::ALL.len(), 1, 0.0, gap);
+            let hovered = self.hovered_idx == Some(idx);
+
+            let mut tile = vg::Path::new();
+            tile.rounded_rect(tx, ty, tw, th, 2.5 * dpx);
+            canvas.fill_path(
+                &tile,
+                &vg::Paint::color(if hovered {
+                    vg::Color::rgb(56, 47, 40)
+                } else {
+                    vg::Color::rgb(38, 32, 27)
+                }),
+            );
+            let mut border = vg::Paint::color(if hovered {
+                vg::Color::rgb(245, 179, 73)
+            } else {
+                vg::Color::rgb(76, 64, 54)
+            });
+            border.set_line_width(1.0 * dpx);
+            canvas.stroke_path(&tile, &border);
+
+            let mseg = preset.to_mseg();
+            stroke_tile_curve(canvas, tx, ty, tw, th, dpx, accent, hovered, 20, |t| {
+                evaluate_mseg_curve(&mseg, t)
+            });
+        }
+    }
+}
+
+/// Interactive `2x9` graphical shape palette for `MODSEQ` step stamping & quick fill.
+struct ModSeqPaletteGrid {
+    seq_idx: usize,
+    params: Arc<JSynPluginParams>,
+    mod_ui: Arc<ModUiState>,
+    hovered_idx: Option<usize>,
+}
+
+impl ModSeqPaletteGrid {
+    fn new(
+        cx: &mut Context,
+        seq_idx: usize,
+        params: Arc<JSynPluginParams>,
+        mod_ui: Arc<ModUiState>,
+    ) -> Handle<'_, Self> {
+        Self {
+            seq_idx,
+            params,
+            mod_ui,
+            hovered_idx: None,
+        }
+        .build(cx, |_| {})
+        .class("palette-grid")
+    }
+}
+
+impl View for ModSeqPaletteGrid {
+    fn element(&self) -> Option<&'static str> {
+        Some("modseq-palette-grid")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseMove(x, y) => {
+                let dpx = cx.scale_factor();
+                let next = hit_grid_tile(
+                    cx.bounds(),
+                    *x,
+                    *y,
+                    ModSeqStepShape::PALETTE.len(),
+                    9,
+                    2,
+                    2.0 * dpx,
+                    2.0 * dpx,
+                );
+                if next != self.hovered_idx {
+                    self.hovered_idx = next;
+                    cx.needs_redraw();
+                }
+            }
+            WindowEvent::MouseOut => {
+                if self.hovered_idx.take().is_some() {
+                    cx.needs_redraw();
+                }
+            }
+            WindowEvent::MouseDown(MouseButton::Left) => {
+                let dpx = cx.scale_factor();
+                if let Some(idx) = hit_grid_tile(
+                    cx.bounds(),
+                    cx.mouse().cursorx,
+                    cx.mouse().cursory,
+                    ModSeqStepShape::PALETTE.len(),
+                    9,
+                    2,
+                    2.0 * dpx,
+                    2.0 * dpx,
+                ) {
+                    self.mod_ui.set_active_stamp(ModSeqStepShape::PALETTE[idx]);
+                    cx.emit(UiEvent::ModUiChanged);
+                    cx.needs_redraw();
+                    meta.consume();
+                }
+            }
+            WindowEvent::MouseDown(MouseButton::Right) => {
+                let dpx = cx.scale_factor();
+                if let Some(idx) = hit_grid_tile(
+                    cx.bounds(),
+                    cx.mouse().cursorx,
+                    cx.mouse().cursory,
+                    ModSeqStepShape::PALETTE.len(),
+                    9,
+                    2,
+                    2.0 * dpx,
+                    2.0 * dpx,
+                ) {
+                    let shape = ModSeqStepShape::PALETTE[idx];
+                    self.mod_ui.set_active_stamp(shape);
+                    let n = self.params.modseqs[self.seq_idx]
+                        .num_steps
+                        .value()
+                        .clamp(2, MAX_MODSEQ_STEPS as i32) as usize;
+                    let mut bank = self.params.modseq_steps.snapshot();
+                    for step in bank.seqs[self.seq_idx].iter_mut().take(n) {
+                        *step = ModSeqStep::stamped(shape, 1.0, 0.0);
+                    }
+                    self.params.modseq_steps.store_value(bank);
+                    cx.emit(UiEvent::ModUiChanged);
+                    cx.needs_redraw();
+                    meta.consume();
+                }
+            }
+            _ => {}
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let mut frame = cx.build_path();
+        cx.draw_background(canvas, &mut frame);
+        cx.draw_border(canvas, &mut frame);
+
+        let bounds = cx.bounds();
+        if bounds.w <= 8.0 || bounds.h <= 8.0 {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let pad = 2.0 * dpx;
+        let gap = 2.0 * dpx;
+        let active_shape = self.mod_ui.active_stamp();
+        let accent = subtab_accent(ModSeqSubTab::MSeq(self.seq_idx));
+
+        for (idx, &shape) in ModSeqStepShape::PALETTE.iter().enumerate() {
+            let (tx, ty, tw, th) = grid_tile_rect(bounds, idx, 9, 2, pad, gap);
+            let is_active = shape == active_shape;
+            let hovered = self.hovered_idx == Some(idx);
+
+            let mut tile = vg::Path::new();
+            tile.rounded_rect(tx, ty, tw, th, 2.5 * dpx);
+            canvas.fill_path(
+                &tile,
+                &vg::Paint::color(if is_active {
+                    vg::Color::rgb(73, 56, 38)
+                } else if hovered {
+                    vg::Color::rgb(53, 44, 36)
+                } else {
+                    vg::Color::rgb(37, 31, 26)
+                }),
+            );
+            let mut border = vg::Paint::color(if is_active {
+                vg::Color::rgb(245, 179, 73)
+            } else if hovered {
+                vg::Color::rgb(180, 140, 95)
+            } else {
+                vg::Color::rgb(68, 57, 48)
+            });
+            border.set_line_width((if is_active { 1.25 } else { 0.9 }) * dpx);
+            canvas.stroke_path(&tile, &border);
+
+            let sub = shape.subdivision();
+            if sub > 1 {
+                let mut div_paint = vg::Paint::color(vg::Color::rgba(155, 138, 120, 65));
+                div_paint.set_line_width(0.75 * dpx);
+                for k in 1..sub {
+                    let dx = tx + (k as f32 / sub as f32) * tw;
+                    let mut line = vg::Path::new();
+                    line.move_to(dx, ty + 2.0 * dpx);
+                    line.line_to(dx, ty + th - 2.0 * dpx);
+                    canvas.stroke_path(&line, &div_paint);
+                }
+            }
+
+            let step = ModSeqStep::stamped(shape, 1.0, 0.0);
+            stroke_tile_curve(
+                canvas,
+                tx,
+                ty,
+                tw,
+                th,
+                dpx,
+                accent,
+                is_active || hovered,
+                24,
+                |t| evaluate_step_shape(step, t),
+            );
+        }
     }
 }
 
@@ -835,7 +1281,7 @@ pub(super) fn build_modseq_tab(
                                                 HStack::new(cx, move |cx| {
                                                     bold_label(
                                                         cx,
-                                                        "MSEG: DBL-CLICK ADD/DEL NODE  |  DRAG MID/R-CLICK CURVE",
+                                                        "LFO: DBL-CLICK NODE | R-DRAG BEND",
                                                         "mini-label",
                                                     )
                                                     .width(Auto)
@@ -843,7 +1289,11 @@ pub(super) fn build_modseq_tab(
                                                     .child_top(Stretch(1.0))
                                                     .child_bottom(Stretch(1.0));
 
-                                                    let p_rst = p_mode.clone();
+                                                    LfoPresetBar::new(cx, seq_idx, p_mode.clone())
+                                                        .width(Pixels(278.0))
+                                                        .height(Pixels(18.0));
+
+                                                    let p_rst = p_mode;
                                                     Button::new(
                                                         cx,
                                                         move |cx| {
@@ -862,7 +1312,7 @@ pub(super) fn build_modseq_tab(
                                                         },
                                                     )
                                                     .class("preset-btn")
-                                                    .width(Pixels(48.0))
+                                                    .width(Pixels(44.0))
                                                     .height(Pixels(18.0));
                                                 })
                                                 .col_between(Pixels(6.0))
@@ -870,41 +1320,18 @@ pub(super) fn build_modseq_tab(
                                                 .height(Pixels(18.0));
                                             } else {
                                                 HStack::new(cx, move |cx| {
-                                                    bold_label(cx, "STAMP", "mini-label")
-                                                        .width(Pixels(38.0))
-                                                        .height(Stretch(1.0))
-                                                        .child_space(Stretch(1.0));
-
-                                                    for &shape in &ModSeqStepShape::STAMPS {
-                                                        let u_sel = u_mode.clone();
-                                                        Button::new(
-                                                            cx,
-                                                            move |cx| {
-                                                                u_sel.set_active_stamp(shape);
-                                                                cx.emit(UiEvent::ModUiChanged);
-                                                                cx.needs_redraw();
-                                                            },
-                                                            move |cx| {
-                                                                bold_label(
-                                                                    cx,
-                                                                    shape.label(),
-                                                                    "preset-btn-label",
-                                                                )
-                                                                .child_space(Stretch(1.0))
-                                                                .hoverable(false)
-                                                            },
-                                                        )
-                                                        .class("preset-btn")
-                                                        .checked(UiData::mod_ui_rev.map({
-                                                            let u_chk = u_mode.clone();
-                                                            move |_| u_chk.active_stamp() == shape
-                                                        }))
-                                                        .width(Pixels(46.0))
-                                                        .height(Pixels(18.0));
-                                                    }
+                                                    bold_label(
+                                                        cx,
+                                                        "MODSEQ: L-DRAG STAMP STEP  |  R-CLICK TILE TO FILL",
+                                                        "mini-label",
+                                                    )
+                                                    .width(Auto)
+                                                    .height(Stretch(1.0))
+                                                    .child_top(Stretch(1.0))
+                                                    .child_bottom(Stretch(1.0));
 
                                                     let p_fill = p_mode.clone();
-                                                    let u_fill = u_mode.clone();
+                                                    let u_fill = u_mode;
                                                     Button::new(
                                                         cx,
                                                         move |cx| {
@@ -932,10 +1359,32 @@ pub(super) fn build_modseq_tab(
                                                         },
                                                     )
                                                     .class("preset-btn")
-                                                    .width(Pixels(36.0))
+                                                    .width(Pixels(38.0))
+                                                    .height(Pixels(18.0));
+
+                                                    let p_clr = p_mode;
+                                                    Button::new(
+                                                        cx,
+                                                        move |cx| {
+                                                            let mut bank =
+                                                                p_clr.modseq_steps.snapshot();
+                                                            for step in bank.seqs[seq_idx].iter_mut() {
+                                                                *step = ModSeqStep::default();
+                                                            }
+                                                            p_clr.modseq_steps.store_value(bank);
+                                                            cx.needs_redraw();
+                                                        },
+                                                        |cx| {
+                                                            bold_label(cx, "CLEAR", "preset-btn-label")
+                                                                .child_space(Stretch(1.0))
+                                                                .hoverable(false)
+                                                        },
+                                                    )
+                                                    .class("preset-btn")
+                                                    .width(Pixels(44.0))
                                                     .height(Pixels(18.0));
                                                 })
-                                                .col_between(Pixels(3.0))
+                                                .col_between(Pixels(5.0))
                                                 .width(Auto)
                                                 .height(Pixels(18.0));
                                             }
@@ -978,13 +1427,45 @@ pub(super) fn build_modseq_tab(
             match sub.get(cx) {
                 ModSeqSubTab::MSeq(seq_idx) => {
                     HStack::new(cx, move |cx| {
-                        ModSeqCurveCanvas::new(cx, seq_idx, p_sub.clone(), m_sub.clone())
-                            .width(Stretch(1.0))
-                            .height(Stretch(1.0));
+                        let p_left = p_sub.clone();
+                        let m_left = m_sub.clone();
+                        HStack::new(
+                            cx,
+                            ParamWidgetBase::build_view(
+                                UiData::params,
+                                move |pr| &pr.modseqs[seq_idx].mode,
+                                move |cx, param_data| {
+                                    let is_mseg = param_data.make_lens(|pr| {
+                                        pr.unmodulated_plain_value() == ModSeqModeParam::Mseg
+                                    });
+                                    let p_c = p_left.clone();
+                                    let u_c = m_left.clone();
+                                    Binding::new(cx, is_mseg, move |cx, m| {
+                                        ModSeqCurveCanvas::new(cx, seq_idx, p_c.clone(), u_c.clone())
+                                            .width(Stretch(1.0))
+                                            .height(Stretch(1.0));
+                                        if !m.get(cx) {
+                                            ModSeqPaletteGrid::new(
+                                                cx,
+                                                seq_idx,
+                                                p_c.clone(),
+                                                u_c.clone(),
+                                            )
+                                            .width(Pixels(286.0))
+                                            .height(Stretch(1.0));
+                                        }
+                                    });
+                                },
+                            ),
+                        )
+                        .col_between(Pixels(6.0))
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0));
 
                         HStack::new(cx, {
                             let p_ctrl = p_sub.clone();
                             let g_ctrl = g_sub.clone();
+                            let u_ctrl = m_sub.clone();
                             let accent = subtab_accent(ModSeqSubTab::MSeq(seq_idx));
                             move |cx| {
                                 VStack::new(cx, {
@@ -1010,7 +1491,7 @@ pub(super) fn build_modseq_tab(
                                     }
                                 })
                                 .row_between(Pixels(2.0))
-                                .width(Pixels(78.0))
+                                .width(Pixels(74.0))
                                 .height(Auto)
                                 .top(Stretch(1.0))
                                 .bottom(Stretch(1.0));
@@ -1038,7 +1519,7 @@ pub(super) fn build_modseq_tab(
                                     }
                                 })
                                 .row_between(Pixels(2.0))
-                                .width(Pixels(70.0))
+                                .width(Pixels(66.0))
                                 .height(Auto)
                                 .top(Stretch(1.0))
                                 .bottom(Stretch(1.0));
@@ -1046,6 +1527,7 @@ pub(super) fn build_modseq_tab(
                                 VStack::new(cx, {
                                     let p = p_ctrl.clone();
                                     let g = g_ctrl.clone();
+                                    let u = u_ctrl;
                                     move |cx| {
                                         build_labeled_dropdown(
                                             cx,
@@ -1055,7 +1537,6 @@ pub(super) fn build_modseq_tab(
                                             move |pr| &pr.modseqs[seq_idx].sync_rate,
                                             RATE_ITEMS,
                                         );
-                                        let p_steps = p.clone();
                                         HStack::new(
                                             cx,
                                             ParamWidgetBase::build_view(
@@ -1066,31 +1547,43 @@ pub(super) fn build_modseq_tab(
                                                         pr.unmodulated_plain_value()
                                                             == ModSeqModeParam::Mseg
                                                     });
-                                                    let p_s = p_steps.clone();
+                                                    let u_s = u.clone();
                                                     Binding::new(cx, is_mseg, move |cx, m| {
                                                         if m.get(cx) {
-                                                            let p_n = p_s.clone();
-                                                            Binding::new(
-                                                                cx,
-                                                                UiData::mod_ui_rev,
-                                                                move |cx, _| {
-                                                                    let n = p_n
-                                                                        .modseq_steps
-                                                                        .snapshot()
-                                                                        .msegs[seq_idx]
-                                                                        .num_nodes;
-                                                                    let txt =
-                                                                        format!("NODES: {n}/16");
-                                                                    bold_label(
-                                                                        cx,
-                                                                        &txt,
-                                                                        "mini-label",
-                                                                    )
+                                                            let u_press = u_s.clone();
+                                                            let u_chk = u_s.clone();
+                                                            VStack::new(cx, move |cx| {
+                                                                bold_label(cx, "GRID", "mini-label")
                                                                     .width(Stretch(1.0))
-                                                                    .height(Pixels(24.0))
+                                                                    .height(Pixels(9.0))
                                                                     .child_space(Stretch(1.0));
-                                                                },
-                                                            );
+                                                                Button::new(
+                                                                    cx,
+                                                                    move |cx| {
+                                                                        u_press.toggle_mseg_snap();
+                                                                        cx.emit(UiEvent::ModUiChanged);
+                                                                        cx.needs_redraw();
+                                                                    },
+                                                                    |cx| {
+                                                                        bold_label(
+                                                                            cx,
+                                                                            "SNAP 1/16",
+                                                                            "snap-btn-label",
+                                                                        )
+                                                                        .child_space(Stretch(1.0))
+                                                                        .hoverable(false)
+                                                                    },
+                                                                )
+                                                                .class("snap-btn")
+                                                                .checked(UiData::mod_ui_rev.map(
+                                                                    move |_| u_chk.mseg_snap(),
+                                                                ))
+                                                                .width(Stretch(1.0))
+                                                                .height(Pixels(18.0));
+                                                            })
+                                                            .width(Stretch(1.0))
+                                                            .height(Auto)
+                                                            .row_between(Pixels(1.0));
                                                         } else {
                                                             build_flex_pill_cell(
                                                                 cx,
@@ -1111,7 +1604,7 @@ pub(super) fn build_modseq_tab(
                                     }
                                 })
                                 .row_between(Pixels(2.0))
-                                .width(Pixels(70.0))
+                                .width(Pixels(66.0))
                                 .height(Auto)
                                 .top(Stretch(1.0))
                                 .bottom(Stretch(1.0));
@@ -1123,8 +1616,8 @@ pub(super) fn build_modseq_tab(
                                     "FREQ",
                                     false,
                                     accent,
-                                    32.0,
-                                    52.0,
+                                    30.0,
+                                    48.0,
                                 );
 
                                 build_knob_cell(
@@ -1134,18 +1627,18 @@ pub(super) fn build_modseq_tab(
                                     "SMOOTH",
                                     false,
                                     CORAL_RGB,
-                                    32.0,
-                                    52.0,
+                                    30.0,
+                                    48.0,
                                 );
                             }
                         })
-                        .col_between(Pixels(5.0))
+                        .col_between(Pixels(4.0))
                         .child_top(Stretch(1.0))
                         .child_bottom(Stretch(1.0))
-                        .width(Pixels(342.0))
+                        .width(Pixels(326.0))
                         .height(Stretch(1.0));
                     })
-                    .col_between(Pixels(8.0))
+                    .col_between(Pixels(6.0))
                     .width(Stretch(1.0))
                     .height(Stretch(1.0));
                 }

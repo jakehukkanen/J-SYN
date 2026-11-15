@@ -1192,23 +1192,59 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
 #[test]
 fn test_modseq_stamps_and_mseg_curve() {
     use j_syn_dsp::{
-        evaluate_modseq_curve, evaluate_mseg_curve, ModDestination, ModMatrixSource, ModSeqMode,
-        ModSeqStep, ModSeqStepShape, ModSeqSyncMode, ModSlot, MsegCurve, MsegNode,
-        MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
+        evaluate_modseq_curve, evaluate_mseg_curve, evaluate_step_shape, LfoPreset,
+        ModDestination, ModMatrixSource, ModSeqMode, ModSeqStep, ModSeqStepShape,
+        ModSeqSyncMode, ModSlot, MsegCurve, MsegNode, MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
     };
 
-    // 1. Verify Performer stamp shapes evaluate cleanly across step bounds
+    // 1. Verify all 18 MODSEQ palette curves (single-cycle + 2x/3x subdivisions) evaluate cleanly
+    assert_eq!(ModSeqStepShape::PALETTE.len(), 18);
+    for &shape in &ModSeqStepShape::PALETTE {
+        let step = ModSeqStep::stamped(shape, 0.8, 0.0);
+        for k in 0..=20 {
+            let t = k as f32 / 20.0;
+            let v = evaluate_step_shape(step, t);
+            assert!(v.is_finite() && (0.0..=1.0).contains(&v));
+        }
+    }
+    let ramp2x = ModSeqStep::stamped(ModSeqStepShape::RampDown2x, 0.8, 0.0);
+    assert!(evaluate_step_shape(ramp2x, 0.1) > evaluate_step_shape(ramp2x, 0.4));
+    assert!(evaluate_step_shape(ramp2x, 0.6) > evaluate_step_shape(ramp2x, 0.9));
+    let sqr2x = ModSeqStep::stamped(ModSeqStepShape::Square2x, 0.8, 0.0);
+    assert!((evaluate_step_shape(sqr2x, 0.1) - 0.8).abs() < 1e-4);
+    assert!(evaluate_step_shape(sqr2x, 0.35).abs() < 1e-4);
+    assert!((evaluate_step_shape(sqr2x, 0.6) - 0.8).abs() < 1e-4);
+    assert!(evaluate_step_shape(sqr2x, 0.85).abs() < 1e-4);
+    let tri3x = ModSeqStep::stamped(ModSeqStepShape::TriSine3x, 0.8, 0.0);
+    assert!(evaluate_step_shape(tri3x, 1.0 / 6.0) > 0.75);
+    assert!(evaluate_step_shape(tri3x, 3.0 / 6.0) > 0.75);
+    assert!(evaluate_step_shape(tri3x, 5.0 / 6.0) > 0.75);
+
     let mut steps = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
-    for (idx, &shape) in ModSeqStepShape::STAMPS.iter().enumerate() {
+    for (idx, &shape) in ModSeqStepShape::PALETTE
+        .iter()
+        .take(MAX_MODSEQ_STEPS)
+        .enumerate()
+    {
         steps[idx] = ModSeqStep::stamped(shape, 0.8, 0.0);
     }
-    // Step 0 = Sine (0 at start, ~0.8 at midpoint), Step 4 = Pulse (0.8 first half, 0.0 second half)
-    assert!(evaluate_modseq_curve(&steps, 8, 0.01) < 0.05);
-    assert!((evaluate_modseq_curve(&steps, 8, 0.5 / 8.0) - 0.8).abs() < 1e-3);
-    assert!((evaluate_modseq_curve(&steps, 8, 4.25 / 8.0) - 0.8).abs() < 1e-4);
-    assert!(evaluate_modseq_curve(&steps, 8, 4.75 / 8.0).abs() < 1e-4);
+    // Step 0 = Flat (0.8), Step 7 = SineArchUp (~0 at start, ~0.8 at mid), Step 10 = Pulse (0.8 first half, 0.0 second half)
+    assert!((evaluate_modseq_curve(&steps, 16, 0.5 / 16.0) - 0.8).abs() < 1e-4);
+    assert!(evaluate_modseq_curve(&steps, 16, 7.01 / 16.0) < 0.06);
+    assert!((evaluate_modseq_curve(&steps, 16, 7.5 / 16.0) - 0.8).abs() < 1e-3);
+    assert!((evaluate_modseq_curve(&steps, 16, 10.25 / 16.0) - 0.8).abs() < 1e-4);
+    assert!(evaluate_modseq_curve(&steps, 16, 10.75 / 16.0).abs() < 1e-4);
 
-    // 2. Verify MSEG multi-node curve & zero-allocation audio-thread evaluation
+    // 2. Verify all 8 LFO presets & multi-node MSEG curve + zero-allocation audio-thread evaluation
+    assert_eq!(LfoPreset::ALL.len(), 8);
+    for &preset in &LfoPreset::ALL {
+        let curve = preset.to_mseg();
+        for k in 0..=20 {
+            let v = evaluate_mseg_curve(&curve, k as f32 / 20.0);
+            assert!(v.is_finite() && (0.0..=1.0).contains(&v));
+        }
+    }
+
     let mut mseg = MsegCurve {
         nodes: [MsegNode::default(); MAX_MSEG_NODES],
         num_nodes: 3,

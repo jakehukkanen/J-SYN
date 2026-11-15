@@ -1,7 +1,7 @@
 //! Drag-and-drop Modulation Source Pill bar, live telemetry 60 Hz redraw ticker,
 //! and inline modulation slot inspector (`UNI/BIP`, depth readout, slot cycle, remove).
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -40,11 +40,14 @@ pub(crate) struct ModUiState {
     inspected_dest: AtomicU8,
     inspected_slot: AtomicU8,
     active_stamp: AtomicU8,
+    mseg_snap: AtomicBool,
+    last_enabled_mask: AtomicU16,
     drop_rects: Mutex<[(f32, f32, f32, f32, u8); NUM_MOD_DESTS]>,
 }
 
 impl ModUiState {
     pub fn new(params: Arc<JSynPluginParams>, telemetry: Arc<ModUiTelemetry>) -> Self {
+        let initial_mask = Self::compute_enabled_mask(&params);
         Self {
             params,
             telemetry,
@@ -53,7 +56,9 @@ impl ModUiState {
             active_bottom_tab: AtomicU8::new(bottom_tab_tag(BottomTab::VoiceEnv)),
             inspected_dest: AtomicU8::new(UNSET_U8),
             inspected_slot: AtomicU8::new(UNSET_U8),
-            active_stamp: AtomicU8::new(ModSeqStepShape::Sine as u8),
+            active_stamp: AtomicU8::new(ModSeqStepShape::RampDown as u8),
+            mseg_snap: AtomicBool::new(false),
+            last_enabled_mask: AtomicU16::new(initial_mask),
             drop_rects: Mutex::new([(0.0, 0.0, 0.0, 0.0, UNSET_U8); NUM_MOD_DESTS]),
         }
     }
@@ -61,6 +66,50 @@ impl ModUiState {
     #[inline]
     pub fn active_stamp(&self) -> ModSeqStepShape {
         ModSeqStepShape::from_u8(self.active_stamp.load(Ordering::Relaxed))
+    }
+
+    /// Packs module enable states (OSC1..4, Noise, F1..2, INS1..2) into a bitmask so host
+    /// automation changes trigger panel dim/undim updates even without mouse clicks.
+    pub fn compute_enabled_mask(params: &JSynPluginParams) -> u16 {
+        let mut mask = 0u16;
+        for (i, osc) in params.oscs.iter().enumerate() {
+            if osc.enabled.value() {
+                mask |= 1 << i;
+            }
+        }
+        if params.noise.enabled.value() {
+            mask |= 1 << 4;
+        }
+        if params.filters[0].enabled.value() {
+            mask |= 1 << 5;
+        }
+        if params.filters[1].enabled.value() {
+            mask |= 1 << 6;
+        }
+        if params.routing.inserts[0].mode.value() != crate::InsertModeParam::Off {
+            mask |= 1 << 7;
+        }
+        if params.routing.inserts[1].mode.value() != crate::InsertModeParam::Off {
+            mask |= 1 << 8;
+        }
+        mask
+    }
+
+    pub fn poll_enabled_mask_changed(&self) -> bool {
+        let next = Self::compute_enabled_mask(&self.params);
+        let prev = self.last_enabled_mask.swap(next, Ordering::Relaxed);
+        prev != next
+    }
+
+    #[inline]
+    pub fn mseg_snap(&self) -> bool {
+        self.mseg_snap.load(Ordering::Relaxed)
+    }
+
+    pub fn toggle_mseg_snap(&self) -> bool {
+        let next = !self.mseg_snap.load(Ordering::Relaxed);
+        self.mseg_snap.store(next, Ordering::Relaxed);
+        next
     }
 
     pub fn set_active_stamp(&self, shape: ModSeqStepShape) {
@@ -586,8 +635,12 @@ impl View for ModSourcePill {
 /// Builds the 12 modulation source pills + inline slot inspector inside the bottom `.tab-bar`
 /// and starts a 60 Hz redraw timer (`16 ms`) for live mod-ring and playhead animations.
 pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
-    let timer = cx.add_timer(Duration::from_millis(16), None, |cx, action| {
+    let timer_ui = mod_ui.clone();
+    let timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
         if matches!(action, TimerAction::Tick(_)) {
+            if timer_ui.poll_enabled_mask_changed() {
+                cx.emit(UiEvent::ModUiChanged);
+            }
             cx.needs_redraw();
         }
     });

@@ -852,9 +852,9 @@ impl From<ModSeqPlayParam> for ModSeqPlayMode {
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModSeqModeParam {
-    #[name = "Performer"]
+    #[name = "MODSEQ"]
     Performer,
-    #[name = "MSEG"]
+    #[name = "LFO"]
     Mseg,
 }
 
