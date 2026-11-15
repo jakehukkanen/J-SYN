@@ -184,7 +184,7 @@ dropdown {
 }
 
 dropdown:focus,
-dropdown:focus-within,
+dropdown:focus-visible,
 dropdown:active {
   border-color: #6b5d52;
   outline-width: 0px;

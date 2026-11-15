@@ -1586,4 +1586,13 @@ mod tests {
             start_idle.elapsed()
         );
     }
+
+    #[test]
+    fn theme_css_parses_cleanly() {
+        let css = include_str!("theme.css");
+        assert!(
+            !css.contains(":focus-within"),
+            "Vizia's CSS parser does not support :focus-within"
+        );
+    }
 }
