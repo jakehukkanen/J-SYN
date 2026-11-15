@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde::{Deserialize, Serialize};
 
 pub const NUM_MOD_SLOTS: usize = 32;
-pub const NUM_ACTIVE_SOURCES: usize = 12;
+pub const NUM_ACTIVE_SOURCES: usize = 20;
 pub const NUM_MOD_DESTS: usize = 95;
 
 /// Modulation sources assignable in any matrix slot.
@@ -26,6 +26,14 @@ pub enum ModMatrixSource {
     Keytrack = 10,
     ModWheel = 11,
     Aftertouch = 12,
+    Macro1 = 13,
+    Macro2 = 14,
+    Macro3 = 15,
+    Macro4 = 16,
+    Macro5 = 17,
+    Macro6 = 18,
+    Macro7 = 19,
+    Macro8 = 20,
 }
 
 impl ModMatrixSource {
@@ -42,6 +50,25 @@ impl ModMatrixSource {
         Self::Keytrack,
         Self::ModWheel,
         Self::Aftertouch,
+        Self::Macro1,
+        Self::Macro2,
+        Self::Macro3,
+        Self::Macro4,
+        Self::Macro5,
+        Self::Macro6,
+        Self::Macro7,
+        Self::Macro8,
+    ];
+
+    pub const MACROS: [ModMatrixSource; 8] = [
+        Self::Macro1,
+        Self::Macro2,
+        Self::Macro3,
+        Self::Macro4,
+        Self::Macro5,
+        Self::Macro6,
+        Self::Macro7,
+        Self::Macro8,
     ];
 
     #[inline]
@@ -59,6 +86,14 @@ impl ModMatrixSource {
             10 => Self::Keytrack,
             11 => Self::ModWheel,
             12 => Self::Aftertouch,
+            13 => Self::Macro1,
+            14 => Self::Macro2,
+            15 => Self::Macro3,
+            16 => Self::Macro4,
+            17 => Self::Macro5,
+            18 => Self::Macro6,
+            19 => Self::Macro7,
+            20 => Self::Macro8,
             _ => Self::None,
         }
     }
@@ -89,6 +124,14 @@ impl ModMatrixSource {
             Self::Keytrack => "KEY",
             Self::ModWheel => "MW",
             Self::Aftertouch => "AT",
+            Self::Macro1 => "M1",
+            Self::Macro2 => "M2",
+            Self::Macro3 => "M3",
+            Self::Macro4 => "M4",
+            Self::Macro5 => "M5",
+            Self::Macro6 => "M6",
+            Self::Macro7 => "M7",
+            Self::Macro8 => "M8",
         }
     }
 
@@ -108,6 +151,14 @@ impl ModMatrixSource {
             Self::Keytrack => "KEYTRACK",
             Self::ModWheel => "MOD WHEEL",
             Self::Aftertouch => "AFTERTOUCH",
+            Self::Macro1 => "MACRO 1",
+            Self::Macro2 => "MACRO 2",
+            Self::Macro3 => "MACRO 3",
+            Self::Macro4 => "MACRO 4",
+            Self::Macro5 => "MACRO 5",
+            Self::Macro6 => "MACRO 6",
+            Self::Macro7 => "MACRO 7",
+            Self::Macro8 => "MACRO 8",
         }
     }
 
@@ -130,6 +181,15 @@ impl ModMatrixSource {
             Self::Keytrack => (255, 112, 96),
             Self::ModWheel => (255, 92, 130),
             Self::Aftertouch => (255, 126, 82),
+            // Macros: Warm Amber/Violet high-contrast family
+            Self::Macro1 => (255, 200, 72),
+            Self::Macro2 => (255, 178, 60),
+            Self::Macro3 => (245, 152, 66),
+            Self::Macro4 => (255, 214, 102),
+            Self::Macro5 => (222, 148, 255),
+            Self::Macro6 => (196, 136, 255),
+            Self::Macro7 => (240, 128, 224),
+            Self::Macro8 => (176, 158, 255),
         }
     }
 }

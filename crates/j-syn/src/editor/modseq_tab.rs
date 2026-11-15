@@ -22,8 +22,7 @@ use super::controls::{
 use super::mod_bar::{bottom_tab_tag, ModUiState};
 use super::{BottomTab, UiData, UiEvent, CORAL_RGB, GOLD_RGB};
 use crate::{
-    JSynPluginParams, ModSeqModeParam, ModSeqPlayParam, ModSeqRateParam, ModSeqRetrigParam,
-    ModSeqSyncParam,
+    JSynPluginParams, ModSeqModeParam, ModSeqPlayParam, ModSeqRetrigParam, ModSeqSyncParam,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,19 +43,10 @@ const MODE_ITEMS: &[(&str, ModSeqModeParam)] = &[
 ];
 
 const SYNC_ITEMS: &[(&str, ModSeqSyncParam)] = &[
-    ("Sync", ModSeqSyncParam::TempoSync),
-    ("Hz", ModSeqSyncParam::FreeHz),
-];
-
-const RATE_ITEMS: &[(&str, ModSeqRateParam)] = &[
-    ("1/32", ModSeqRateParam::Div1_32),
-    ("1/16", ModSeqRateParam::Div1_16),
-    ("1/8", ModSeqRateParam::Div1_8),
-    ("1/4", ModSeqRateParam::Div1_4),
-    ("1/2", ModSeqRateParam::Div1_2),
-    ("1 Bar", ModSeqRateParam::Bars1),
-    ("2 Bars", ModSeqRateParam::Bars2),
-    ("4 Bars", ModSeqRateParam::Bars4),
+    ("Free", ModSeqSyncParam::Free),
+    ("Straight", ModSeqSyncParam::Straight),
+    ("Triplet", ModSeqSyncParam::Triplet),
+    ("Dotted", ModSeqSyncParam::Dotted),
 ];
 
 const PLAY_ITEMS: &[(&str, ModSeqPlayParam)] = &[
@@ -1519,24 +1509,14 @@ pub(super) fn build_modseq_tab(
                                     }
                                 })
                                 .row_between(Pixels(2.0))
-                                .width(Pixels(66.0))
+                                .width(Pixels(72.0))
                                 .height(Auto)
                                 .top(Stretch(1.0))
                                 .bottom(Stretch(1.0));
 
                                 VStack::new(cx, {
-                                    let p = p_ctrl.clone();
-                                    let g = g_ctrl.clone();
                                     let u = u_ctrl.clone();
                                     move |cx| {
-                                        build_labeled_dropdown(
-                                            cx,
-                                            "RATE",
-                                            p.clone(),
-                                            g.clone(),
-                                            move |pr| &pr.modseqs[seq_idx].sync_rate,
-                                            RATE_ITEMS,
-                                        );
                                         HStack::new(
                                             cx,
                                             ParamWidgetBase::build_view(
@@ -1603,7 +1583,6 @@ pub(super) fn build_modseq_tab(
                                         .height(Pixels(28.0));
                                     }
                                 })
-                                .row_between(Pixels(2.0))
                                 .width(Pixels(66.0))
                                 .height(Auto)
                                 .top(Stretch(1.0))
@@ -1613,26 +1592,27 @@ pub(super) fn build_modseq_tab(
                                 build_knob_cell_mod_fmt(
                                     cx,
                                     UiData::params,
-                                    move |pr| &pr.modseqs[seq_idx].free_hz,
-                                    "FREQ",
+                                    move |pr| &pr.modseqs[seq_idx].rate,
+                                    "RATE",
                                     false,
                                     accent,
-                                    30.0,
-                                    48.0,
+                                    32.0,
+                                    52.0,
                                     ModDestination::modseq_rate(seq_idx),
                                     u_ctrl,
                                     bottom_tab_tag(BottomTab::ModSeq),
-                                    Arc::new(move |norm, opt_mod_offset| {
-                                        if p_fmt.modseqs[seq_idx].sync_mode.value()
-                                            == ModSeqSyncParam::TempoSync
-                                        {
-                                            if let Some(off) = opt_mod_offset {
-                                                return format!("{:.2}x", 2.0_f32.powf(off * 2.0));
-                                            }
+                                    Arc::new(move |norm, _opt_mod_offset| {
+                                        let mode: j_syn_dsp::ModSeqSyncMode =
+                                            p_fmt.modseqs[seq_idx].sync_mode.value().into();
+                                        if mode == j_syn_dsp::ModSeqSyncMode::Free {
+                                            format!(
+                                                "{:.2} Hz",
+                                                j_syn_dsp::modseq_free_norm_to_hz(norm)
+                                            )
+                                        } else {
+                                            j_syn_dsp::modseq_division_label(mode, norm)
+                                                .to_string()
                                         }
-                                        p_fmt.modseqs[seq_idx]
-                                            .free_hz
-                                            .normalized_value_to_string(norm, true)
                                     }),
                                 );
 
@@ -1643,15 +1623,15 @@ pub(super) fn build_modseq_tab(
                                     "SMOOTH",
                                     false,
                                     CORAL_RGB,
-                                    30.0,
-                                    48.0,
+                                    32.0,
+                                    50.0,
                                 );
                             }
                         })
                         .col_between(Pixels(4.0))
                         .child_top(Stretch(1.0))
                         .child_bottom(Stretch(1.0))
-                        .width(Pixels(326.0))
+                        .width(Pixels(334.0))
                         .height(Stretch(1.0));
                     })
                     .col_between(Pixels(6.0))

@@ -492,57 +492,90 @@ impl ModSeqShapePreset {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModSeqSyncMode {
-    TempoSync = 0,
-    FreeHz = 1,
+    Free = 0,
+    Straight = 1,
+    Triplet = 2,
+    Dotted = 3,
 }
 
 impl ModSeqSyncMode {
     pub fn from_index(idx: usize) -> Self {
         match idx {
-            1 => Self::FreeHz,
-            _ => Self::TempoSync,
+            0 => Self::Free,
+            2 => Self::Triplet,
+            3 => Self::Dotted,
+            _ => Self::Straight,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModSeqRate {
-    Div1_32 = 0,
-    Div1_16 = 1,
-    Div1_8 = 2,
-    Div1_4 = 3,
-    Div1_2 = 4,
-    Bars1 = 5,
-    Bars2 = 6,
-    Bars4 = 7,
+pub const MODSEQ_STRAIGHT_DIVS: [(&str, f32); 10] = [
+    ("8 Bars", 1.0 / 32.0),
+    ("4 Bars", 1.0 / 16.0),
+    ("2 Bars", 1.0 / 8.0),
+    ("1 Bar", 1.0 / 4.0),
+    ("1/2", 0.5),
+    ("1/4", 1.0),
+    ("1/8", 2.0),
+    ("1/16", 4.0),
+    ("1/32", 8.0),
+    ("1/64", 16.0),
+];
+
+pub const MODSEQ_TRIPLET_DIVS: [(&str, f32); 5] = [
+    ("1/2T", 0.75),
+    ("1/4T", 1.5),
+    ("1/8T", 3.0),
+    ("1/16T", 6.0),
+    ("1/32T", 12.0),
+];
+
+pub const MODSEQ_DOTTED_DIVS: [(&str, f32); 5] = [
+    ("1/2D", 1.0 / 3.0),
+    ("1/4D", 2.0 / 3.0),
+    ("1/8D", 4.0 / 3.0),
+    ("1/16D", 8.0 / 3.0),
+    ("1/32D", 16.0 / 3.0),
+];
+
+#[inline]
+fn sync_divs(sync_mode: ModSeqSyncMode) -> &'static [(&'static str, f32)] {
+    match sync_mode {
+        ModSeqSyncMode::Free => &[],
+        ModSeqSyncMode::Straight => &MODSEQ_STRAIGHT_DIVS,
+        ModSeqSyncMode::Triplet => &MODSEQ_TRIPLET_DIVS,
+        ModSeqSyncMode::Dotted => &MODSEQ_DOTTED_DIVS,
+    }
 }
 
-impl ModSeqRate {
-    pub fn from_index(idx: usize) -> Self {
-        match idx {
-            0 => Self::Div1_32,
-            1 => Self::Div1_16,
-            2 => Self::Div1_8,
-            3 => Self::Div1_4,
-            4 => Self::Div1_2,
-            5 => Self::Bars1,
-            6 => Self::Bars2,
-            _ => Self::Bars4,
-        }
-    }
+/// Maps normalized `0.0..=1.0` rate knob position to continuous `0.05..=50.0 Hz` in `Free` mode.
+#[inline]
+pub fn modseq_free_norm_to_hz(norm: f32) -> f32 {
+    (0.05 * 1000.0_f32.powf(norm.clamp(0.0, 1.0))).clamp(0.05, 50.0)
+}
 
-    #[inline]
-    pub fn cycles_per_beat(self) -> f32 {
-        match self {
-            Self::Div1_32 => 8.0,
-            Self::Div1_16 => 4.0,
-            Self::Div1_8 => 2.0,
-            Self::Div1_4 => 1.0,
-            Self::Div1_2 => 0.5,
-            Self::Bars1 => 0.25,
-            Self::Bars2 => 0.125,
-            Self::Bars4 => 0.0625,
-        }
+/// Maps normalized `0.0..=1.0` rate knob position to the snapped division label for sync modes.
+#[inline]
+pub fn modseq_division_label(sync_mode: ModSeqSyncMode, rate_norm: f32) -> &'static str {
+    let divs = sync_divs(sync_mode);
+    if divs.is_empty() {
+        return "Free";
+    }
+    let idx = ((rate_norm.clamp(0.0, 1.0) * (divs.len() as f32 - 0.001)).floor() as usize)
+        .min(divs.len() - 1);
+    divs[idx].0
+}
+
+/// Computes effective modulator frequency in Hz for any `ModSeqSyncMode` and normalized rate.
+#[inline]
+pub fn modseq_rate_hz(sync_mode: ModSeqSyncMode, rate_norm: f32, tempo_bpm: f32) -> f32 {
+    let divs = sync_divs(sync_mode);
+    if divs.is_empty() {
+        modseq_free_norm_to_hz(rate_norm)
+    } else {
+        let idx = ((rate_norm.clamp(0.0, 1.0) * (divs.len() as f32 - 0.001)).floor() as usize)
+            .min(divs.len() - 1);
+        (tempo_bpm.clamp(20.0, 300.0) / 60.0) * divs[idx].1
     }
 }
 
@@ -582,8 +615,9 @@ impl ModSeqRetrig {
 pub struct ModSeqParams {
     pub mode: ModSeqMode,
     pub sync_mode: ModSeqSyncMode,
-    pub sync_rate: ModSeqRate,
-    pub free_hz: f32,
+    /// Unified normalized `0.0..=1.0` rate knob position (continuous `0.05..=50.0 Hz` in `Free`,
+    /// snapped across musical divisions in `Straight` / `Triplet` / `Dotted`).
+    pub rate_norm: f32,
     pub play_mode: ModSeqPlayMode,
     pub retrig: ModSeqRetrig,
     pub num_steps: usize,
@@ -595,9 +629,8 @@ impl Default for ModSeqParams {
     fn default() -> Self {
         Self {
             mode: ModSeqMode::Performer,
-            sync_mode: ModSeqSyncMode::TempoSync,
-            sync_rate: ModSeqRate::Bars1,
-            free_hz: 1.5,
+            sync_mode: ModSeqSyncMode::Straight,
+            rate_norm: 0.35, // 1 Bar in Straight mode
             play_mode: ModSeqPlayMode::Loop,
             retrig: ModSeqRetrig::PolyVoice,
             num_steps: 8,
@@ -767,19 +800,8 @@ impl ModSeqState {
         steps: &[ModSeqStep; MAX_MODSEQ_STEPS],
         mseg: &MsegCurve,
     ) -> f32 {
-        let freq_hz = match params.sync_mode {
-            ModSeqSyncMode::TempoSync => {
-                let base =
-                    (tempo_bpm.clamp(20.0, 300.0) / 60.0) * params.sync_rate.cycles_per_beat();
-                let mult = 2.0_f32.powf(params.rate_mod * 2.0);
-                (base * mult).clamp(0.01, 100.0)
-            }
-            ModSeqSyncMode::FreeHz => {
-                let base = params.free_hz.clamp(0.05, 30.0);
-                let mult = 2.0_f32.powf(params.rate_mod * 4.0);
-                (base * mult).clamp(0.02, 100.0)
-            }
-        };
+        let eff_norm = (params.rate_norm + params.rate_mod).clamp(0.0, 1.0);
+        let freq_hz = modseq_rate_hz(params.sync_mode, eff_norm, tempo_bpm).clamp(0.01, 100.0);
         let d_phase = freq_hz * dt_seconds.max(0.0);
 
         match params.play_mode {

@@ -1138,8 +1138,8 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
     let mut seq_params = SynthParams::default();
     ModSeqShapePreset::RampUp.apply_to_sequence(&mut seq_params.modseq_steps.seqs[0], 8);
     seq_params.modseq_steps.seqs[0][0].tension = 0.5;
-    seq_params.modseqs[0].sync_mode = ModSeqSyncMode::FreeHz;
-    seq_params.modseqs[0].free_hz = 10.0;
+    seq_params.modseqs[0].sync_mode = ModSeqSyncMode::Free;
+    seq_params.modseqs[0].rate_norm = 0.767; // ~10.0 Hz
     seq_params.modseqs[0].play_mode = ModSeqPlayMode::OneShot;
     seq_params.modseqs[0].retrig = ModSeqRetrig::MonoGlobal;
     seq_params.modseqs[0].smooth = 0.0;
@@ -1269,8 +1269,8 @@ fn test_modseq_stamps_and_mseg_curve() {
     let bank = WavetableBank::new();
     let mut params = SynthParams::default();
     params.modseqs[0].mode = ModSeqMode::Mseg;
-    params.modseqs[0].sync_mode = ModSeqSyncMode::FreeHz;
-    params.modseqs[0].free_hz = 4.0;
+    params.modseqs[0].sync_mode = ModSeqSyncMode::Free;
+    params.modseqs[0].rate_norm = 0.634; // ~4.0 Hz
     params.modseqs[0].smooth = 0.0;
     params.modseq_steps.msegs[0] = mseg;
     params.mod_matrix.slots[0] = ModSlot {
@@ -1444,8 +1444,8 @@ fn osc_pitch_range_minus_48_to_plus_48_and_auto_sleep() {
 #[test]
 fn mod_matrix_modseq_rate_modulation_free_and_sync() {
     use j_syn_dsp::{
-        ModDestination, ModMatrixSource, ModSeqPlayMode, ModSeqRate, ModSeqRetrig, ModSeqSyncMode,
-        ModSlot,
+        modseq_division_label, modseq_rate_hz, ModDestination, ModMatrixSource, ModSeqPlayMode,
+        ModSeqRetrig, ModSeqSyncMode, ModSlot,
     };
 
     let bank = WavetableBank::new();
@@ -1454,17 +1454,21 @@ fn mod_matrix_modseq_rate_modulation_free_and_sync() {
     assert_eq!(ModDestination::modseq_rate(0), ModDestination::ModSeq1Rate);
     assert_eq!(ModDestination::modseq_rate(3), ModDestination::ModSeq4Rate);
     assert_eq!(ModDestination::ModSeq1Rate.name(), "MS1 RATE");
+    assert_eq!(modseq_division_label(ModSeqSyncMode::Straight, 0.35), "1 Bar");
+    assert_eq!(modseq_division_label(ModSeqSyncMode::Straight, 0.56), "1/4");
+    assert_eq!(modseq_division_label(ModSeqSyncMode::Triplet, 0.5), "1/8T");
+    assert_eq!(modseq_division_label(ModSeqSyncMode::Dotted, 0.5), "1/8D");
 
-    // 1. FreeHz mode (PolyVoice): +0.5 depth * +1.0 ModWheel -> 2^(0.5 * 4) = 4x rate
+    // 1. Free mode (PolyVoice): modulating rate_norm +0.25 increases exponential Hz cleanly
     let mut free_params = SynthParams::default();
-    free_params.modseqs[0].sync_mode = ModSeqSyncMode::FreeHz;
-    free_params.modseqs[0].free_hz = 2.0;
+    free_params.modseqs[0].sync_mode = ModSeqSyncMode::Free;
+    free_params.modseqs[0].rate_norm = 0.45;
     free_params.modseqs[0].play_mode = ModSeqPlayMode::Loop;
     free_params.modseqs[0].retrig = ModSeqRetrig::PolyVoice;
     free_params.mod_matrix.slots[0] = ModSlot {
         source: ModMatrixSource::ModWheel,
         destination: ModDestination::ModSeq1Rate,
-        depth: 0.5,
+        depth: 0.25,
         bipolar: false,
         enabled: true,
     };
@@ -1480,28 +1484,26 @@ fn mod_matrix_modseq_rate_modulation_free_and_sync() {
         eng.telemetry().modseq_phase(0)
     };
 
+    let base_hz = modseq_rate_hz(ModSeqSyncMode::Free, 0.45, 120.0);
+    let mod_hz = modseq_rate_hz(ModSeqSyncMode::Free, 0.70, 120.0);
     let free_base = run_phase(&free_params, 0.0, 2400);
     let free_fast = run_phase(&free_params, 1.0, 2400);
     assert!(
-        (0.08..0.12).contains(&free_base),
-        "Expected FreeHz baseline phase ~0.10, got {free_base}"
-    );
-    assert!(
-        (0.36..0.44).contains(&free_fast) && free_fast > free_base * 3.5,
-        "Expected FreeHz modulated phase ~0.40 (4x base), got fast={free_fast}, base={free_base}"
+        mod_hz > base_hz * 5.0 && free_fast > free_base * 4.5,
+        "Expected Free rate_norm modulation speedup: base={free_base}, fast={free_fast}"
     );
 
-    // 2. TempoSync mode (PolyVoice): 120 BPM Bars1 = 0.5 Hz, +0.5 depth -> 2^(0.5 * 2) = 2x rate
+    // 2. Straight sync mode (PolyVoice): modulating rate_norm steps to a faster rhythmic division
     let mut sync_poly = SynthParams::default();
     sync_poly.tempo_bpm = 120.0;
-    sync_poly.modseqs[0].sync_mode = ModSeqSyncMode::TempoSync;
-    sync_poly.modseqs[0].sync_rate = ModSeqRate::Bars1;
+    sync_poly.modseqs[0].sync_mode = ModSeqSyncMode::Straight;
+    sync_poly.modseqs[0].rate_norm = 0.15; // 2 Bars
     sync_poly.modseqs[0].play_mode = ModSeqPlayMode::Loop;
     sync_poly.modseqs[0].retrig = ModSeqRetrig::PolyVoice;
     sync_poly.mod_matrix.slots[0] = ModSlot {
         source: ModMatrixSource::ModWheel,
         destination: ModDestination::ModSeq1Rate,
-        depth: 0.5,
+        depth: 0.20, // -> 0.35 (1/4)
         bipolar: false,
         enabled: true,
     };
@@ -1509,18 +1511,18 @@ fn mod_matrix_modseq_rate_modulation_free_and_sync() {
     let sync_poly_base = run_phase(&sync_poly, 0.0, 4800);
     let sync_poly_fast = run_phase(&sync_poly, 1.0, 4800);
     assert!(
-        sync_poly_fast > sync_poly_base * 1.85 && sync_poly_fast < sync_poly_base * 2.15,
-        "Expected TempoSync PolyVoice ~2x speedup: base={sync_poly_base}, fast={sync_poly_fast}"
+        sync_poly_fast > sync_poly_base * 3.9,
+        "Expected Straight sync PolyVoice speedup: base={sync_poly_base}, fast={sync_poly_fast}"
     );
 
-    // 3. TempoSync mode (MonoGlobal): global ModWheel drives global_modseqs[0]
+    // 3. Straight sync mode (MonoGlobal): global ModWheel drives global_modseqs[0]
     let mut sync_mono = sync_poly;
     sync_mono.modseqs[0].retrig = ModSeqRetrig::MonoGlobal;
     let sync_mono_base = run_phase(&sync_mono, 0.0, 4800);
     let sync_mono_fast = run_phase(&sync_mono, 1.0, 4800);
     assert!(
-        sync_mono_fast > sync_mono_base * 1.85 && sync_mono_fast < sync_mono_base * 2.15,
-        "Expected TempoSync MonoGlobal ~2x speedup: base={sync_mono_base}, fast={sync_mono_fast}"
+        sync_mono_fast > sync_mono_base * 3.9,
+        "Expected Straight sync MonoGlobal speedup: base={sync_mono_base}, fast={sync_mono_fast}"
     );
 }
 
@@ -1618,5 +1620,124 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
     assert!(
         (stack4_pk - stack1_pk).abs() > 1e-4,
         "Series STACK 4 should alter FX output compared to STACK 1 ({stack1_pk} vs {stack4_pk})"
+    );
+}
+
+#[test]
+fn filter_notch_peak_and_normalized_cutoff_modulation() {
+    use j_syn_dsp::filter::{
+        cutoff_hz_to_norm, cutoff_norm_to_hz, evaluate_filter_response_db, FilterMode,
+        FilterParams,
+    };
+
+    // Normalized cutoff curve round-trip check
+    for &hz in &[20.0_f32, 120.0, 1000.0, 5000.0, 20_000.0] {
+        let norm = cutoff_hz_to_norm(hz);
+        let back = cutoff_norm_to_hz(norm);
+        assert!(
+            (back - hz).abs() < hz * 1e-4 + 1e-3,
+            "Cutoff norm round-trip mismatch for {hz}: norm={norm}, back={back}"
+        );
+    }
+
+    // Notch cuts at cutoff, Peak boosts at cutoff
+    let notch_params = FilterParams {
+        enabled: true,
+        mode: FilterMode::Notch,
+        cutoff_hz: 1000.0,
+        resonance: 0.6,
+        ..FilterParams::default()
+    };
+    let notch_at_fc = evaluate_filter_response_db(&notch_params, 1000.0);
+    let notch_low = evaluate_filter_response_db(&notch_params, 100.0);
+    assert!(notch_at_fc < notch_low - 6.0, "Notch response expected deep dip at fc");
+
+    let peak_params = FilterParams {
+        enabled: true,
+        mode: FilterMode::Peak,
+        cutoff_hz: 1000.0,
+        resonance: 0.6,
+        ..FilterParams::default()
+    };
+    let peak_at_fc = evaluate_filter_response_db(&peak_params, 1000.0);
+    let peak_low = evaluate_filter_response_db(&peak_params, 100.0);
+    assert!(peak_at_fc > peak_low + 3.0, "Peak response expected boost at fc");
+
+    let bank = WavetableBank::new();
+    for mode in [FilterMode::Notch, FilterMode::Peak] {
+        let mut p = SynthParams::default();
+        p.filters[0].enabled = true;
+        p.filters[0].mode = mode;
+        p.filters[0].cutoff_hz = 1200.0;
+        p.filters[0].resonance = 0.55;
+        let mut eng = SynthEngine::new(48_000.0);
+        eng.note_on(0, 60, 1.0, None, &p);
+        for _ in 0..2048 {
+            let (l, r) = eng.process_sample(&p, &bank);
+            assert!(l.is_finite() && r.is_finite());
+        }
+    }
+}
+
+#[test]
+fn fx_filter_all_modes_and_macro_mod_sources() {
+    use j_syn_dsp::{FxSlotParams, FxType, ModDestination, ModMatrixSource, ModSlot};
+
+    let bank = WavetableBank::new();
+    // All 7 FxType::Filter modes process cleanly with finite output
+    for mode_idx in 0..7 {
+        let mut p = SynthParams::default();
+        p.oscs[0].wt_pos = 0.75; // rich harmonics so HP/BP modes are audible
+        p.fx_slots[0] = FxSlotParams {
+            fx_type: FxType::Filter,
+            enabled: true,
+            stack: 1,
+            params: [0.45, 0.4, (mode_idx as f32) / 6.0, 1.0],
+        };
+        let mut eng = SynthEngine::new(48_000.0);
+        eng.note_on(0, 57, 1.0, None, &p);
+        let mut peak = 0.0_f32;
+        for _ in 0..2048 {
+            let (l, r) = eng.process_sample(&p, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            peak = peak.max(l.abs()).max(r.abs());
+        }
+        assert!(peak > 0.005, "FxType::Filter mode {mode_idx} produced silence");
+    }
+
+    // Macro1..Macro8 modulate destinations cleanly
+    assert_eq!(ModMatrixSource::MACROS.len(), 8);
+    assert_eq!(ModMatrixSource::Macro1.short_label(), "M1");
+    assert_eq!(ModMatrixSource::Macro8.short_label(), "M8");
+
+    let mut mp = SynthParams::default();
+    mp.filters[0].enabled = true;
+    mp.filters[0].cutoff_hz = 200.0;
+    mp.macros[0] = 0.0;
+    mp.mod_matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::Macro1,
+        destination: ModDestination::Filter1Cutoff,
+        depth: 0.75,
+        bipolar: false,
+        enabled: true,
+    };
+
+    let run_rms = |params: &SynthParams| -> f32 {
+        let mut eng = SynthEngine::new(48_000.0);
+        eng.note_on(0, 60, 1.0, None, params);
+        let mut sum_sq = 0.0_f32;
+        for _ in 0..2048 {
+            let (l, r) = eng.process_sample(params, &bank);
+            sum_sq += 0.5 * (l * l + r * r);
+        }
+        (sum_sq / 2048.0).sqrt()
+    };
+
+    let rms_low = run_rms(&mp);
+    mp.macros[0] = 1.0;
+    let rms_high = run_rms(&mp);
+    assert!(
+        rms_high > rms_low * 1.15,
+        "Expected Macro1 -> Filter1Cutoff to brighten output: low={rms_low}, high={rms_high}"
     );
 }

@@ -538,6 +538,9 @@ impl SynthEngine {
         }
         idle_sources[10] = self.mod_wheel.clamp(0.0, 1.0);
         idle_sources[11] = self.aftertouch.clamp(0.0, 1.0);
+        for m in 0..8 {
+            idle_sources[12 + m] = params.macros[m].clamp(0.0, 1.0);
+        }
         let mut idle_offsets = [0.0_f32; NUM_MOD_DESTS];
         params
             .mod_matrix
@@ -595,6 +598,9 @@ impl SynthEngine {
             }
             idle_sources[10] = self.mod_wheel.clamp(0.0, 1.0);
             idle_sources[11] = self.aftertouch.clamp(0.0, 1.0);
+            for m in 0..8 {
+                idle_sources[12 + m] = params.macros[m].clamp(0.0, 1.0);
+            }
             let mut idle_offsets = [0.0_f32; NUM_MOD_DESTS];
             params
                 .mod_matrix

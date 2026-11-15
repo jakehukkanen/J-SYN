@@ -1,5 +1,7 @@
 use crate::envelope::{AdsrParams, AmpAdsr};
-use crate::filter::{FilterParams, FilterState, FilterSvfCore};
+use crate::filter::{
+    cutoff_hz_to_norm, cutoff_norm_to_hz, FilterParams, FilterState, FilterSvfCore,
+};
 use crate::insert::{
     FilterRouting, InsertPosition, InsertShaperState, RoutingParams, VoiceFeedbackState,
 };
@@ -38,6 +40,7 @@ pub struct SynthParams {
     pub modseqs: [ModSeqParams; 4],
     pub modseq_steps: ModSeqStepBank,
     pub mod_matrix: ModMatrixState,
+    pub macros: [f32; 8],
     pub fx_slots: [FxSlotParams; NUM_FX_SLOTS],
     pub tempo_bpm: f32,
 }
@@ -67,6 +70,7 @@ impl Default for SynthParams {
             modseqs: [ModSeqParams::default(); 4],
             modseq_steps: ModSeqStepBank::default(),
             mod_matrix: ModMatrixState::default(),
+            macros: [0.0; 8],
             fx_slots: [FxSlotParams::default(); NUM_FX_SLOTS],
             tempo_bpm: 120.0,
         }
@@ -198,7 +202,8 @@ fn apply_filter_modulation(
     let mut out = *flt;
     let d_cut = mod_offsets[ModDestination::filter_cutoff(idx).index()];
     if d_cut.abs() > 1e-6 {
-        out.cutoff_hz = (out.cutoff_hz * 2.0_f32.powf(d_cut * 6.0)).clamp(20.0, 20_000.0);
+        let norm = cutoff_hz_to_norm(out.cutoff_hz);
+        out.cutoff_hz = cutoff_norm_to_hz((norm + d_cut).clamp(0.0, 1.0));
     }
     out.resonance =
         (out.resonance + mod_offsets[ModDestination::filter_res(idx).index()]).clamp(0.0, 1.0);
@@ -636,6 +641,9 @@ impl Voice {
         sources[9] = ((self.current_midi_note - 12.0) / 96.0).clamp(0.0, 1.0);
         sources[10] = mod_wheel.clamp(0.0, 1.0);
         sources[11] = aftertouch.clamp(0.0, 1.0);
+        for m in 0..8 {
+            sources[12 + m] = params.macros[m].clamp(0.0, 1.0);
+        }
 
         self.last_sources = sources;
         params

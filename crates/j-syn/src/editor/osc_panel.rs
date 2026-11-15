@@ -133,7 +133,8 @@ pub(super) fn build_osc_panel(
         VStack::new(cx, move |cx| {
             bold_label(cx, osc_label, "module-title")
                 .width(Stretch(1.0))
-                .height(Pixels(16.0));
+                .height(Pixels(16.0))
+                .child_space(Stretch(1.0));
 
             build_pitch_pill_cell(
                 cx,
@@ -159,20 +160,18 @@ pub(super) fn build_osc_panel(
             .height(Pixels(20.0));
         })
         .width(Pixels(64.0))
-        .height(Stretch(1.0));
+        .height(Stretch(1.0))
+        .row_between(Pixels(4.0));
 
-        // Column 2: Wavetable dropdown + < > step arrows, single-cycle scope, WARP & MOD rows
+        // Column 2: [<] [Wavetable v] [>], single-cycle scope, WARP & MOD rows
         let p_center = params.clone();
         let bank_center = bank.clone();
+        let ui_scope = mod_ui.clone();
         VStack::new(cx, move |cx| {
             let p_wt = p_center.clone();
             let gui_wt = gui_left.clone();
             let bank_wt = bank_center.clone();
             HStack::new(cx, move |cx| {
-                build_wavetable_dropdown(cx, osc_idx, bank_wt, p_wt.clone(), gui_wt.clone())
-                    .width(Stretch(1.0))
-                    .height(Pixels(20.0));
-
                 let p_prev = p_wt.clone();
                 let g_prev = gui_wt.clone();
                 Button::new(
@@ -183,6 +182,10 @@ pub(super) fn build_osc_panel(
                 .class("wt-step-btn")
                 .width(Pixels(18.0))
                 .height(Pixels(20.0));
+
+                build_wavetable_dropdown(cx, osc_idx, bank_wt, p_wt.clone(), gui_wt.clone())
+                    .width(Stretch(1.0))
+                    .height(Pixels(20.0));
 
                 let p_next = p_wt;
                 let g_next = gui_wt;
@@ -199,7 +202,7 @@ pub(super) fn build_osc_panel(
             .width(Stretch(1.0))
             .height(Pixels(20.0));
 
-            WavetableScope::new(cx, osc_idx, bank_center, p_center.clone())
+            WavetableScope::new(cx, osc_idx, bank_center, p_center.clone(), ui_scope)
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
 
@@ -345,7 +348,7 @@ pub(super) fn build_osc_panel(
                         title,
                         false,
                         accent,
-                        46.0,
+                        52.0,
                         dest,
                         ui_right.clone(),
                         0,

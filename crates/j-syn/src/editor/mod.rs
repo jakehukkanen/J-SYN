@@ -31,6 +31,7 @@ mod controls;
 mod filter_panel;
 mod fx_rack;
 mod insert_panel;
+mod macros_tab;
 mod mod_bar;
 mod modseq_tab;
 mod noise_panel;
@@ -42,10 +43,11 @@ mod widgets;
 use controls::{
     bold_label, build_bool_dropdown, build_flex_knob_cell_mod_dim, build_header_knob_cell,
     build_header_knob_cell_mod, build_knob_cell, build_mini_pill_cell, build_module_header,
-    build_placeholder_bay, build_tab_button, build_ui_scale_dropdown,
+    build_tab_button, build_ui_scale_dropdown,
 };
 use filter_panel::build_filter_panel;
 use insert_panel::build_insert_panel;
+use macros_tab::build_macros_tab;
 use mod_bar::{bottom_tab_tag, build_matrix_view, build_mod_source_bar, ModUiState};
 use modseq_tab::{build_modseq_tab, ModSeqSubTab};
 use noise_panel::build_noise_panel;
@@ -109,6 +111,7 @@ pub(crate) enum UiEvent {
     SelectModSeqSubTab(ModSeqSubTab),
     ModUiChanged,
     SetUiScale(u32),
+    SetMacroName(usize, String),
     ShowTooltip(TooltipState),
     HideTooltip,
 }
@@ -122,6 +125,7 @@ pub(crate) struct UiData {
     pub modseq_subtab: ModSeqSubTab,
     pub mod_ui_rev: u64,
     pub ui_scale_pct: u32,
+    pub macro_names: [String; 8],
     pub tooltip: TooltipState,
 }
 
@@ -156,6 +160,20 @@ impl Model for UiData {
             }
             UiEvent::SetUiScale(pct) => {
                 self.ui_scale_pct = *pct;
+                meta.consume();
+            }
+            UiEvent::SetMacroName(idx, name) => {
+                if *idx < 8 {
+                    let trimmed = if name.trim().is_empty() {
+                        format!("MACRO {}", idx + 1)
+                    } else {
+                        name.clone()
+                    };
+                    self.macro_names[*idx] = name.clone();
+                    if let Ok(mut guard) = self.params.macro_names.lock() {
+                        guard[*idx] = trimmed;
+                    }
+                }
                 meta.consume();
             }
             UiEvent::ShowTooltip(state) => {
@@ -605,33 +623,7 @@ fn build_bottom_tabs(
                     build_routing_tab(cx, params.clone(), gui_context.clone(), mod_ui_tabs.clone());
                 }
                 BottomTab::MacrosGlobal => {
-                    VStack::new(cx, |cx| {
-                        build_module_header(
-                            cx,
-                            "MACROS / GLOBAL CONFIG (MILESTONE 3)",
-                            22.0,
-                        );
-
-                        HStack::new(cx, move |cx| {
-                            build_placeholder_bay(
-                                cx,
-                                "MACRO KNOBS 1 - 8",
-                                "ASSIGNABLE PERFORMANCE MACROS (M3)",
-                            );
-                            build_placeholder_bay(
-                                cx,
-                                "GLOBAL CONFIG & PRESET PATHS",
-                                "WAVETABLE LIBRARY / TUNING / QUALITY (M3)",
-                            );
-                        })
-                        .col_between(Pixels(8.0))
-                        .width(Stretch(1.0))
-                        .height(Stretch(1.0));
-                    })
-                    .class("hardware-module")
-                    .class("drawer-module")
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0));
+                    build_macros_tab(cx, mod_ui_tabs.clone());
                 }
             }
         });
@@ -655,6 +647,11 @@ pub(crate) fn create(
 
         let mod_ui = Arc::new(ModUiState::new(params.clone(), telemetry.clone()));
         let initial_scale_pct = (cx.user_scale_factor() * 100.0).round() as u32;
+        let initial_macro_names = params
+            .macro_names
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| std::array::from_fn(|i| format!("MACRO {}", i + 1)));
         UiData {
             params: params.clone(),
             mod_ui: mod_ui.clone(),
@@ -663,6 +660,7 @@ pub(crate) fn create(
             modseq_subtab: ModSeqSubTab::MSeq(0),
             mod_ui_rev: 0,
             ui_scale_pct: initial_scale_pct,
+            macro_names: initial_macro_names,
             tooltip: TooltipState::default(),
         }
         .build(cx);

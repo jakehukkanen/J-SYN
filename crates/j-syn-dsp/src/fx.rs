@@ -18,6 +18,8 @@ const REVERB_COMB_LEN: usize = 4096;
 const REVERB_AP_LEN: usize = 1024;
 const SCOPE_DECIM: usize = 64;
 
+use crate::filter::{cutoff_norm_to_hz, FilterMode, FilterParams, FilterSlope, FilterSvfCore};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FxType {
@@ -28,10 +30,11 @@ pub enum FxType {
     Delay = 4,
     Reverb = 5,
     JSatClipper = 6,
+    Filter = 7,
 }
 
 impl FxType {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Off,
         Self::Ott,
         Self::Distortion,
@@ -39,6 +42,7 @@ impl FxType {
         Self::Delay,
         Self::Reverb,
         Self::JSatClipper,
+        Self::Filter,
     ];
 
     #[inline]
@@ -50,6 +54,7 @@ impl FxType {
             4 => Self::Delay,
             5 => Self::Reverb,
             6 => Self::JSatClipper,
+            7 => Self::Filter,
             _ => Self::Off,
         }
     }
@@ -63,6 +68,7 @@ impl FxType {
             Self::Delay => "Delay",
             Self::Reverb => "Reverb",
             Self::JSatClipper => "J-SAT Clipper",
+            Self::Filter => "Filter",
         }
     }
 
@@ -75,6 +81,7 @@ impl FxType {
             Self::Delay => "DELAY",
             Self::Reverb => "REVERB",
             Self::JSatClipper => "J-SAT",
+            Self::Filter => "FILTER",
         }
     }
 }
@@ -115,6 +122,8 @@ impl FxSlotParams {
             FxType::Reverb => [0.55, 0.60, 0.45, 0.22],
             // J-SAT Clipper: Drive +3.6 dB (0.15), Ceil -0.9 dB (0.95), Knee 40%, Mix 100%
             FxType::JSatClipper => [0.15, 0.95, 0.40, 1.00],
+            // Filter: Cutoff ~2.5 kHz (0.65), Res 25%, Type LP 12 (0.0), Mix 100%
+            FxType::Filter => [0.65, 0.25, 0.00, 1.00],
         }
     }
 
@@ -1005,6 +1014,75 @@ impl JSatClipperStereo {
     }
 }
 
+/// Stereo multimode Filter FX (`LP 12`, `LP 24`, `HP 12`, `HP 24`, `BP`, `Notch`, `Peak`).
+struct FxFilterStereo {
+    core: FilterSvfCore,
+    sample_rate: f32,
+}
+
+impl FxFilterStereo {
+    const TYPE_LABELS: [&'static str; 7] =
+        ["LP 12", "LP 24", "HP 12", "HP 24", "BP", "Notch", "Peak"];
+
+    fn new(sample_rate: f32) -> Self {
+        Self {
+            core: FilterSvfCore::new(2_000.0),
+            sample_rate: sample_rate.max(1_000.0),
+        }
+    }
+
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate.max(1_000.0);
+    }
+
+    fn reset(&mut self) {
+        self.core.reset_states();
+    }
+
+    #[inline]
+    fn type_index(p2: f32) -> usize {
+        ((p2.clamp(0.0, 1.0) * 6.999) as usize).min(6)
+    }
+
+    #[inline]
+    fn filter_params(p: [f32; 4]) -> FilterParams {
+        let (mode, slope) = match Self::type_index(p[2]) {
+            0 => (FilterMode::Lp, FilterSlope::Db12),
+            1 => (FilterMode::Lp, FilterSlope::Db24),
+            2 => (FilterMode::Hp, FilterSlope::Db12),
+            3 => (FilterMode::Hp, FilterSlope::Db24),
+            4 => (FilterMode::Bp, FilterSlope::Db12),
+            5 => (FilterMode::Notch, FilterSlope::Db12),
+            _ => (FilterMode::Peak, FilterSlope::Db12),
+        };
+        FilterParams {
+            enabled: true,
+            mode,
+            slope,
+            cutoff_hz: cutoff_norm_to_hz(p[0]),
+            resonance: p[1].clamp(0.0, 1.0),
+            drive: 0.0,
+            keytrack: 0.0,
+            aux: p[3].clamp(0.0, 1.0),
+        }
+    }
+
+    #[inline]
+    fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+        let fp = Self::filter_params(p);
+        let (ol, or) = self.core.process_core_stereo(
+            in_l,
+            in_r,
+            &fp,
+            60.0,
+            self.sample_rate,
+            crate::oscillator::EngineMode::Hq,
+        );
+        let act = ol.abs().max(or.abs()).clamp(0.0, 1.0) * fp.aux;
+        (flush_denormal(ol), flush_denormal(or), act)
+    }
+}
+
 /// Complete single FX processing stage holding pre-allocated DSP sub-engines.
 struct StereoFxStage {
     ott: OttStereo,
@@ -1013,6 +1091,7 @@ struct StereoFxStage {
     delay: DelayStereo,
     reverb: ReverbStereo,
     clipper: JSatClipperStereo,
+    filter: FxFilterStereo,
 }
 
 impl StereoFxStage {
@@ -1024,6 +1103,7 @@ impl StereoFxStage {
             delay: DelayStereo::new(sample_rate),
             reverb: ReverbStereo::new(sample_rate),
             clipper: JSatClipperStereo::new(),
+            filter: FxFilterStereo::new(sample_rate),
         }
     }
 
@@ -1033,6 +1113,7 @@ impl StereoFxStage {
         self.chorus.set_sample_rate(sample_rate);
         self.delay.set_sample_rate(sample_rate);
         self.reverb.set_sample_rate(sample_rate);
+        self.filter.set_sample_rate(sample_rate);
     }
 
     fn reset(&mut self) {
@@ -1042,6 +1123,7 @@ impl StereoFxStage {
         self.delay.reset();
         self.reverb.reset();
         self.clipper.reset();
+        self.filter.reset();
     }
 
     #[inline]
@@ -1061,6 +1143,7 @@ impl StereoFxStage {
             FxType::Delay => self.delay.process(in_l, in_r, p, tempo_bpm),
             FxType::Reverb => self.reverb.process(in_l, in_r, p),
             FxType::JSatClipper => self.clipper.process(in_l, in_r, p),
+            FxType::Filter => self.filter.process(in_l, in_r, p),
         }
     }
 }
@@ -1118,6 +1201,16 @@ impl FxRackState {
     #[inline]
     pub fn format_delay_sync(p0: f32) -> &'static str {
         DELAY_SYNC_LABELS[DelayStereo::sync_index(p0)]
+    }
+
+    #[inline]
+    pub fn format_filter_type(p2: f32) -> &'static str {
+        FxFilterStereo::TYPE_LABELS[FxFilterStereo::type_index(p2)]
+    }
+
+    #[inline]
+    pub fn filter_params_from_fx(p: [f32; 4]) -> FilterParams {
+        FxFilterStereo::filter_params(p)
     }
 
     #[inline]

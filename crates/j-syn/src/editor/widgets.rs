@@ -298,6 +298,23 @@ impl RotaryKnob {
         emit_widget_tooltip(cx, self.format_tooltip_text());
     }
 
+    fn is_on_mod_collar(&self, cx: &EventContext, x: f32, y: f32) -> bool {
+        let Some(ref mb) = self.mod_binding else {
+            return false;
+        };
+        if mb.mod_ui.primary_slot_for_dest(mb.dest).is_none() {
+            return false;
+        }
+        let bounds = cx.bounds();
+        let dpx = cx.scale_factor();
+        let center_x = bounds.x + bounds.w * 0.5;
+        let center_y = bounds.y + bounds.h * 0.52;
+        let max_r = (bounds.w.min(bounds.h) * 0.5) - 2.0 * dpx;
+        let mod_ring_r = max_r * 0.99;
+        let arc_r = (max_r * 0.81).min(mod_ring_r - 3.6 * dpx);
+        (x - center_x).hypot(y - center_y) > (arc_r + 1.4 * dpx)
+    }
+
     fn reset_to_default(&mut self, cx: &mut EventContext) {
         if self.drag_active || self.mod_depth_drag.is_some() {
             let was_param_drag = self.drag_active;
@@ -339,12 +356,19 @@ impl View for RotaryKnob {
         event.map(|window_event, meta| match window_event {
             WindowEvent::MouseOver => {
                 self.hovered = true;
+                let cursor = if self.is_on_mod_collar(cx, cx.mouse().cursorx, cx.mouse().cursory) {
+                    CursorIcon::NsResize
+                } else {
+                    CursorIcon::Default
+                };
+                cx.emit(WindowEvent::SetCursor(cursor));
                 self.emit_tooltip(cx);
                 cx.needs_redraw();
             }
             WindowEvent::MouseOut => {
                 self.hovered = false;
                 if !self.drag_active && self.mod_depth_drag.is_none() {
+                    cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
                     cx.emit(UiEvent::HideTooltip);
                 }
                 cx.needs_redraw();
@@ -358,15 +382,9 @@ impl View for RotaryKnob {
                 }
                 if let Some(ref mb) = self.mod_binding {
                     if let Some((slot_idx, slot)) = mb.mod_ui.primary_slot_for_dest(mb.dest) {
-                        let bounds = cx.bounds();
-                        let dpx = cx.scale_factor();
-                        let center_x = bounds.x + bounds.w * 0.5;
-                        let center_y = bounds.y + bounds.h * 0.52;
-                        let max_r = (bounds.w.min(bounds.h) * 0.5) - 2.0 * dpx;
-                        let mod_ring_r = max_r * 0.99;
-                        let arc_r = (max_r * 0.81).min(mod_ring_r - 3.6 * dpx);
-                        let dist = (cx.mouse().cursorx - center_x).hypot(cx.mouse().cursory - center_y);
-                        if cx.modifiers().contains(Modifiers::ALT) || dist > (arc_r + 1.4 * dpx) {
+                        if cx.modifiers().contains(Modifiers::ALT)
+                            || self.is_on_mod_collar(cx, cx.mouse().cursorx, cx.mouse().cursory)
+                        {
                             self.mod_depth_drag = Some(ModDepthDrag {
                                 slot_idx,
                                 start_y: cx.mouse().cursory,
@@ -376,6 +394,7 @@ impl View for RotaryKnob {
                             cx.capture();
                             cx.focus();
                             cx.set_active(true);
+                            cx.emit(WindowEvent::SetCursor(CursorIcon::Grabbing));
                             cx.emit(UiEvent::ModUiChanged);
                             self.emit_tooltip(cx);
                             cx.needs_redraw();
@@ -429,8 +448,19 @@ impl View for RotaryKnob {
                     cx.release();
                     cx.set_active(false);
                     if self.hovered {
+                        let cursor = if self.is_on_mod_collar(
+                            cx,
+                            cx.mouse().cursorx,
+                            cx.mouse().cursory,
+                        ) {
+                            CursorIcon::NsResize
+                        } else {
+                            CursorIcon::Default
+                        };
+                        cx.emit(WindowEvent::SetCursor(cursor));
                         self.emit_tooltip(cx);
                     } else {
+                        cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
                         cx.emit(UiEvent::HideTooltip);
                     }
                     cx.needs_redraw();
@@ -450,8 +480,9 @@ impl View for RotaryKnob {
                     meta.consume();
                 }
             }
-            WindowEvent::MouseMove(_x, y) => {
+            WindowEvent::MouseMove(x, y) => {
                 if handle_mod_depth_move(&mut self.mod_depth_drag, &self.mod_binding, cx, *y) {
+                    cx.emit(WindowEvent::SetCursor(CursorIcon::Grabbing));
                     self.emit_tooltip(cx);
                     meta.consume();
                     return;
@@ -478,6 +509,13 @@ impl View for RotaryKnob {
                     self.emit_tooltip(cx);
                     cx.needs_redraw();
                     meta.consume();
+                } else if self.hovered {
+                    let cursor = if self.is_on_mod_collar(cx, *x, *y) {
+                        CursorIcon::NsResize
+                    } else {
+                        CursorIcon::Default
+                    };
+                    cx.emit(WindowEvent::SetCursor(cursor));
                 }
             }
             WindowEvent::MouseScroll(_scroll_x, scroll_y) => {

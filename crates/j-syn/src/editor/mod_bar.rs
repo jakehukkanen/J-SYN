@@ -485,8 +485,8 @@ impl ModUiState {
     }
 }
 
-/// Draggable modulation source pill (`E1..E4`, `MS1..MS4`, `VEL`, `KEY`, `MW`, `AT`).
-struct ModSourcePill {
+/// Draggable modulation source pill (`E1..E4`, `MS1..MS4`, `VEL`, `KEY`, `MW`, `AT`, `M1..M8`).
+pub(crate) struct ModSourcePill {
     source: ModMatrixSource,
     mod_ui: Arc<ModUiState>,
     drag_active: bool,
@@ -497,7 +497,7 @@ struct ModSourcePill {
 }
 
 impl ModSourcePill {
-    fn new<'a>(
+    pub(crate) fn new<'a>(
         cx: &'a mut Context,
         source: ModMatrixSource,
         mod_ui: Arc<ModUiState>,
@@ -674,7 +674,7 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
 
     let ui_for_pills = mod_ui.clone();
     HStack::new(cx, move |cx| {
-        for &src in &ModMatrixSource::ALL_ACTIVE {
+        for &src in &ModMatrixSource::ALL_ACTIVE[..12] {
             ModSourcePill::new(cx, src, ui_for_pills.clone())
                 .width(Pixels(36.0))
                 .height(Pixels(18.0))

@@ -2,12 +2,14 @@
 
 use std::sync::Arc;
 
+use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{EngineMode, ModOrder, WavetableBank};
 use nih_plug::prelude::Param;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::RawParamEvent;
 
+use super::mod_bar::ModUiState;
 use super::UiData;
 use crate::{JSynPluginParams, ModSourceParam, ModTypeParam, OscPluginParams};
 
@@ -17,6 +19,7 @@ pub struct WavetableScope {
     osc_idx: usize,
     bank: Arc<WavetableBank>,
     params: Arc<JSynPluginParams>,
+    mod_ui: Arc<ModUiState>,
 }
 
 #[inline]
@@ -57,11 +60,13 @@ impl WavetableScope {
         osc_idx: usize,
         bank: Arc<WavetableBank>,
         params: Arc<JSynPluginParams>,
+        mod_ui: Arc<ModUiState>,
     ) -> Handle<'_, Self> {
         Self {
             osc_idx,
             bank,
             params,
+            mod_ui,
         }
         .build(cx, move |cx| {
             let scope_lens = UiData::params.map(move |p| {
@@ -135,12 +140,21 @@ impl View for WavetableScope {
                 &custom_guard
             }
         };
-        let wt_pos = osc.wt_pos.value();
-        let phase_offset = (osc.phase.value() / 360.0).rem_euclid(1.0).fract();
+        let tel = &self.mod_ui.telemetry;
+        let wt_pos = (osc.wt_pos.value()
+            + tel.dest_offset(ModDestination::osc_wt_pos(self.osc_idx)))
+        .clamp(0.0, 1.0);
+        let phase_offset = ((osc.phase.value() / 360.0)
+            + tel.dest_offset(ModDestination::osc_phase(self.osc_idx)))
+        .rem_euclid(1.0);
         let warp_mode = osc.warp_mode.value().into();
-        let warp_amount = osc.warp_amount.value();
+        let warp_amount = (osc.warp_amount.value()
+            + tel.dest_offset(ModDestination::osc_warp(self.osc_idx)))
+        .clamp(0.0, 1.0);
         let mod_type = osc.mod_type.value();
-        let mod_depth = osc.mod_depth.value().clamp(0.0, 1.0);
+        let mod_depth = (osc.mod_depth.value()
+            + tel.dest_offset(ModDestination::osc_mod_depth(self.osc_idx)))
+        .clamp(0.0, 1.0);
         let mod_order: ModOrder = osc.mod_order.value().into();
 
         let mod_idx_opt = mod_source_index(osc.mod_source.value());
@@ -154,15 +168,21 @@ impl View for WavetableScope {
                     &mod_custom_guard
                 }
             };
-            let car_semi = osc.pitch.value();
-            let mod_semi = m_osc.pitch.value();
+            let car_semi = osc.pitch.value()
+                + tel.dest_offset(ModDestination::osc_pitch(self.osc_idx)) * 96.0;
+            let mod_semi =
+                m_osc.pitch.value() + tel.dest_offset(ModDestination::osc_pitch(m_idx)) * 96.0;
             let ratio = 2.0_f32.powf((mod_semi - car_semi) / 12.0).clamp(0.25, 8.0);
             Some((
                 m_wt,
-                m_osc.wt_pos.value(),
-                (m_osc.phase.value() / 360.0).rem_euclid(1.0).fract(),
+                (m_osc.wt_pos.value() + tel.dest_offset(ModDestination::osc_wt_pos(m_idx)))
+                    .clamp(0.0, 1.0),
+                ((m_osc.phase.value() / 360.0)
+                    + tel.dest_offset(ModDestination::osc_phase(m_idx)))
+                .rem_euclid(1.0),
                 m_osc.warp_mode.value().into(),
-                m_osc.warp_amount.value(),
+                (m_osc.warp_amount.value() + tel.dest_offset(ModDestination::osc_warp(m_idx)))
+                    .clamp(0.0, 1.0),
                 m_osc.mod_order.value().into(),
                 ratio,
             ))

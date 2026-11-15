@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use j_syn_dsp::filter::{cutoff_norm_to_hz, evaluate_filter_response_db};
 use j_syn_dsp::mod_matrix::{ModDestination, FX_SCOPE_LEN};
 use j_syn_dsp::{FxRackState, FxType};
 use nih_plug::prelude::{GuiContext, ParamSetter};
@@ -24,6 +25,7 @@ const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Delay", FxTypeParam::Delay),
     ("Reverb", FxTypeParam::Reverb),
     ("J-SAT Clip", FxTypeParam::JSatClipper),
+    ("Filter", FxTypeParam::Filter),
 ];
 
 #[inline]
@@ -91,6 +93,7 @@ fn fx_accent_rgb(fx_ty: FxTypeParam) -> (u8, u8, u8) {
         FxTypeParam::Delay => (245, 179, 73),
         FxTypeParam::Reverb => (195, 145, 245),
         FxTypeParam::JSatClipper => (245, 86, 86),
+        FxTypeParam::Filter => (112, 224, 154),
     }
 }
 
@@ -134,6 +137,12 @@ pub(super) fn fx_param_label(fx_ty: FxTypeParam, param_idx: usize) -> &'static s
             2 => "KNEE",
             _ => "MIX",
         },
+        FxTypeParam::Filter => match param_idx {
+            0 => "CUTOFF",
+            1 => "RES",
+            2 => "TYPE",
+            _ => "MIX",
+        },
     }
 }
 
@@ -166,6 +175,20 @@ pub(super) fn format_fx_param_value(fx_ty: FxTypeParam, param_idx: usize, norm: 
         FxTypeParam::JSatClipper => match param_idx {
             0 => format!("+{:.1} dB", n * 24.0),
             1 => format!("{:.1} dB", -18.0 + n * 18.0),
+            _ => format!("{:.0}%", n * 100.0),
+        },
+        FxTypeParam::Filter => match param_idx {
+            0 => {
+                let hz = cutoff_norm_to_hz(n);
+                if hz >= 10_000.0 {
+                    format!("{:.1} kHz", hz / 1000.0)
+                } else if hz >= 1000.0 {
+                    format!("{:.2} kHz", hz / 1000.0)
+                } else {
+                    format!("{:.0} Hz", hz)
+                }
+            }
+            2 => FxRackState::format_filter_type(n).to_string(),
             _ => format!("{:.0}%", n * 100.0),
         },
     }
@@ -354,60 +377,80 @@ fn paint_clipper_scope(
     canvas.stroke_path(&border, &b_paint);
 }
 
-/// Live compact scope displayed in `MAIN` FX cards when `J-SAT Clipper` is active,
-/// and inside the full `FX` Rack slot cards.
-struct JSatClipperScope {
+#[inline]
+fn paint_filter_scope(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    dpx: f32,
     slot_idx: usize,
-    params: Arc<JSynPluginParams>,
-    mod_ui: Arc<ModUiState>,
-}
+    params: &JSynPluginParams,
+    mod_ui: &ModUiState,
+) {
+    let radius = 3.5 * dpx;
+    let enabled = fx_slot_enabled_fn(slot_idx)(params);
+    let mut bg = vg::Path::new();
+    bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
+    canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(20, 17, 14)));
 
-impl JSatClipperScope {
-    fn new(
-        cx: &mut Context,
-        slot_idx: usize,
-        params: Arc<JSynPluginParams>,
-        mod_ui: Arc<ModUiState>,
-    ) -> Handle<'_, Self> {
-        Self {
-            slot_idx,
-            params,
-            mod_ui,
+    let pad_x = 4.0 * dpx;
+    let pad_y = 3.0 * dpx;
+    let ix = bounds.x + pad_x;
+    let iy = bounds.y + pad_y;
+    let iw = (bounds.w - 2.0 * pad_x).max(1.0);
+    let ih = (bounds.h - 2.0 * pad_y).max(1.0);
+
+    let slot = &params.fx_slots[slot_idx];
+    let tel = &mod_ui.telemetry;
+    let eff = [
+        (slot.p1.value() + tel.dest_offset(ModDestination::fx_param(slot_idx, 0))).clamp(0.0, 1.0),
+        (slot.p2.value() + tel.dest_offset(ModDestination::fx_param(slot_idx, 1))).clamp(0.0, 1.0),
+        (slot.p3.value() + tel.dest_offset(ModDestination::fx_param(slot_idx, 2))).clamp(0.0, 1.0),
+        (slot.p4.value() + tel.dest_offset(ModDestination::fx_param(slot_idx, 3))).clamp(0.0, 1.0),
+    ];
+    let fp = FxRackState::filter_params_from_fx(eff);
+
+    // 0 dB reference line
+    let zero_y = iy + (18.0 / 42.0) * ih;
+    let mut zero_line = vg::Path::new();
+    zero_line.move_to(ix, zero_y);
+    zero_line.line_to(ix + iw, zero_y);
+    let mut zero_paint = vg::Paint::color(vg::Color::rgba(95, 82, 68, if enabled { 95 } else { 40 }));
+    zero_paint.set_line_width(1.0 * dpx);
+    canvas.stroke_path(&zero_line, &zero_paint);
+
+    // Frequency response curve (20 Hz .. 20 kHz log scale)
+    const PTS: usize = 64;
+    let mut curve = vg::Path::new();
+    for i in 0..PTS {
+        let t = i as f32 / (PTS - 1) as f32;
+        let freq_hz = 20.0 * 1000.0_f32.powf(t);
+        let db = evaluate_filter_response_db(&fp, freq_hz).clamp(-24.0, 18.0);
+        let y_norm = ((18.0 - db) / 42.0).clamp(0.0, 1.0);
+        let x = ix + t * iw;
+        let y = iy + y_norm * ih;
+        if i == 0 {
+            curve.move_to(x, y);
+        } else {
+            curve.line_to(x, y);
         }
-        .build(cx, |_| {})
     }
+    let mut curve_paint = vg::Paint::color(vg::Color::rgba(
+        112,
+        224,
+        154,
+        if enabled { 235 } else { 85 },
+    ));
+    curve_paint.set_line_width(1.5 * dpx);
+    canvas.stroke_path(&curve, &curve_paint);
+
+    let mut border = vg::Path::new();
+    border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
+    let mut b_paint = vg::Paint::color(vg::Color::rgba(90, 74, 62, if enabled { 160 } else { 75 }));
+    b_paint.set_line_width(1.0 * dpx);
+    canvas.stroke_path(&border, &b_paint);
 }
 
-impl View for JSatClipperScope {
-    fn element(&self) -> Option<&'static str> {
-        Some("jsat-clipper-scope")
-    }
-
-    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        event.map(|raw_param_event, _| {
-            if let RawParamEvent::ParametersChanged = raw_param_event {
-                cx.needs_redraw();
-            }
-        });
-    }
-
-    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        let bounds = cx.bounds();
-        if bounds.w <= 4.0 || bounds.h <= 4.0 {
-            return;
-        }
-        paint_clipper_scope(
-            canvas,
-            bounds,
-            cx.scale_factor(),
-            self.slot_idx,
-            &self.params,
-            &self.mod_ui,
-        );
-    }
-}
-
-/// Multi-FX live waveform & activity visualizer used in the full 2×4 `FX` rack view.
+/// Multi-FX live waveform, filter curve, & activity visualizer used in `MAIN` and `FX` views.
 struct FxSlotVisualizer {
     slot_idx: usize,
     params: Arc<JSynPluginParams>,
@@ -452,6 +495,17 @@ impl View for FxSlotVisualizer {
         let fx_ty = self.params.fx_slots[self.slot_idx].fx_type.value();
         if fx_ty == FxTypeParam::JSatClipper {
             paint_clipper_scope(
+                canvas,
+                bounds,
+                dpx,
+                self.slot_idx,
+                &self.params,
+                &self.mod_ui,
+            );
+            return;
+        }
+        if fx_ty == FxTypeParam::Filter {
+            paint_filter_scope(
                 canvas,
                 bounds,
                 dpx,
@@ -635,7 +689,7 @@ fn build_fx_slot_header(
             "ON",
             (245, 179, 73),
         )
-        .width(Pixels(36.0))
+        .width(Pixels(48.0))
         .height(Pixels(18.0))
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
@@ -656,9 +710,10 @@ fn build_fx_slot_header(
                 "STK",
                 4,
                 1.0,
-            );
+            )
+            .class("stk-pill");
         })
-        .width(Pixels(48.0))
+        .width(Pixels(54.0))
         .height(Pixels(19.0));
 
         if show_reorder {
@@ -725,15 +780,15 @@ pub(crate) fn build_main_fx_column(
                     cx,
                     UiData::params.map(move |p| p.fx_slots[slot_idx].fx_type.value() as usize),
                     move |cx, fx_idx_lens| {
-                        if FxType::from_index(fx_idx_lens.get(cx)) == FxType::JSatClipper {
-                            JSatClipperScope::new(cx, slot_idx, p_scope.clone(), m_scope.clone())
+                        if FxType::from_index(fx_idx_lens.get(cx)) != FxType::Off {
+                            FxSlotVisualizer::new(cx, slot_idx, p_scope.clone(), m_scope.clone())
                                 .width(Stretch(1.0))
-                                .height(Pixels(26.0));
+                                .height(Pixels(22.0));
                         }
                     },
                 );
 
-                build_fx_knob_row(cx, slot_idx, p_card, m_card, 32.0, 0);
+                build_fx_knob_row(cx, slot_idx, p_card, m_card, 36.0, 0);
             })
             .class("hardware-module")
             .class("fx-compact-card")
@@ -806,7 +861,7 @@ pub(crate) fn build_fx_rack_view(
                                     slot_idx,
                                     p_card.clone(),
                                     m_card.clone(),
-                                    38.0,
+                                    42.0,
                                     FX_VIEW_TAG,
                                 );
                             })

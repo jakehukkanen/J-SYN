@@ -12,6 +12,23 @@ use crate::oscillator::EngineMode;
 
 pub const COMB_BUF_LEN: usize = 2048;
 
+/// Skew factor matching `nih_plug::prelude::FloatRange::skew_factor(-2.2)` (`2.0_f32.powf(-2.2)`).
+pub const CUTOFF_SKEW_FACTOR: f32 = 0.217_637_64;
+
+/// Maps a filter cutoff frequency (`20.0..=20_000.0 Hz`) to normalized `0.0..=1.0` space.
+#[inline]
+pub fn cutoff_hz_to_norm(hz: f32) -> f32 {
+    let t = ((hz.clamp(20.0, 20_000.0) - 20.0) / (20_000.0 - 20.0)).clamp(0.0, 1.0);
+    t.powf(CUTOFF_SKEW_FACTOR)
+}
+
+/// Maps normalized `0.0..=1.0` cutoff position back to `20.0..=20_000.0 Hz`.
+#[inline]
+pub fn cutoff_norm_to_hz(norm: f32) -> f32 {
+    let t = norm.clamp(0.0, 1.0).powf(1.0 / CUTOFF_SKEW_FACTOR);
+    (20.0 + (20_000.0 - 20.0) * t).clamp(20.0, 20_000.0)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterMode {
     Lp = 0,
@@ -24,6 +41,8 @@ pub enum FilterMode {
     HpNotch = 7,
     LpNotch = 8,
     LpPeak = 9,
+    Notch = 10,
+    Peak = 11,
 }
 
 impl FilterMode {
@@ -38,6 +57,8 @@ impl FilterMode {
             7 => Self::HpNotch,
             8 => Self::LpNotch,
             9 => Self::LpPeak,
+            10 => Self::Notch,
+            11 => Self::Peak,
             _ => Self::Lp,
         }
     }
@@ -362,10 +383,12 @@ impl FilterSvfCore {
         let aux = params.aux.clamp(0.0, 1.0);
 
         match params.mode {
-            FilterMode::Lp | FilterMode::Bp | FilterMode::Hp => {
+            FilterMode::Lp | FilterMode::Bp | FilterMode::Hp | FilterMode::Notch | FilterMode::Peak => {
                 let g = (PI * fc / sr).tan().min(8.0);
                 let mut out = [0.0_f32; 2];
-                if params.slope == FilterSlope::Db6 {
+                if params.slope == FilterSlope::Db6
+                    && !matches!(params.mode, FilterMode::Notch | FilterMode::Peak)
+                {
                     for (ch, &x) in [in_l, in_r].iter().enumerate() {
                         let x_in = if drive > 1e-4 {
                             fast_tanh(x * (1.0 + drive * 3.0))
@@ -386,9 +409,10 @@ impl FilterSvfCore {
                         out[ch] = x * (1.0 - aux) + wet * aux;
                     }
                 } else {
-                    let stages = params.slope.num_2pole_stages();
+                    let stages = params.slope.num_2pole_stages().max(1);
                     let k0 = 2.0 - 1.95 * res;
                     let k_helper = (1.4142 - 0.45 * res).max(0.75);
+                    let peak_boost = 0.6 + 1.8 * res;
                     let sat = drive > 0.25 || res > 0.85;
                     for (ch, &x) in [in_l, in_r].iter().enumerate() {
                         let x_in = if drive > 1e-4 {
@@ -408,6 +432,8 @@ impl FilterSvfCore {
                             FilterMode::Lp => lp0,
                             FilterMode::Bp => bp0,
                             FilterMode::Hp => hp0,
+                            FilterMode::Notch => lp0 + hp0,
+                            FilterMode::Peak => x_in + peak_boost * k0 * bp0,
                             _ => lp0,
                         };
                         for stage in 1..stages {
@@ -428,6 +454,8 @@ impl FilterSvfCore {
                                 FilterMode::Lp => lp_s,
                                 FilterMode::Bp => bp_s * k_helper,
                                 FilterMode::Hp => hp_s,
+                                FilterMode::Notch => lp_s + hp_s,
+                                FilterMode::Peak => mid + 0.5 * peak_boost * k_helper * bp_s,
                                 _ => lp_s,
                             };
                         }
@@ -711,8 +739,10 @@ pub fn evaluate_filter_response_db(params: &FilterParams, freq_hz: f32) -> f32 {
     let one_minus_w2 = 1.0 - w2;
 
     let mag = match params.mode {
-        FilterMode::Lp | FilterMode::Bp | FilterMode::Hp => {
-            let wet = if params.slope == FilterSlope::Db6 {
+        FilterMode::Lp | FilterMode::Bp | FilterMode::Hp | FilterMode::Notch | FilterMode::Peak => {
+            let wet = if params.slope == FilterSlope::Db6
+                && !matches!(params.mode, FilterMode::Notch | FilterMode::Peak)
+            {
                 let den = (1.0 + w2).sqrt().max(1e-4);
                 let base = match params.mode {
                     FilterMode::Lp => 1.0 / den,
@@ -722,15 +752,23 @@ pub fn evaluate_filter_response_db(params: &FilterParams, freq_hz: f32) -> f32 {
                 };
                 base * (1.0 + 0.15 * drive)
             } else {
-                let stages = params.slope.num_2pole_stages();
+                let stages = params.slope.num_2pole_stages().max(1);
                 let k0 = (2.0 - 1.95 * res).max(0.05);
                 let d0 = (one_minus_w2 * one_minus_w2 + (k0 * w).powi(2))
                     .sqrt()
                     .max(1e-4);
+                let peak_boost = 0.6 + 1.8 * res;
                 let mut m = match params.mode {
                     FilterMode::Lp => (1.0 + 0.15 * drive) / d0,
                     FilterMode::Bp => ((1.0 + res * 0.5) * w) / d0,
                     FilterMode::Hp => (w2 * (1.0 + 0.15 * drive)) / d0,
+                    FilterMode::Notch => (one_minus_w2.abs() * (1.0 + 0.15 * drive)) / d0,
+                    FilterMode::Peak => {
+                        let num =
+                            (one_minus_w2 * one_minus_w2 + ((1.0 + peak_boost) * k0 * w).powi(2))
+                                .sqrt();
+                        (num * (1.0 + 0.15 * drive)) / d0
+                    }
                     _ => 1.0 / d0,
                 };
                 if stages > 1 {
@@ -742,6 +780,13 @@ pub fn evaluate_filter_response_db(params: &FilterParams, freq_hz: f32) -> f32 {
                         FilterMode::Lp => 1.0 / d_h,
                         FilterMode::Bp => (k_helper * w) / d_h,
                         FilterMode::Hp => w2 / d_h,
+                        FilterMode::Notch => one_minus_w2.abs() / d_h,
+                        FilterMode::Peak => {
+                            let num = (one_minus_w2 * one_minus_w2
+                                + ((1.0 + 0.5 * peak_boost) * k_helper * w).powi(2))
+                            .sqrt();
+                            num / d_h
+                        }
                         _ => 1.0 / d_h,
                     };
                     m *= stage_gain.powi((stages - 1) as i32);

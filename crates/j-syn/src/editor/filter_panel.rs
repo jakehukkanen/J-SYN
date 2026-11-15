@@ -46,6 +46,8 @@ const FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
     ("HP + Notch", FilterModeParam::HpNotch),
     ("LP + Notch", FilterModeParam::LpNotch),
     ("LP + Peak", FilterModeParam::LpPeak),
+    ("Notch", FilterModeParam::Notch),
+    ("Peak", FilterModeParam::Peak),
 ];
 
 const FILTER_SLOPE_ITEMS: &[(&str, FilterSlopeParam)] = &[
@@ -475,7 +477,7 @@ pub(super) fn build_filter_panel(
                     "CUTOFF",
                     false,
                     accent,
-                    44.0,
+                    49.0,
                     ModDestination::filter_cutoff(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -489,7 +491,7 @@ pub(super) fn build_filter_panel(
                     "RES",
                     false,
                     accent,
-                    44.0,
+                    49.0,
                     ModDestination::filter_res(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -503,7 +505,7 @@ pub(super) fn build_filter_panel(
                     "DRIVE",
                     false,
                     accent,
-                    44.0,
+                    49.0,
                     ModDestination::filter_drive(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -516,7 +518,7 @@ pub(super) fn build_filter_panel(
                     params.clone(),
                     mod_ui.clone(),
                     accent,
-                    44.0,
+                    49.0,
                 );
             }
         })

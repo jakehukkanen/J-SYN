@@ -8,7 +8,7 @@ use arc_swap::ArcSwap;
 use j_syn_dsp::{
     AdsrParams, EngineMode, FactoryWavetable, FilterMode, FilterParams, FilterRouting, FilterSlope,
     InsertMode, InsertParams, InsertPosition, ModMatrixState, ModOrder, ModSeqMode, ModSeqParams,
-    ModSeqPlayMode, ModSeqRate, ModSeqRetrig, ModSeqStepBank, ModSeqSyncMode, ModSource, ModType,
+    ModSeqPlayMode, ModSeqRetrig, ModSeqStepBank, ModSeqSyncMode, ModSource, ModType,
     NoiseParams, NoiseType, OscParams, PolyMode, RoutingParams, SynthEngine, SynthParams, WarpMode,
     Wavetable, WavetableBank,
 };
@@ -195,6 +195,10 @@ pub enum FilterModeParam {
     LpNotch,
     #[name = "LP + Peak"]
     LpPeak,
+    #[name = "Notch"]
+    Notch,
+    #[name = "Peak"]
+    Peak,
 }
 
 impl From<FilterModeParam> for FilterMode {
@@ -210,6 +214,8 @@ impl From<FilterModeParam> for FilterMode {
             FilterModeParam::HpNotch => FilterMode::HpNotch,
             FilterModeParam::LpNotch => FilterMode::LpNotch,
             FilterModeParam::LpPeak => FilterMode::LpPeak,
+            FilterModeParam::Notch => FilterMode::Notch,
+            FilterModeParam::Peak => FilterMode::Peak,
         }
     }
 }
@@ -772,52 +778,23 @@ impl OscPluginParams {
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModSeqSyncParam {
-    #[name = "Sync"]
-    TempoSync,
-    #[name = "Hz"]
-    FreeHz,
+    #[name = "Free"]
+    Free,
+    #[name = "Straight"]
+    Straight,
+    #[name = "Triplet"]
+    Triplet,
+    #[name = "Dotted"]
+    Dotted,
 }
 
 impl From<ModSeqSyncParam> for ModSeqSyncMode {
     fn from(val: ModSeqSyncParam) -> Self {
         match val {
-            ModSeqSyncParam::TempoSync => ModSeqSyncMode::TempoSync,
-            ModSeqSyncParam::FreeHz => ModSeqSyncMode::FreeHz,
-        }
-    }
-}
-
-#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModSeqRateParam {
-    #[name = "1/32"]
-    Div1_32,
-    #[name = "1/16"]
-    Div1_16,
-    #[name = "1/8"]
-    Div1_8,
-    #[name = "1/4"]
-    Div1_4,
-    #[name = "1/2"]
-    Div1_2,
-    #[name = "1 Bar"]
-    Bars1,
-    #[name = "2 Bars"]
-    Bars2,
-    #[name = "4 Bars"]
-    Bars4,
-}
-
-impl From<ModSeqRateParam> for ModSeqRate {
-    fn from(val: ModSeqRateParam) -> Self {
-        match val {
-            ModSeqRateParam::Div1_32 => ModSeqRate::Div1_32,
-            ModSeqRateParam::Div1_16 => ModSeqRate::Div1_16,
-            ModSeqRateParam::Div1_8 => ModSeqRate::Div1_8,
-            ModSeqRateParam::Div1_4 => ModSeqRate::Div1_4,
-            ModSeqRateParam::Div1_2 => ModSeqRate::Div1_2,
-            ModSeqRateParam::Bars1 => ModSeqRate::Bars1,
-            ModSeqRateParam::Bars2 => ModSeqRate::Bars2,
-            ModSeqRateParam::Bars4 => ModSeqRate::Bars4,
+            ModSeqSyncParam::Free => ModSeqSyncMode::Free,
+            ModSeqSyncParam::Straight => ModSeqSyncMode::Straight,
+            ModSeqSyncParam::Triplet => ModSeqSyncMode::Triplet,
+            ModSeqSyncParam::Dotted => ModSeqSyncMode::Dotted,
         }
     }
 }
@@ -923,10 +900,7 @@ pub struct ModSeqPluginParams {
     pub sync_mode: EnumParam<ModSeqSyncParam>,
 
     #[id = "ms_rate"]
-    pub sync_rate: EnumParam<ModSeqRateParam>,
-
-    #[id = "ms_hz"]
-    pub free_hz: FloatParam,
+    pub rate: FloatParam,
 
     #[id = "ms_play"]
     pub play_mode: EnumParam<ModSeqPlayParam>,
@@ -945,19 +919,8 @@ impl Default for ModSeqPluginParams {
     fn default() -> Self {
         Self {
             mode: EnumParam::new("Mode", ModSeqModeParam::Performer),
-            sync_mode: EnumParam::new("Sync", ModSeqSyncParam::TempoSync),
-            sync_rate: EnumParam::new("Rate", ModSeqRateParam::Bars1),
-            free_hz: FloatParam::new(
-                "Freq",
-                1.5,
-                FloatRange::Skewed {
-                    min: 0.05,
-                    max: 30.0,
-                    factor: FloatRange::skew_factor(-1.5),
-                },
-            )
-            .with_unit(" Hz")
-            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            sync_mode: EnumParam::new("Sync", ModSeqSyncParam::Straight),
+            rate: percentage_param("Rate", 0.35),
             play_mode: EnumParam::new("Play Mode", ModSeqPlayParam::Loop),
             retrig: EnumParam::new("Retrig", ModSeqRetrigParam::PolyVoice),
             num_steps: IntParam::new("Steps", 8, IntRange::Linear { min: 2, max: 16 }),
@@ -971,8 +934,7 @@ impl ModSeqPluginParams {
         ModSeqParams {
             mode: self.mode.value().into(),
             sync_mode: self.sync_mode.value().into(),
-            sync_rate: self.sync_rate.value().into(),
-            free_hz: self.free_hz.value(),
+            rate_norm: self.rate.value(),
             play_mode: self.play_mode.value().into(),
             retrig: self.retrig.value().into(),
             num_steps: self.num_steps.value().clamp(2, 16) as usize,
@@ -1043,6 +1005,33 @@ pub struct JSynPluginParams {
 
     #[nested(array, group = "Master FX")]
     pub fx_slots: [FxSlotPluginParams; 8],
+
+    #[nested(array, group = "Macros")]
+    pub macros: [MacroPluginParams; 8],
+
+    #[persist = "macro_names"]
+    pub macro_names: Arc<Mutex<[String; 8]>>,
+}
+
+#[derive(Params)]
+pub struct MacroPluginParams {
+    #[id = "val"]
+    pub value: FloatParam,
+}
+
+impl MacroPluginParams {
+    pub fn new(idx: usize) -> Self {
+        Self {
+            value: FloatParam::new(
+                format!("Macro {}", idx + 1),
+                0.0,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit("%")
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage()),
+        }
+    }
 }
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -1061,6 +1050,8 @@ pub enum FxTypeParam {
     Reverb,
     #[name = "J-SAT Clipper"]
     JSatClipper,
+    #[name = "Filter"]
+    Filter,
 }
 
 impl From<j_syn_dsp::FxType> for FxTypeParam {
@@ -1073,6 +1064,7 @@ impl From<j_syn_dsp::FxType> for FxTypeParam {
             j_syn_dsp::FxType::Delay => Self::Delay,
             j_syn_dsp::FxType::Reverb => Self::Reverb,
             j_syn_dsp::FxType::JSatClipper => Self::JSatClipper,
+            j_syn_dsp::FxType::Filter => Self::Filter,
         }
     }
 }
@@ -1087,6 +1079,7 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
             FxTypeParam::Delay => Self::Delay,
             FxTypeParam::Reverb => Self::Reverb,
             FxTypeParam::JSatClipper => Self::JSatClipper,
+            FxTypeParam::Filter => Self::Filter,
         }
     }
 }
@@ -1200,6 +1193,10 @@ impl Default for JSynPluginParams {
             mod_envs: std::array::from_fn(|_| ModEnvPluginParams::default()),
             modseqs: std::array::from_fn(|_| ModSeqPluginParams::default()),
             fx_slots: std::array::from_fn(|i| FxSlotPluginParams::new_slot(i)),
+            macros: std::array::from_fn(MacroPluginParams::new),
+            macro_names: Arc::new(Mutex::new(std::array::from_fn(|i| {
+                format!("MACRO {}", i + 1)
+            }))),
         }
     }
 }
@@ -1346,6 +1343,7 @@ impl Plugin for JSynPlugin {
             ],
             modseq_steps,
             mod_matrix,
+            macros: std::array::from_fn(|i| self.params.macros[i].value.value()),
             fx_slots: std::array::from_fn(|i| j_syn_dsp::FxSlotParams {
                 fx_type: self.params.fx_slots[i].fx_type.value().into(),
                 enabled: self.params.fx_slots[i].enabled.value(),

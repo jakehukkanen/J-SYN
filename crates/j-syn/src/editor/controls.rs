@@ -467,7 +467,7 @@ pub(super) fn build_ui_scale_dropdown(cx: &mut Context) {
     .row_between(Pixels(2.0));
 }
 
-fn build_rotary_knob_with_opt_mod<'a, L, Params, P, FMap>(
+pub(super) fn build_rotary_knob_with_opt_mod<'a, L, Params, P, FMap>(
     cx: &'a mut Context,
     params: L,
     params_to_param: FMap,
@@ -1062,22 +1062,4 @@ pub(super) fn build_tab_button(
     .checked(UiData::active_tab.map(move |t| *t == tab))
     .width(Pixels(width_px))
     .height(Stretch(1.0));
-}
-
-pub(super) fn build_placeholder_bay(cx: &mut Context, title: &'static str, subtitle: &'static str) {
-    VStack::new(cx, move |cx| {
-        bold_label(cx, title, "placeholder-title")
-            .width(Stretch(1.0))
-            .child_left(Stretch(1.0))
-            .child_right(Stretch(1.0));
-        bold_label(cx, subtitle, "placeholder-sub")
-            .width(Stretch(1.0))
-            .child_left(Stretch(1.0))
-            .child_right(Stretch(1.0));
-    })
-    .class("placeholder-bay")
-    .width(Stretch(1.0))
-    .height(Stretch(1.0))
-    .child_top(Stretch(1.0))
-    .child_bottom(Stretch(1.0));
 }
