@@ -5,8 +5,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use j_syn_dsp::{
-    EngineMode, FactoryWavetable, ModOrder, ModSource, ModType, OscParams, PolyMode, SynthEngine,
-    SynthParams, WarpMode, Wavetable, WavetableBank,
+    EngineMode, FactoryWavetable, FilterMode, FilterParams, FilterRouting, FilterSlope,
+    InsertMode, InsertParams, InsertPosition, ModOrder, ModSource, ModType, NoiseParams,
+    NoiseType, OscParams, PolyMode, RoutingParams, SynthEngine, SynthParams, WarpMode, Wavetable,
+    WavetableBank,
 };
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
@@ -102,6 +104,428 @@ pub enum ModTypeParam {
     Rm,
 }
 
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoiseTypeParam {
+    #[name = "White"]
+    White,
+    #[name = "Pink"]
+    Pink,
+    #[name = "Brown"]
+    Brown,
+}
+
+impl From<NoiseTypeParam> for NoiseType {
+    fn from(val: NoiseTypeParam) -> Self {
+        match val {
+            NoiseTypeParam::White => NoiseType::White,
+            NoiseTypeParam::Pink => NoiseType::Pink,
+            NoiseTypeParam::Brown => NoiseType::Brown,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterModeParam {
+    #[name = "LP"]
+    Lp,
+    #[name = "BP"]
+    Bp,
+    #[name = "HP"]
+    Hp,
+    #[name = "Scream"]
+    Scream,
+    #[name = "Daft"]
+    Daft,
+    #[name = "Comb"]
+    Comb,
+    #[name = "HP + Peak"]
+    HpPeak,
+    #[name = "HP + Notch"]
+    HpNotch,
+    #[name = "LP + Notch"]
+    LpNotch,
+    #[name = "LP + Peak"]
+    LpPeak,
+}
+
+impl From<FilterModeParam> for FilterMode {
+    fn from(val: FilterModeParam) -> Self {
+        match val {
+            FilterModeParam::Lp => FilterMode::Lp,
+            FilterModeParam::Bp => FilterMode::Bp,
+            FilterModeParam::Hp => FilterMode::Hp,
+            FilterModeParam::Scream => FilterMode::Scream,
+            FilterModeParam::Daft => FilterMode::Daft,
+            FilterModeParam::Comb => FilterMode::Comb,
+            FilterModeParam::HpPeak => FilterMode::HpPeak,
+            FilterModeParam::HpNotch => FilterMode::HpNotch,
+            FilterModeParam::LpNotch => FilterMode::LpNotch,
+            FilterModeParam::LpPeak => FilterMode::LpPeak,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterSlopeParam {
+    #[name = "6 dB"]
+    Db6,
+    #[name = "12 dB"]
+    Db12,
+    #[name = "24 dB"]
+    Db24,
+    #[name = "36 dB"]
+    Db36,
+    #[name = "48 dB"]
+    Db48,
+}
+
+impl From<FilterSlopeParam> for FilterSlope {
+    fn from(val: FilterSlopeParam) -> Self {
+        match val {
+            FilterSlopeParam::Db6 => FilterSlope::Db6,
+            FilterSlopeParam::Db12 => FilterSlope::Db12,
+            FilterSlopeParam::Db24 => FilterSlope::Db24,
+            FilterSlopeParam::Db36 => FilterSlope::Db36,
+            FilterSlopeParam::Db48 => FilterSlope::Db48,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterRoutingParam {
+    #[name = "Serial (F1->F2)"]
+    Serial,
+    #[name = "Parallel (F1+F2)"]
+    Parallel,
+}
+
+impl From<FilterRoutingParam> for FilterRouting {
+    fn from(val: FilterRoutingParam) -> Self {
+        match val {
+            FilterRoutingParam::Serial => FilterRouting::Serial,
+            FilterRoutingParam::Parallel => FilterRouting::Parallel,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertModeParam {
+    #[name = "Off"]
+    Off,
+    #[name = "Tube"]
+    Tube,
+    #[name = "Mech"]
+    Mech,
+    #[name = "Tube -> Mech"]
+    TubeToMech,
+    #[name = "Mech -> Tube"]
+    MechToTube,
+    #[name = "Sine Shaper"]
+    SineShaper,
+    #[name = "Parabolic"]
+    Parabolic,
+    #[name = "Soft Clip"]
+    SoftClip,
+    #[name = "Bitcrush"]
+    Bitcrush,
+}
+
+impl From<InsertModeParam> for InsertMode {
+    fn from(val: InsertModeParam) -> Self {
+        match val {
+            InsertModeParam::Off => InsertMode::Off,
+            InsertModeParam::Tube => InsertMode::Tube,
+            InsertModeParam::Mech => InsertMode::Mech,
+            InsertModeParam::TubeToMech => InsertMode::TubeToMech,
+            InsertModeParam::MechToTube => InsertMode::MechToTube,
+            InsertModeParam::SineShaper => InsertMode::SineShaper,
+            InsertModeParam::Parabolic => InsertMode::Parabolic,
+            InsertModeParam::SoftClip => InsertMode::SoftClip,
+            InsertModeParam::Bitcrush => InsertMode::Bitcrush,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InsertPosParam {
+    #[name = "Pre-F1"]
+    PreFilter,
+    #[name = "Between F1->F2"]
+    BetweenFilters,
+    #[name = "Post-F2"]
+    PostFilter,
+}
+
+impl From<InsertPosParam> for InsertPosition {
+    fn from(val: InsertPosParam) -> Self {
+        match val {
+            InsertPosParam::PreFilter => InsertPosition::PreFilter,
+            InsertPosParam::BetweenFilters => InsertPosition::BetweenFilters,
+            InsertPosParam::PostFilter => InsertPosition::PostFilter,
+        }
+    }
+}
+
+fn percentage_param(name: &str, default_val: f32) -> FloatParam {
+    FloatParam::new(name, default_val, FloatRange::Linear { min: 0.0, max: 1.0 })
+        .with_unit(" %")
+        .with_value_to_string(formatters::v2s_f32_percentage(0))
+        .with_string_to_value(formatters::s2v_f32_percentage())
+}
+
+fn bipolar_percentage_param(name: &str, default_val: f32) -> FloatParam {
+    FloatParam::new(
+        name,
+        default_val,
+        FloatRange::Linear {
+            min: -1.0,
+            max: 1.0,
+        },
+    )
+    .with_unit(" %")
+    .with_value_to_string(formatters::v2s_f32_percentage(0))
+    .with_string_to_value(formatters::s2v_f32_percentage())
+}
+
+#[derive(Params)]
+pub struct NoisePluginParams {
+    #[id = "noise_enabled"]
+    pub enabled: BoolParam,
+
+    #[id = "noise_type"]
+    pub noise_type: EnumParam<NoiseTypeParam>,
+
+    #[id = "noise_color"]
+    pub color: FloatParam,
+
+    #[id = "noise_stereo"]
+    pub stereo: FloatParam,
+
+    #[id = "noise_level"]
+    pub level: FloatParam,
+}
+
+impl Default for NoisePluginParams {
+    fn default() -> Self {
+        Self {
+            enabled: BoolParam::new("Noise Enabled", false),
+            noise_type: EnumParam::new("Noise Type", NoiseTypeParam::White),
+            color: bipolar_percentage_param("Noise Color", 0.0),
+            stereo: percentage_param("Noise Stereo", 0.5),
+            level: percentage_param("Noise Level", 0.5),
+        }
+    }
+}
+
+impl NoisePluginParams {
+    pub fn to_dsp(&self) -> NoiseParams {
+        NoiseParams {
+            enabled: self.enabled.value(),
+            noise_type: self.noise_type.value().into(),
+            color: self.color.value(),
+            stereo: self.stereo.value(),
+            level: self.level.value(),
+        }
+    }
+}
+
+#[derive(Params)]
+pub struct FilterPluginParams {
+    #[id = "flt_enabled"]
+    pub enabled: BoolParam,
+
+    #[id = "flt_mode"]
+    pub mode: EnumParam<FilterModeParam>,
+
+    #[id = "flt_slope"]
+    pub slope: EnumParam<FilterSlopeParam>,
+
+    #[id = "flt_cutoff"]
+    pub cutoff: FloatParam,
+
+    #[id = "flt_res"]
+    pub resonance: FloatParam,
+
+    #[id = "flt_drive"]
+    pub drive: FloatParam,
+
+    #[id = "flt_keytrack"]
+    pub keytrack: FloatParam,
+
+    #[id = "flt_aux"]
+    pub aux: FloatParam,
+}
+
+impl FilterPluginParams {
+    fn new(idx: usize) -> Self {
+        let default_cutoff = if idx == 0 { 20_000.0 } else { 2_000.0 };
+        Self {
+            enabled: BoolParam::new("Filter Enabled", idx == 0),
+            mode: EnumParam::new("Filter Mode", FilterModeParam::Lp),
+            slope: EnumParam::new("Filter Slope", FilterSlopeParam::Db12),
+            cutoff: FloatParam::new(
+                "Cutoff",
+                default_cutoff,
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 20_000.0,
+                    factor: FloatRange::skew_factor(-2.2),
+                },
+            )
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0))
+            .with_string_to_value(formatters::s2v_f32_hz_then_khz()),
+            resonance: percentage_param("Resonance", 0.0),
+            drive: percentage_param("Drive", 0.0),
+            keytrack: percentage_param("Keytrack", 0.0),
+            aux: percentage_param("Aux", 1.0),
+        }
+    }
+
+    pub fn to_dsp(&self) -> FilterParams {
+        FilterParams {
+            enabled: self.enabled.value(),
+            mode: self.mode.value().into(),
+            slope: self.slope.value().into(),
+            cutoff_hz: self.cutoff.value(),
+            resonance: self.resonance.value(),
+            drive: self.drive.value(),
+            keytrack: self.keytrack.value(),
+            aux: self.aux.value(),
+        }
+    }
+}
+
+#[derive(Params)]
+pub struct InsertSlotPluginParams {
+    #[id = "ins_mode"]
+    pub mode: EnumParam<InsertModeParam>,
+
+    #[id = "ins_pos"]
+    pub position: EnumParam<InsertPosParam>,
+
+    #[id = "ins_drive"]
+    pub drive: FloatParam,
+
+    #[id = "ins_mix"]
+    pub mix: FloatParam,
+}
+
+impl InsertSlotPluginParams {
+    fn new(idx: usize) -> Self {
+        let default_pos = if idx == 0 {
+            InsertPosParam::BetweenFilters
+        } else {
+            InsertPosParam::PostFilter
+        };
+        Self {
+            mode: EnumParam::new("Insert Mode", InsertModeParam::Off),
+            position: EnumParam::new("Insert Position", default_pos),
+            drive: percentage_param("Insert Drive", 0.25),
+            mix: percentage_param("Insert Mix", 1.0),
+        }
+    }
+
+    pub fn to_dsp(&self) -> InsertParams {
+        InsertParams {
+            mode: self.mode.value().into(),
+            position: self.position.value().into(),
+            drive: self.drive.value(),
+            mix: self.mix.value(),
+        }
+    }
+}
+
+#[derive(Params)]
+pub struct RoutingPluginParams {
+    #[id = "osc1_flt_bal"]
+    pub osc1_flt_bal: FloatParam,
+
+    #[id = "osc2_flt_bal"]
+    pub osc2_flt_bal: FloatParam,
+
+    #[id = "osc3_flt_bal"]
+    pub osc3_flt_bal: FloatParam,
+
+    #[id = "osc4_flt_bal"]
+    pub osc4_flt_bal: FloatParam,
+
+    #[id = "noise_flt_bal"]
+    pub noise_flt_bal: FloatParam,
+
+    #[id = "osc1_direct"]
+    pub osc1_direct: BoolParam,
+
+    #[id = "osc2_direct"]
+    pub osc2_direct: BoolParam,
+
+    #[id = "osc3_direct"]
+    pub osc3_direct: BoolParam,
+
+    #[id = "osc4_direct"]
+    pub osc4_direct: BoolParam,
+
+    #[id = "noise_direct"]
+    pub noise_direct: BoolParam,
+
+    #[id = "flt_routing"]
+    pub filter_routing: EnumParam<FilterRoutingParam>,
+
+    #[id = "flt_mix"]
+    pub filter_mix: FloatParam,
+
+    #[nested(array, group = "Inserts")]
+    pub inserts: [InsertSlotPluginParams; 2],
+
+    #[id = "fb_amt"]
+    pub feedback_amount: FloatParam,
+}
+
+impl Default for RoutingPluginParams {
+    fn default() -> Self {
+        Self {
+            osc1_flt_bal: bipolar_percentage_param("OSC 1 Send", -1.0),
+            osc2_flt_bal: bipolar_percentage_param("OSC 2 Send", -1.0),
+            osc3_flt_bal: bipolar_percentage_param("OSC 3 Send", -1.0),
+            osc4_flt_bal: bipolar_percentage_param("OSC 4 Send", -1.0),
+            noise_flt_bal: bipolar_percentage_param("Noise Send", -1.0),
+            osc1_direct: BoolParam::new("OSC 1 Direct", false),
+            osc2_direct: BoolParam::new("OSC 2 Direct", false),
+            osc3_direct: BoolParam::new("OSC 3 Direct", false),
+            osc4_direct: BoolParam::new("OSC 4 Direct", false),
+            noise_direct: BoolParam::new("Noise Direct", false),
+            filter_routing: EnumParam::new("Filter Routing", FilterRoutingParam::Serial),
+            filter_mix: bipolar_percentage_param("Filter Mix", 0.0),
+            inserts: [InsertSlotPluginParams::new(0), InsertSlotPluginParams::new(1)],
+            feedback_amount: percentage_param("Feedback", 0.0),
+        }
+    }
+}
+
+impl RoutingPluginParams {
+    pub fn to_dsp(&self) -> RoutingParams {
+        RoutingParams {
+            osc_filter_balance: [
+                self.osc1_flt_bal.value(),
+                self.osc2_flt_bal.value(),
+                self.osc3_flt_bal.value(),
+                self.osc4_flt_bal.value(),
+            ],
+            noise_filter_balance: self.noise_flt_bal.value(),
+            osc_direct: [
+                self.osc1_direct.value(),
+                self.osc2_direct.value(),
+                self.osc3_direct.value(),
+                self.osc4_direct.value(),
+            ],
+            noise_direct: self.noise_direct.value(),
+            filter_routing: self.filter_routing.value().into(),
+            filter_mix: self.filter_mix.value(),
+            inserts: [self.inserts[0].to_dsp(), self.inserts[1].to_dsp()],
+            feedback_amount: self.feedback_amount.value(),
+        }
+    }
+}
+
 #[derive(Params)]
 pub struct OscPluginParams {
     #[id = "enabled"]
@@ -160,6 +584,9 @@ pub struct OscPluginParams {
 
     #[id = "level"]
     pub level: FloatParam,
+
+    #[id = "keytrack"]
+    pub keytrack: BoolParam,
 }
 
 impl OscPluginParams {
@@ -245,6 +672,7 @@ impl OscPluginParams {
                 .with_unit(" %")
                 .with_value_to_string(formatters::v2s_f32_percentage(0))
                 .with_string_to_value(formatters::s2v_f32_percentage()),
+            keytrack: BoolParam::new("Keytrack", true),
         }
     }
 
@@ -282,6 +710,7 @@ impl OscPluginParams {
             spread: self.spread.value(),
             pan: self.pan.value(),
             level: self.level.value(),
+            keytrack: self.keytrack.value(),
         }
     }
 }
@@ -323,6 +752,15 @@ pub struct JSynPluginParams {
 
     #[nested(array, group = "Oscillators")]
     pub oscs: [OscPluginParams; 4],
+
+    #[nested(group = "Noise")]
+    pub noise: NoisePluginParams,
+
+    #[nested(array, group = "Filters")]
+    pub filters: [FilterPluginParams; 2],
+
+    #[nested(group = "Routing")]
+    pub routing: RoutingPluginParams,
 }
 
 impl Default for JSynPluginParams {
@@ -419,6 +857,12 @@ impl Default for JSynPluginParams {
                 OscPluginParams::new(2),
                 OscPluginParams::new(3),
             ],
+            noise: NoisePluginParams::default(),
+            filters: [
+                FilterPluginParams::new(0),
+                FilterPluginParams::new(1),
+            ],
+            routing: RoutingPluginParams::default(),
         }
     }
 }
@@ -541,6 +985,12 @@ impl Plugin for JSynPlugin {
                 self.params.oscs[2].to_dsp(),
                 self.params.oscs[3].to_dsp(),
             ],
+            noise: self.params.noise.to_dsp(),
+            filters: [
+                self.params.filters[0].to_dsp(),
+                self.params.filters[1].to_dsp(),
+            ],
+            routing: self.params.routing.to_dsp(),
         };
 
         let choices = [

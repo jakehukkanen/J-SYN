@@ -1,4 +1,4 @@
-//! Warm dark-mode skeuomorphic Vizia GUI for `J-SYN` (Milestone 1).
+//! Warm dark-mode skeuomorphic Vizia GUI for `J-SYN`.
 //!
 //! Maintainability and readability for both humans and AI are top priorities in this layout:
 //! - [`mod@self`] holds top-level UI state (`UiData`, `BottomTab`, `UiEvent`), macOS `baseview`
@@ -10,6 +10,9 @@
 //!   `LedToggleSwitch`, `ParamStepPill`).
 //! - [`scope`] draws the live single-cycle `WavetableScope` preview canvas.
 //! - [`osc_panel`] builds each `OSC 1` – `OSC 4` hardware strip.
+//! - [`noise_panel`] builds the per-voice stereo `NOISE` strip below `OSC 4`.
+//! - [`filter_panel`] builds `FILTER 1` and `FILTER 2` with live frequency response curves.
+//! - [`routing_tab`] builds the `ROUTING` bottom tab (Filter sends, Topology, Feedback, Insert).
 
 use std::sync::Arc;
 
@@ -21,7 +24,11 @@ use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 use crate::JSynPluginParams;
 
 mod controls;
+mod filter_panel;
+mod insert_panel;
+mod noise_panel;
 mod osc_panel;
+mod routing_tab;
 mod scope;
 mod widgets;
 
@@ -30,7 +37,12 @@ use controls::{
     build_mini_pill_cell, build_module_header, build_placeholder_bay, build_tab_button,
     build_ui_scale_dropdown,
 };
+use filter_panel::build_filter_panel;
+use insert_panel::build_insert_panel;
+use noise_panel::build_noise_panel;
 use osc_panel::build_osc_panel;
+use routing_tab::build_routing_tab;
+use widgets::LedToggleSwitch;
 
 const BASE_WIDTH: u32 = 1160;
 const BASE_HEIGHT: u32 = 760;
@@ -259,45 +271,25 @@ fn build_osc_column(
             );
         }
 
-        // Reserved compact Noise slot below OSC 4
-        HStack::new(cx, move |cx| {
-            bold_label(cx, "NOISE (M2)", "module-title").width(Pixels(92.0));
-            build_placeholder_bay(
-                cx,
-                "NOISE GENERATOR",
-                "COLOR / AMP / FILTER ROUTING (MILESTONE 2)",
-            );
-        })
-        .class("hardware-module")
-        .col_between(Pixels(8.0))
-        .width(Stretch(1.0))
-        .height(Pixels(38.0));
+        // Per-voice stereo Noise generator strip below OSC 4
+        build_noise_panel(cx, params, gui_context);
     })
     .row_between(Pixels(4.0))
     .width(Stretch(2.2))
     .height(Stretch(1.0));
 }
 
-fn build_filter_column(cx: &mut Context) {
-    VStack::new(cx, |cx| {
-        for (header, title, subtitle) in [
-            (
-                "FILTER 1 (M2)",
-                "MULTIMODE FILTER 1",
-                "LP / BP / HP / DAFT / SCREAM",
-            ),
-            ("FILTER 2 (M2)", "MULTIMODE FILTER 2", "DUAL / COMB / FORMANT"),
-        ] {
-            VStack::new(cx, |cx| {
-                build_module_header(cx, header, 22.0);
-                build_placeholder_bay(cx, title, subtitle);
-            })
-            .class("hardware-module")
-            .width(Stretch(1.0))
-            .height(Stretch(1.0));
-        }
+fn build_filter_column(
+    cx: &mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+) {
+    VStack::new(cx, move |cx| {
+        build_filter_panel(cx, 0, params.clone(), gui_context.clone(), AMBER_RGB);
+        build_filter_panel(cx, 1, params.clone(), gui_context.clone(), CORAL_RGB);
+        build_insert_panel(cx, params, gui_context);
     })
-    .row_between(Pixels(6.0))
+    .row_between(Pixels(5.0))
     .width(Stretch(1.0))
     .height(Stretch(1.0));
 }
@@ -324,8 +316,12 @@ fn build_fx_column(cx: &mut Context) {
     .height(Stretch(1.0));
 }
 
-fn build_bottom_tabs(cx: &mut Context) {
-    VStack::new(cx, |cx| {
+fn build_bottom_tabs(
+    cx: &mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+) {
+    VStack::new(cx, move |cx| {
         HStack::new(cx, move |cx| {
             build_tab_button(cx, BottomTab::VoiceEnv, "VOICE & ENV");
             build_tab_button(cx, BottomTab::ModSeq, "MODSEQ");
@@ -340,60 +336,159 @@ fn build_bottom_tabs(cx: &mut Context) {
         Binding::new(cx, UiData::active_tab, move |cx, active| {
             match active.get(cx) {
                 BottomTab::VoiceEnv => {
-                    VStack::new(cx, |cx| {
-                        build_module_header(cx, "AMP ENVELOPE (ADSR)", 20.0);
+                    HStack::new(cx, |cx| {
+                        VStack::new(cx, |cx| {
+                            build_module_header(cx, "AMP ENVELOPE (ADSR)", 18.0);
 
-                        HStack::new(cx, move |cx| {
-                            build_knob_cell(
-                                cx,
-                                UiData::params,
-                                |p| &p.amp_attack,
-                                "ATTACK",
-                                false,
-                                AMBER_RGB,
-                                40.0,
-                                78.0,
-                            );
-                            build_knob_cell(
-                                cx,
-                                UiData::params,
-                                |p| &p.amp_decay,
-                                "DECAY",
-                                false,
-                                AMBER_RGB,
-                                40.0,
-                                78.0,
-                            );
-                            build_knob_cell(
-                                cx,
-                                UiData::params,
-                                |p| &p.amp_sustain,
-                                "SUSTAIN",
-                                false,
-                                GOLD_RGB,
-                                40.0,
-                                78.0,
-                            );
-                            build_knob_cell(
-                                cx,
-                                UiData::params,
-                                |p| &p.amp_release,
-                                "RELEASE",
-                                false,
-                                CORAL_RGB,
-                                40.0,
-                                78.0,
-                            );
+                            HStack::new(cx, move |cx| {
+                                build_knob_cell(
+                                    cx,
+                                    UiData::params,
+                                    |p| &p.amp_attack,
+                                    "ATTACK",
+                                    false,
+                                    AMBER_RGB,
+                                    36.0,
+                                    72.0,
+                                );
+                                build_knob_cell(
+                                    cx,
+                                    UiData::params,
+                                    |p| &p.amp_decay,
+                                    "DECAY",
+                                    false,
+                                    AMBER_RGB,
+                                    36.0,
+                                    72.0,
+                                );
+                                build_knob_cell(
+                                    cx,
+                                    UiData::params,
+                                    |p| &p.amp_sustain,
+                                    "SUSTAIN",
+                                    false,
+                                    GOLD_RGB,
+                                    36.0,
+                                    72.0,
+                                );
+                                build_knob_cell(
+                                    cx,
+                                    UiData::params,
+                                    |p| &p.amp_release,
+                                    "RELEASE",
+                                    false,
+                                    CORAL_RGB,
+                                    36.0,
+                                    72.0,
+                                );
+                            })
+                            .col_between(Pixels(22.0))
+                            .child_left(Stretch(1.0))
+                            .child_right(Stretch(1.0))
+                            .child_top(Stretch(1.0))
+                            .child_bottom(Stretch(1.0))
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0));
                         })
-                        .col_between(Pixels(28.0))
-                        .child_left(Stretch(1.0))
-                        .child_right(Stretch(1.0))
-                        .child_top(Stretch(1.0))
-                        .child_bottom(Stretch(1.0))
+                        .class("hardware-module")
+                        .width(Stretch(1.25))
+                        .height(Stretch(1.0));
+
+                        VStack::new(cx, |cx| {
+                            build_module_header(cx, "KEYTRACKING", 18.0);
+
+                            HStack::new(cx, move |cx| {
+                                build_knob_cell(
+                                    cx,
+                                    UiData::params,
+                                    |p| &p.filters[0].keytrack,
+                                    "F1 KEYTRK",
+                                    false,
+                                    AMBER_RGB,
+                                    32.0,
+                                    66.0,
+                                );
+                                build_knob_cell(
+                                    cx,
+                                    UiData::params,
+                                    |p| &p.filters[1].keytrack,
+                                    "F2 KEYTRK",
+                                    false,
+                                    CORAL_RGB,
+                                    32.0,
+                                    66.0,
+                                );
+
+                                VStack::new(cx, |cx| {
+                                    HStack::new(cx, |cx| {
+                                        LedToggleSwitch::new(
+                                            cx,
+                                            UiData::params,
+                                            |p| &p.oscs[0].keytrack,
+                                            "OSC 1 KT",
+                                            "OSC 1 KT",
+                                            AMBER_RGB,
+                                        )
+                                        .width(Pixels(78.0))
+                                        .height(Pixels(22.0));
+                                        LedToggleSwitch::new(
+                                            cx,
+                                            UiData::params,
+                                            |p| &p.oscs[1].keytrack,
+                                            "OSC 2 KT",
+                                            "OSC 2 KT",
+                                            GOLD_RGB,
+                                        )
+                                        .width(Pixels(78.0))
+                                        .height(Pixels(22.0));
+                                    })
+                                    .col_between(Pixels(6.0))
+                                    .height(Pixels(22.0));
+
+                                    HStack::new(cx, |cx| {
+                                        LedToggleSwitch::new(
+                                            cx,
+                                            UiData::params,
+                                            |p| &p.oscs[2].keytrack,
+                                            "OSC 3 KT",
+                                            "OSC 3 KT",
+                                            CORAL_RGB,
+                                        )
+                                        .width(Pixels(78.0))
+                                        .height(Pixels(22.0));
+                                        LedToggleSwitch::new(
+                                            cx,
+                                            UiData::params,
+                                            |p| &p.oscs[3].keytrack,
+                                            "OSC 4 KT",
+                                            "OSC 4 KT",
+                                            AMBER_RGB,
+                                        )
+                                        .width(Pixels(78.0))
+                                        .height(Pixels(22.0));
+                                    })
+                                    .col_between(Pixels(6.0))
+                                    .height(Pixels(22.0));
+                                })
+                                .row_between(Pixels(6.0))
+                                .width(Auto)
+                                .height(Auto)
+                                .top(Stretch(1.0))
+                                .bottom(Stretch(1.0));
+                            })
+                            .col_between(Pixels(14.0))
+                            .child_left(Stretch(1.0))
+                            .child_right(Stretch(1.0))
+                            .child_top(Stretch(1.0))
+                            .child_bottom(Stretch(1.0))
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0));
+                        })
+                        .class("hardware-module")
                         .width(Stretch(1.0))
                         .height(Stretch(1.0));
                     })
-                    .class("hardware-module")
+                    .col_between(Pixels(6.0))
                     .width(Stretch(1.0))
                     .height(Stretch(1.0));
                 }
@@ -426,18 +521,7 @@ fn build_bottom_tabs(cx: &mut Context) {
                     .height(Stretch(1.0));
                 }
                 BottomTab::Routing => {
-                    VStack::new(cx, |cx| {
-                        build_module_header(cx, "ROUTING (M2)", 22.0);
-
-                        build_placeholder_bay(
-                            cx,
-                            "SERIAL / PARALLEL FILTER & INSERT ROUTING",
-                            "OSC 1-4 + NOISE -> F1 / F2 -> FEEDBACK -> MASTER (M2)",
-                        );
-                    })
-                    .class("hardware-module")
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0));
+                    build_routing_tab(cx, params.clone(), gui_context.clone());
                 }
                 BottomTab::MacrosGlobal => {
                     VStack::new(cx, |cx| {
@@ -504,6 +588,8 @@ pub(crate) fn create(
             // Main chassis: 3-Column Layout (Oscillators | Filters | Master FX) + 4-Tab Bottom Bar
             VStack::new(cx, move |cx| {
                 VStack::new(cx, move |cx| {
+                    let params_tabs = params_for_ui.clone();
+                    let gui_ctx_tabs = gui_ctx_for_ui.clone();
                     HStack::new(cx, move |cx| {
                         build_osc_column(
                             cx,
@@ -511,14 +597,14 @@ pub(crate) fn create(
                             params_for_ui.clone(),
                             gui_ctx_for_ui.clone(),
                         );
-                        build_filter_column(cx);
+                        build_filter_column(cx, params_for_ui, gui_ctx_for_ui);
                         build_fx_column(cx);
                     })
                     .col_between(Pixels(8.0))
                     .width(Stretch(1.0))
                     .height(Stretch(1.0));
 
-                    build_bottom_tabs(cx);
+                    build_bottom_tabs(cx, params_tabs, gui_ctx_tabs);
                 })
                 .class("section-panel")
                 .row_between(Pixels(6.0))

@@ -111,6 +111,7 @@ pub struct OscParams {
     pub spread: f32,
     pub pan: f32,
     pub level: f32,
+    pub keytrack: bool,
 }
 
 impl Default for OscParams {
@@ -134,6 +135,7 @@ impl Default for OscParams {
             spread: 0.5,
             pan: 0.0,
             level: 0.75,
+            keytrack: true,
         }
     }
 }

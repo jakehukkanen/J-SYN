@@ -447,3 +447,598 @@ fn mod_order_pm_then_warp_differs_from_warp_then_pm() {
         "Expected PM -> Warp and Warp -> PM to produce distinct waveforms, diff={diff_energy}"
     );
 }
+
+#[test]
+fn noise_generator_white_pink_brown_and_stereo_decorrelation() {
+    use j_syn_dsp::{NoiseType, SynthEngine, SynthParams, WavetableBank};
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    let render_noise = |noise_type: NoiseType, color: f32, stereo: f32| {
+        let mut params = SynthParams::default();
+        for osc in &mut params.oscs {
+            osc.enabled = false;
+        }
+        params.amp_attack_s = 0.001;
+        params.filters[0].enabled = false;
+        params.noise.enabled = true;
+        params.noise.noise_type = noise_type;
+        params.noise.color = color;
+        params.noise.stereo = stereo;
+        params.noise.level = 1.0;
+
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.note_on(0, 60, 0.8, None, &params);
+        let mut out = Vec::with_capacity(2048);
+        for _ in 0..2048 {
+            let (l, r) = eng.process_sample(&params, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            out.push((l, r));
+        }
+        out
+    };
+
+    for nt in [NoiseType::White, NoiseType::Pink, NoiseType::Brown] {
+        let out = render_noise(nt, 0.0, 0.5);
+        let rms = (out[256..].iter().map(|(l, _)| l * l).sum::<f32>() / (out.len() - 256) as f32)
+            .sqrt();
+        assert!(
+            rms > 0.01,
+            "Expected audible RMS for noise type {nt:?}, got {rms}"
+        );
+    }
+
+    let mono_out = render_noise(NoiseType::White, 0.0, 0.0);
+    for &(l, r) in &mono_out {
+        assert!(
+            (l - r).abs() < 1e-6,
+            "Expected identical L/R when stereo=0, got l={l}, r={r}"
+        );
+    }
+
+    let stereo_out = render_noise(NoiseType::White, 0.0, 1.0);
+    let stereo_diff: f32 = stereo_out[256..]
+        .iter()
+        .map(|(l, r)| (l - r).powi(2))
+        .sum();
+    assert!(
+        stereo_diff > 0.05,
+        "Expected decorrelated L/R when stereo=1.0, diff={stereo_diff}"
+    );
+
+    let dark = render_noise(NoiseType::White, -1.0, 0.0);
+    let bright = render_noise(NoiseType::White, 1.0, 0.0);
+    let hf_ratio = |buf: &[(f32, f32)]| -> f32 {
+        let slice = &buf[256..];
+        let e_tot: f32 = slice.iter().map(|(l, _)| l * l).sum::<f32>().max(1e-6);
+        let e_diff: f32 = slice.windows(2).map(|w| (w[1].0 - w[0].0).powi(2)).sum();
+        e_diff / e_tot
+    };
+    let dark_hf = hf_ratio(&dark);
+    let bright_hf = hf_ratio(&bright);
+    assert!(
+        bright_hf > dark_hf * 2.0,
+        "Expected bright color (+1) to have higher HF ratio than dark (-1): bright={bright_hf}, dark={dark_hf}"
+    );
+}
+
+#[test]
+fn dual_multimode_filters_all_topologies_stable_and_audible() {
+    use j_syn_dsp::{
+        EngineMode, FilterMode, FilterParams, FilterSlope, SynthEngine, SynthParams, WavetableBank,
+    };
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+    let modes = [
+        (FilterMode::Lp, FilterSlope::Db12),
+        (FilterMode::Lp, FilterSlope::Db24),
+        (FilterMode::Bp, FilterSlope::Db12),
+        (FilterMode::Hp, FilterSlope::Db12),
+        (FilterMode::Scream, FilterSlope::Db12),
+        (FilterMode::Daft, FilterSlope::Db12),
+        (FilterMode::Comb, FilterSlope::Db12),
+    ];
+
+    for engine_mode in [EngineMode::Vintage2007, EngineMode::Hq] {
+        for (mode, slope) in modes {
+            // Musical high-resonance / driven check
+            let mut params = SynthParams::default();
+            params.engine_mode = engine_mode;
+            params.amp_attack_s = 0.002;
+            params.oscs[0].wt_pos = 0.75;
+            params.filters[0] = FilterParams {
+                enabled: true,
+                mode,
+                slope,
+                cutoff_hz: 900.0,
+                resonance: 0.85,
+                drive: 0.75,
+                keytrack: 0.5,
+                aux: 0.75,
+            };
+            params.filters[1].enabled = false;
+
+            let mut eng = SynthEngine::new(sample_rate);
+            eng.note_on(0, 60, 0.8, None, &params);
+            let mut energy = 0.0_f32;
+            for _ in 0..2048 {
+                let (l, r) = eng.process_sample(&params, &bank);
+                assert!(
+                    l.is_finite() && r.is_finite() && l.abs() < 4.0 && r.abs() < 4.0,
+                    "Filter unstable for {mode:?} ({engine_mode:?}): l={l}, r={r}"
+                );
+                energy += l * l;
+            }
+            let rms = (energy / 2048.0).sqrt();
+            assert!(
+                rms > 0.01,
+                "Expected audible signal through {mode:?} ({engine_mode:?}), rms={rms}"
+            );
+
+            // Extreme self-oscillation stability check
+            params.filters[0].resonance = 1.0;
+            params.filters[0].drive = 1.0;
+            let mut eng_ext = SynthEngine::new(sample_rate);
+            eng_ext.note_on(0, 60, 0.8, None, &params);
+            for _ in 0..2048 {
+                let (l, r) = eng_ext.process_sample(&params, &bank);
+                assert!(
+                    l.is_finite() && r.is_finite() && l.abs() < 4.0 && r.abs() < 4.0,
+                    "Self-oscillation blew up for {mode:?} ({engine_mode:?}): l={l}, r={r}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn serial_and_parallel_filter_routing_and_source_balance() {
+    use j_syn_dsp::{
+        FilterMode, FilterParams, FilterRouting, FilterSlope, SynthEngine, SynthParams,
+        WavetableBank,
+    };
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    let render = |routing: FilterRouting, osc1_bal: f32, flt_mix: f32| {
+        let mut params = SynthParams::default();
+        params.master_gain = 1.0;
+        params.amp_attack_s = 0.002;
+        params.oscs[0].level = 1.0;
+        params.oscs[0].wt_pos = 0.75; // rich harmonic waveform
+        params.filters[0] = FilterParams {
+            enabled: true,
+            mode: FilterMode::Lp,
+            slope: FilterSlope::Db24,
+            cutoff_hz: 400.0,
+            resonance: 0.2,
+            drive: 0.0,
+            keytrack: 0.0,
+            aux: 1.0,
+        };
+        params.filters[1] = FilterParams {
+            enabled: true,
+            mode: FilterMode::Hp,
+            slope: FilterSlope::Db12,
+            cutoff_hz: 4_000.0,
+            resonance: 0.2,
+            drive: 0.0,
+            keytrack: 0.0,
+            aux: 1.0,
+        };
+        params.routing.filter_routing = routing;
+        params.routing.osc_filter_balance[0] = osc1_bal;
+        params.routing.filter_mix = flt_mix;
+
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.note_on(0, 60, 0.8, None, &params);
+        let mut buf = Vec::with_capacity(2048);
+        for _ in 0..2048 {
+            let (l, r) = eng.process_sample(&params, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            buf.push(l);
+        }
+        buf
+    };
+
+    // Serial F1 (LP400) -> F2 (HP4000) with mix=F2 leaves almost no energy
+    let serial = render(FilterRouting::Serial, -1.0, 1.0);
+    // Parallel F1 + F2 with centered source send and mix passes lows + highs
+    let parallel = render(FilterRouting::Parallel, 0.0, 0.0);
+
+    let rms = |b: &[f32]| (b[256..].iter().map(|s| s * s).sum::<f32>() / (b.len() - 256) as f32).sqrt();
+    let serial_rms = rms(&serial);
+    let parallel_rms = rms(&parallel);
+    let diff: f32 = serial.iter().zip(parallel.iter()).map(|(a, b)| (a - b).powi(2)).sum();
+
+    assert!(
+        parallel_rms > serial_rms * 2.0 && diff > 0.01,
+        "Expected Parallel ({parallel_rms}) and Serial ({serial_rms}) routing to differ strongly (diff={diff})"
+    );
+
+    // Verify per-source balance routes OSC1 exclusively to F1 vs F2 in Parallel
+    let to_f1_only = render(FilterRouting::Parallel, -1.0, -1.0);
+    let muted_by_send_to_f2 = render(FilterRouting::Parallel, 1.0, -1.0);
+    let f1_rms = rms(&to_f1_only);
+    let muted_rms = rms(&muted_by_send_to_f2);
+    assert!(
+        f1_rms > 0.005 && muted_rms < f1_rms * 0.1,
+        "Expected osc_filter_balance=-1.0 routed to F1 to be audible ({f1_rms}) vs balance=+1.0 with mix=-1.0 muted ({muted_rms})"
+    );
+}
+
+#[test]
+fn insert_waveshaper_modes_positions_and_voice_feedback() {
+    use j_syn_dsp::{
+        FilterMode, FilterParams, FilterSlope, InsertMode, InsertPosition, SynthEngine,
+        SynthParams, WavetableBank,
+    };
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    let render = |mode: InsertMode, pos: InsertPosition, feedback: f32| {
+        let mut params = SynthParams::default();
+        params.amp_attack_s = 0.002;
+        params.oscs[0].wt_pos = 0.0;
+        params.filters[0] = FilterParams {
+            enabled: true,
+            mode: FilterMode::Lp,
+            slope: FilterSlope::Db12,
+            cutoff_hz: 1_800.0,
+            resonance: 0.25,
+            drive: 0.0,
+            keytrack: 0.0,
+            aux: 1.0,
+        };
+        params.filters[1] = FilterParams {
+            enabled: true,
+            mode: FilterMode::Lp,
+            slope: FilterSlope::Db12,
+            cutoff_hz: 4_000.0,
+            resonance: 0.15,
+            drive: 0.0,
+            keytrack: 0.0,
+            aux: 1.0,
+        };
+        params.routing.inserts[0].mode = mode;
+        params.routing.inserts[0].position = pos;
+        params.routing.inserts[0].drive = 0.8;
+        params.routing.inserts[0].mix = 1.0;
+        params.routing.feedback_amount = feedback;
+
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.note_on(0, 60, 0.8, None, &params);
+        let mut buf = Vec::with_capacity(2048);
+        for _ in 0..2048 {
+            let (l, r) = eng.process_sample(&params, &bank);
+            assert!(
+                l.is_finite() && r.is_finite() && l.abs() < 4.0 && r.abs() < 4.0,
+                "Insert/feedback unstable for {mode:?} @ {pos:?}: l={l}, r={r}"
+            );
+            buf.push(l);
+        }
+        buf
+    };
+
+    let baseline = render(InsertMode::Off, InsertPosition::BetweenFilters, 0.0);
+
+    for mode in [InsertMode::SineShaper, InsertMode::Parabolic, InsertMode::Bitcrush] {
+        for pos in [
+            InsertPosition::PreFilter,
+            InsertPosition::BetweenFilters,
+            InsertPosition::PostFilter,
+        ] {
+            let out = render(mode, pos, 0.85);
+            let rms = (out[256..].iter().map(|s| s * s).sum::<f32>() / (out.len() - 256) as f32)
+                .sqrt();
+            let diff: f32 = out.iter().zip(baseline.iter()).map(|(a, b)| (a - b).powi(2)).sum();
+            assert!(
+                rms > 0.01 && diff > 0.01,
+                "Expected audible waveshaping for {mode:?} @ {pos:?}: rms={rms}, diff={diff}"
+            );
+        }
+    }
+}
+
+#[test]
+fn direct_out_bypasses_filters_inserts_and_feedback() {
+    use j_syn_dsp::{
+        FilterMode, FilterParams, FilterSlope, InsertMode, InsertPosition, SynthEngine,
+        SynthParams, WavetableBank,
+    };
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    let render = |osc_direct: bool, filters_on: bool| {
+        let mut params = SynthParams::default();
+        params.master_gain = 1.0;
+        params.amp_attack_s = 0.001;
+        params.oscs[0].level = 1.0;
+        params.oscs[0].wt_pos = 0.0;
+        params.routing.osc_direct[0] = osc_direct;
+        params.filters[0] = FilterParams {
+            enabled: filters_on,
+            mode: FilterMode::Lp,
+            slope: FilterSlope::Db24,
+            cutoff_hz: 80.0, // heavy attenuation when routed through filter
+            resonance: 0.0,
+            drive: 0.0,
+            keytrack: 0.0,
+            aux: 1.0,
+        };
+        params.routing.inserts[0].mode = if filters_on {
+            InsertMode::SoftClip
+        } else {
+            InsertMode::Off
+        };
+        params.routing.inserts[0].position = InsertPosition::PreFilter;
+        params.routing.inserts[0].drive = 1.0;
+
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.note_on(0, 84, 0.8, None, &params);
+        let mut buf = Vec::with_capacity(2048);
+        for _ in 0..2048 {
+            let (l, r) = eng.process_sample(&params, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            buf.push(l);
+        }
+        buf
+    };
+
+    let direct_with_heavy_filter = render(true, true);
+    let direct_without_filter = render(true, false);
+    let filtered = render(false, true);
+
+    let max_diff: f32 = direct_with_heavy_filter
+        .iter()
+        .zip(direct_without_filter.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f32::max);
+    assert!(
+        max_diff < 1e-6,
+        "Direct out should completely bypass filters/inserts, max_diff={max_diff}"
+    );
+
+    let rms = |b: &[f32]| (b[1024..].iter().map(|s| s * s).sum::<f32>() / (b.len() - 1024) as f32).sqrt();
+    let direct_rms = rms(&direct_with_heavy_filter);
+    let filtered_rms = rms(&filtered);
+    assert!(
+        direct_rms > filtered_rms * 10.0,
+        "Direct out ({direct_rms}) should remain full amplitude even when Filter 1 is at 80 Hz (filtered={filtered_rms})"
+    );
+}
+
+#[test]
+fn osc_keytrack_off_locks_pitch_to_c3() {
+    use j_syn_dsp::{SynthEngine, SynthParams, WavetableBank};
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    let render_note = |note: u8, keytrack: bool| {
+        let mut params = SynthParams::default();
+        params.amp_attack_s = 0.001;
+        params.filters[0].enabled = false;
+        params.oscs[0].keytrack = keytrack;
+        params.oscs[0].semi = 3; // verify tuning offset still applies
+
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.note_on(0, note, 0.8, None, &params);
+        let mut buf = Vec::with_capacity(1024);
+        for _ in 0..1024 {
+            let (l, _) = eng.process_sample(&params, &bank);
+            buf.push(l);
+        }
+        buf
+    };
+
+    let c3 = render_note(60, false);
+    let c5_locked = render_note(84, false);
+    let c5_tracked = render_note(84, true);
+
+    let diff_locked: f32 = c3
+        .iter()
+        .zip(c5_locked.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f32::max);
+    assert!(
+        diff_locked < 1e-5,
+        "Expected keytrack=false on C5 to match C3 identically, max_diff={diff_locked}"
+    );
+
+    let diff_tracked: f32 = c3
+        .iter()
+        .zip(c5_tracked.iter())
+        .map(|(a, b)| (a - b).powi(2))
+        .sum();
+    assert!(
+        diff_tracked > 0.5,
+        "Expected keytrack=true on C5 to differ from C3, diff={diff_tracked}"
+    );
+}
+
+#[test]
+fn multi_filters_and_dual_inserts_are_stable_and_audible() {
+    use j_syn_dsp::{
+        evaluate_filter_response_db, EngineMode, FilterMode, FilterParams, FilterSlope, InsertMode,
+        InsertPosition, SynthEngine, SynthParams, WavetableBank,
+    };
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    for mode in [
+        FilterMode::HpPeak,
+        FilterMode::HpNotch,
+        FilterMode::LpNotch,
+        FilterMode::LpPeak,
+    ] {
+        let fp = FilterParams {
+            enabled: true,
+            mode,
+            slope: FilterSlope::Db12,
+            cutoff_hz: 600.0,
+            resonance: 0.75,
+            drive: 0.5,
+            keytrack: 0.0,
+            aux: 0.65,
+        };
+        assert!(evaluate_filter_response_db(&fp, 1_000.0).is_finite());
+
+        let mut params = SynthParams::default();
+        params.engine_mode = EngineMode::Hq;
+        params.amp_attack_s = 0.002;
+        params.oscs[0].wt_pos = 0.75;
+        params.filters[0] = fp;
+        params.routing.inserts[0].mode = InsertMode::SoftClip;
+        params.routing.inserts[0].position = InsertPosition::PreFilter;
+        params.routing.inserts[0].drive = 0.7;
+        params.routing.inserts[1].mode = InsertMode::Parabolic;
+        params.routing.inserts[1].position = InsertPosition::PostFilter;
+        params.routing.inserts[1].drive = 0.6;
+
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.note_on(0, 60, 0.8, None, &params);
+        let mut energy = 0.0_f32;
+        for _ in 0..2048 {
+            let (l, r) = eng.process_sample(&params, &bank);
+            assert!(
+                l.is_finite() && r.is_finite() && l.abs() < 4.0 && r.abs() < 4.0,
+                "Multi-filter/dual-insert unstable for {mode:?}: l={l}, r={r}"
+            );
+            energy += l * l;
+        }
+        let rms = (energy / 2048.0).sqrt();
+        assert!(rms > 0.01, "Expected audible output for {mode:?}, rms={rms}");
+    }
+}
+
+
+#[test]
+fn filter_slopes_6_to_48_db_per_octave_audio_and_response() {
+    use j_syn_dsp::{
+        evaluate_filter_response_db, FilterMode, FilterParams, FilterSlope, SynthEngine,
+        SynthParams, WavetableBank,
+    };
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+    let slopes = [
+        FilterSlope::Db6,
+        FilterSlope::Db12,
+        FilterSlope::Db24,
+        FilterSlope::Db36,
+        FilterSlope::Db48,
+    ];
+
+    for mode in [FilterMode::Lp, FilterMode::Bp, FilterMode::Hp] {
+        let mut prev_stopband_db = f32::INFINITY;
+        let stopband_freq = match mode {
+            FilterMode::Lp => 8_000.0,
+            FilterMode::Hp => 125.0,
+            FilterMode::Bp => 8_000.0,
+            _ => 8_000.0,
+        };
+
+        for slope in slopes {
+            let fp = FilterParams {
+                enabled: true,
+                mode,
+                slope,
+                cutoff_hz: 1_000.0,
+                resonance: 0.35,
+                drive: 0.0,
+                keytrack: 0.0,
+                aux: 1.0,
+            };
+            let db = evaluate_filter_response_db(&fp, stopband_freq);
+            assert!(
+                db.is_finite() && db <= prev_stopband_db + 0.01,
+                "Expected steeper stopband attenuation for {mode:?} {slope:?}: db={db}, prev={prev_stopband_db}"
+            );
+            prev_stopband_db = db;
+
+            // Verify audio stability at high resonance (resonance = 1.0)
+            let mut params = SynthParams::default();
+            params.amp_attack_s = 0.002;
+            params.oscs[0].wt_pos = 0.75;
+            params.filters[0] = FilterParams {
+                resonance: 1.0,
+                ..fp
+            };
+            let mut eng = SynthEngine::new(sample_rate);
+            eng.note_on(0, 60, 0.8, None, &params);
+            for _ in 0..2048 {
+                let (l, r) = eng.process_sample(&params, &bank);
+                assert!(
+                    l.is_finite() && r.is_finite() && l.abs() < 4.0 && r.abs() < 4.0,
+                    "Filter slope unstable at max resonance for {mode:?} {slope:?}: l={l}, r={r}"
+                );
+            }
+        }
+    }
+}
+
+
+#[test]
+fn tube_mech_and_cascaded_insert_shapers_per_voice_isolation() {
+    use j_syn_dsp::{InsertMode, InsertPosition, SynthEngine, SynthParams, WavetableBank};
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    for mode in [
+        InsertMode::Tube,
+        InsertMode::Mech,
+        InsertMode::TubeToMech,
+        InsertMode::MechToTube,
+    ] {
+        let mut params = SynthParams::default();
+        params.master_gain = 1.0;
+        params.amp_attack_s = 0.002;
+        params.oscs[0].wt_pos = 0.25;
+        params.routing.inserts[0].mode = mode;
+        params.routing.inserts[0].position = InsertPosition::PostFilter;
+        params.routing.inserts[0].drive = 0.85;
+        params.routing.inserts[0].mix = 1.0;
+
+        // Render note A alone, note B alone, and A+B chord together
+        let mut eng_a = SynthEngine::new(sample_rate);
+        eng_a.note_on(0, 48, 0.8, None, &params);
+
+        let mut eng_b = SynthEngine::new(sample_rate);
+        eng_b.note_on(0, 55, 0.8, None, &params);
+
+        let mut eng_chord = SynthEngine::new(sample_rate);
+        eng_chord.note_on(0, 48, 0.8, None, &params);
+        eng_chord.note_on(0, 55, 0.8, None, &params);
+
+        let mut peak = 0.0_f32;
+        let mut max_intermod_err = 0.0_f32;
+        for _ in 0..1024 {
+            let (la, ra) = eng_a.process_sample(&params, &bank);
+            let (lb, rb) = eng_b.process_sample(&params, &bank);
+            let (lc, rc) = eng_chord.process_sample(&params, &bank);
+
+            assert!(
+                lc.is_finite() && rc.is_finite() && lc.abs() < 2.5 && rc.abs() < 2.5,
+                "Insert mode {mode:?} blew up: lc={lc}, rc={rc}"
+            );
+            peak = peak.max(la.abs()).max(ra.abs());
+            max_intermod_err = max_intermod_err
+                .max((lc - (la + lb)).abs())
+                .max((rc - (ra + rb)).abs());
+        }
+
+        assert!(peak > 0.05 && peak <= 1.2, "Unexpected peak for {mode:?}: {peak}");
+        assert!(
+            max_intermod_err < 1e-4,
+            "Expected zero polyphonic intermodulation for {mode:?}, err={max_intermod_err}"
+        );
+    }
+}

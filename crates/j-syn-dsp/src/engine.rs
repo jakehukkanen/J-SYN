@@ -21,6 +21,9 @@ pub struct SynthEngine {
     smoothed_wt_pos: [f32; 4],
     smoothed_mod_depth: [f32; 4],
     smoothed_warp_amount: [f32; 4],
+    smoothed_filter_cutoff: [f32; 2],
+    smoothed_filter_res: [f32; 2],
+    smoothed_filter_drive: [f32; 2],
     smoothed_master_gain: f32,
     rng_state: u32,
 }
@@ -28,7 +31,7 @@ pub struct SynthEngine {
 impl SynthEngine {
     pub fn new(sample_rate: f32) -> Self {
         let sr = sample_rate.max(1000.0);
-        Self {
+        let mut engine = Self {
             voices: std::array::from_fn(|_| Voice::new()),
             tail_voices: std::array::from_fn(|_| TailVoice::new()),
             sample_rate: sr,
@@ -43,15 +46,28 @@ impl SynthEngine {
             smoothed_wt_pos: [0.0; 4],
             smoothed_mod_depth: [0.0; 4],
             smoothed_warp_amount: [0.0; 4],
+            smoothed_filter_cutoff: [20_000.0, 2_000.0],
+            smoothed_filter_res: [0.0; 2],
+            smoothed_filter_drive: [0.0; 2],
             smoothed_master_gain: 0.707_106_77,
             rng_state: 0x9E37_79B9,
-        }
+        };
+        engine.set_sample_rate(sr);
+        engine
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let sr = sample_rate.max(1000.0);
         self.sample_rate = sr;
         self.control_tick_period = (sr / 1500.0).round().max(1.0) as u32;
+        for v in &mut self.voices {
+            v.inserts[0].set_sample_rate(sr);
+            v.inserts[1].set_sample_rate(sr);
+        }
+        for tv in &mut self.tail_voices {
+            tv.inserts[0].set_sample_rate(sr);
+            tv.inserts[1].set_sample_rate(sr);
+        }
     }
 
     pub fn reset(&mut self) {
@@ -95,6 +111,11 @@ impl SynthEngine {
                 self.smoothed_wt_pos[i] = params.oscs[i].wt_pos;
                 self.smoothed_mod_depth[i] = params.oscs[i].mod_depth;
                 self.smoothed_warp_amount[i] = params.oscs[i].warp_amount;
+            }
+            for i in 0..2 {
+                self.smoothed_filter_cutoff[i] = params.filters[i].cutoff_hz;
+                self.smoothed_filter_res[i] = params.filters[i].resonance;
+                self.smoothed_filter_drive[i] = params.filters[i].drive;
             }
         }
 
@@ -313,6 +334,15 @@ impl SynthEngine {
                 self.smoothed_warp_amount[i] +=
                     (params.oscs[i].warp_amount - self.smoothed_warp_amount[i]) * CR_COEFF;
             }
+            for i in 0..2 {
+                let log_cur = self.smoothed_filter_cutoff[i].max(20.0).ln();
+                let log_tgt = params.filters[i].cutoff_hz.max(20.0).ln();
+                self.smoothed_filter_cutoff[i] = (log_cur + (log_tgt - log_cur) * CR_COEFF).exp();
+                self.smoothed_filter_res[i] +=
+                    (params.filters[i].resonance - self.smoothed_filter_res[i]) * CR_COEFF;
+                self.smoothed_filter_drive[i] +=
+                    (params.filters[i].drive - self.smoothed_filter_drive[i]) * CR_COEFF;
+            }
         }
         self.control_tick_counter += 1;
         if self.control_tick_counter >= self.control_tick_period {
@@ -324,6 +354,11 @@ impl SynthEngine {
             cr_params.oscs[i].wt_pos = self.smoothed_wt_pos[i];
             cr_params.oscs[i].mod_depth = self.smoothed_mod_depth[i];
             cr_params.oscs[i].warp_amount = self.smoothed_warp_amount[i];
+        }
+        for i in 0..2 {
+            cr_params.filters[i].cutoff_hz = self.smoothed_filter_cutoff[i];
+            cr_params.filters[i].resonance = self.smoothed_filter_res[i];
+            cr_params.filters[i].drive = self.smoothed_filter_drive[i];
         }
 
         let pb_semi = self.pitch_bend_smoothed * params.pitch_bend_range;
@@ -382,6 +417,18 @@ impl SynthEngine {
                 v.prev_osc_out[i] = 0.0;
             }
             osc.on_note_on(params.oscs[i].retrig, rng_state);
+        }
+
+        v.noise.on_note_on(rng_state);
+        v.inserts[0].reset();
+        v.inserts[1].reset();
+        v.feedback.reset();
+        for (i, flt) in v.filters.iter_mut().enumerate() {
+            flt.on_note_on(
+                params.filters[i].cutoff_hz,
+                params.filters[i].resonance,
+                params.filters[i].drive,
+            );
         }
     }
 
