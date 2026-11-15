@@ -668,7 +668,7 @@ impl OscPluginParams {
                 .with_unit(" %")
                 .with_value_to_string(formatters::v2s_f32_percentage(0))
                 .with_string_to_value(formatters::s2v_f32_percentage()),
-            octave: IntParam::new("Octave", 0, IntRange::Linear { min: -3, max: 3 }),
+            octave: IntParam::new("Octave", 0, IntRange::Linear { min: -4, max: 4 }),
             semi: IntParam::new("Semi", 0, IntRange::Linear { min: -12, max: 12 }),
             fine: FloatParam::new(
                 "Fine",
@@ -985,6 +985,7 @@ impl ModSeqPluginParams {
             retrig: self.retrig.value().into(),
             num_steps: self.num_steps.value().clamp(2, 16) as usize,
             smooth: self.smooth.value(),
+            rate_mod: 0.0,
         }
     }
 }

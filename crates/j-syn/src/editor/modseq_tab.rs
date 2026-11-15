@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use j_syn_dsp::mod_matrix::ModMatrixSource;
+use j_syn_dsp::mod_matrix::{ModDestination, ModMatrixSource};
 use j_syn_dsp::{
     evaluate_adsr_preview, evaluate_modseq_curve, evaluate_mseg_curve, evaluate_step_shape,
     AdsrParams, LfoPreset, ModSeqStep, ModSeqStepShape, MsegNode, MAX_MODSEQ_STEPS,
@@ -17,10 +17,10 @@ use nih_plug_vizia::widgets::util::ModifiersExt;
 
 use super::controls::{
     bold_label, build_enum_dropdown, build_flex_pill_cell, build_knob_cell,
-    build_knob_cell_with_readout,
+    build_knob_cell_mod_fmt, build_knob_cell_with_readout,
 };
-use super::mod_bar::ModUiState;
-use super::{UiData, UiEvent, CORAL_RGB, GOLD_RGB};
+use super::mod_bar::{bottom_tab_tag, ModUiState};
+use super::{BottomTab, UiData, UiEvent, CORAL_RGB, GOLD_RGB};
 use crate::{
     JSynPluginParams, ModSeqModeParam, ModSeqPlayParam, ModSeqRateParam, ModSeqRetrigParam,
     ModSeqSyncParam,
@@ -1527,7 +1527,7 @@ pub(super) fn build_modseq_tab(
                                 VStack::new(cx, {
                                     let p = p_ctrl.clone();
                                     let g = g_ctrl.clone();
-                                    let u = u_ctrl;
+                                    let u = u_ctrl.clone();
                                     move |cx| {
                                         build_labeled_dropdown(
                                             cx,
@@ -1609,7 +1609,8 @@ pub(super) fn build_modseq_tab(
                                 .top(Stretch(1.0))
                                 .bottom(Stretch(1.0));
 
-                                build_knob_cell(
+                                let p_fmt = p_ctrl.clone();
+                                build_knob_cell_mod_fmt(
                                     cx,
                                     UiData::params,
                                     move |pr| &pr.modseqs[seq_idx].free_hz,
@@ -1618,6 +1619,21 @@ pub(super) fn build_modseq_tab(
                                     accent,
                                     30.0,
                                     48.0,
+                                    ModDestination::modseq_rate(seq_idx),
+                                    u_ctrl,
+                                    bottom_tab_tag(BottomTab::ModSeq),
+                                    Arc::new(move |norm, opt_mod_offset| {
+                                        if p_fmt.modseqs[seq_idx].sync_mode.value()
+                                            == ModSeqSyncParam::TempoSync
+                                        {
+                                            if let Some(off) = opt_mod_offset {
+                                                return format!("{:.2}x", 2.0_f32.powf(off * 2.0));
+                                            }
+                                        }
+                                        p_fmt.modseqs[seq_idx]
+                                            .free_hz
+                                            .normalized_value_to_string(norm, true)
+                                    }),
                                 );
 
                                 build_knob_cell(

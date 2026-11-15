@@ -15,7 +15,7 @@ use super::controls::bold_label;
 use super::mod_bar::ModUiState;
 use super::{TooltipState, UiEvent};
 
-pub(super) type ValueFormatter = Arc<dyn Fn(&ParamWidgetBase) -> String + Send + Sync>;
+pub(super) type ValueFormatter = Arc<dyn Fn(f32, Option<f32>) -> String + Send + Sync>;
 
 const KNOB_DRAG_PIXELS: f32 = 150.0;
 const KNOB_FINE_MULTIPLIER: f32 = 0.12;
@@ -39,6 +39,58 @@ struct ModTargetBinding {
     dest: ModDestination,
     mod_ui: Arc<ModUiState>,
     tab_tag: u8,
+}
+
+fn mod_slot_offsets(mb: &ModTargetBinding, md: ModDepthDrag) -> (f32, f32, f32) {
+    let mat = mb.mod_ui.params.mod_matrix.snapshot();
+    let slot = mat
+        .slots
+        .get(md.slot_idx)
+        .copied()
+        .filter(|s| s.enabled && s.source != ModMatrixSource::None)
+        .or_else(|| mb.mod_ui.primary_slot_for_dest(mb.dest).map(|(_, s)| s));
+    let (depth, bipolar) = match slot {
+        Some(s) => (s.depth, s.bipolar),
+        None => (md.start_depth, false),
+    };
+    let (lo_offset, hi_offset) = if bipolar {
+        let span = depth.abs();
+        (-span, span)
+    } else if depth >= 0.0 {
+        (0.0, depth)
+    } else {
+        (depth, 0.0)
+    };
+    (lo_offset, hi_offset, depth)
+}
+
+fn format_mod_range_tooltip(
+    base_norm: f32,
+    mb: &ModTargetBinding,
+    md: ModDepthDrag,
+    fmt: impl Fn(f32, Option<f32>) -> String,
+) -> String {
+    let (lo_offset, hi_offset, depth) = mod_slot_offsets(mb, md);
+    let lo_norm = (base_norm + lo_offset).clamp(0.0, 1.0);
+    let hi_norm = (base_norm + hi_offset).clamp(0.0, 1.0);
+    let min_str = fmt(lo_norm, Some(lo_offset));
+    let max_str = fmt(hi_norm, Some(hi_offset));
+    format!("{min_str} → {max_str} ({:+.0}%)", depth * 100.0)
+}
+
+fn emit_widget_tooltip(cx: &mut EventContext, text: String) {
+    let bounds = cx.bounds();
+    if bounds.w <= 0.0 || bounds.h <= 0.0 {
+        return;
+    }
+    let dpx = cx.scale_factor().max(0.1);
+    cx.emit(UiEvent::ShowTooltip(TooltipState {
+        visible: true,
+        text,
+        center_x: (bounds.x + bounds.w * 0.5) / dpx,
+        anchor_top: bounds.y / dpx,
+        anchor_bottom: (bounds.y + bounds.h) / dpx,
+    }));
 }
 
 /// Handles Alt+drag modulation depth changes when active, returning true if handled.
@@ -220,32 +272,30 @@ impl RotaryKnob {
         )
     }
 
-    fn format_tooltip_text(&self) -> String {
-        if let Some(md) = self.mod_depth_drag {
-            format!("Mod: {:+.0}%", md.start_depth * 100.0)
-        } else if let Some(ref fmt) = self.value_formatter {
-            fmt(&self.param_base)
+    fn format_norm_value(&self, norm: f32, mod_offset: Option<f32>) -> String {
+        let clamped = norm.clamp(0.0, 1.0);
+        if let Some(ref fmt) = self.value_formatter {
+            fmt(clamped, mod_offset)
         } else {
-            self.param_base.normalized_value_to_string(
-                self.param_base.modulated_normalized_value(),
-                true,
-            )
+            self.param_base.normalized_value_to_string(clamped, true)
+        }
+    }
+
+    fn format_tooltip_text(&self) -> String {
+        if let (Some(md), Some(ref mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
+            let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
+            format_mod_range_tooltip(base_norm, mb, md, |n, off| {
+                self.format_norm_value(n, off)
+            })
+        } else if let Some(md) = self.mod_depth_drag {
+            format!("Mod: {:+.0}%", md.start_depth * 100.0)
+        } else {
+            self.format_norm_value(self.param_base.modulated_normalized_value(), None)
         }
     }
 
     fn emit_tooltip(&self, cx: &mut EventContext) {
-        let bounds = cx.bounds();
-        if bounds.w <= 0.0 || bounds.h <= 0.0 {
-            return;
-        }
-        let dpx = cx.scale_factor().max(0.1);
-        cx.emit(UiEvent::ShowTooltip(TooltipState {
-            visible: true,
-            text: self.format_tooltip_text(),
-            center_x: (bounds.x + bounds.w * 0.5) / dpx,
-            anchor_top: bounds.y / dpx,
-            anchor_bottom: (bounds.y + bounds.h) / dpx,
-        }));
+        emit_widget_tooltip(cx, self.format_tooltip_text());
     }
 
     fn reset_to_default(&mut self, cx: &mut EventContext) {
@@ -1005,6 +1055,7 @@ fn format_inline_value(raw: String) -> String {
 pub struct ParamStepPill {
     param_base: ParamWidgetBase,
     num_steps: usize,
+    hovered: bool,
     drag_active: bool,
     drag_moved: bool,
     start_y: f32,
@@ -1075,6 +1126,22 @@ impl ParamStepPill {
         )
     }
 
+    fn format_tooltip_text(&self) -> Option<String> {
+        let (Some(md), Some(ref mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) else {
+            return None;
+        };
+        let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
+        Some(format_mod_range_tooltip(base_norm, mb, md, |n, _| {
+            format_inline_value(self.param_base.normalized_value_to_string(n, true))
+        }))
+    }
+
+    fn emit_tooltip(&self, cx: &mut EventContext) {
+        if let Some(text) = self.format_tooltip_text() {
+            emit_widget_tooltip(cx, text);
+        }
+    }
+
     fn build_inner<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         params: L,
@@ -1097,6 +1164,7 @@ impl ParamStepPill {
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
             num_steps: num_steps.max(2),
+            hovered: false,
             drag_active: false,
             drag_moved: false,
             start_y: 0.0,
@@ -1106,36 +1174,31 @@ impl ParamStepPill {
         }
         .build(cx, move |cx| {
             if let Some(title) = inline_label {
-                HStack::new(
-                    cx,
-                    ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
-                        let text_lens = param_data.make_lens(|param| {
-                            format_inline_value(
-                                param.normalized_value_to_string(
-                                    param.modulated_normalized_value(),
-                                    true,
-                                ),
-                            )
-                        });
-                        bold_label(cx, title, "inline-pill-label")
-                            .width(Auto)
-                            .height(Stretch(1.0))
-                            .child_top(Stretch(1.0))
-                            .child_bottom(Stretch(1.0))
-                            .hoverable(false);
-                        Element::new(cx).width(Stretch(1.0)).hoverable(false);
-                        bold_label(cx, text_lens, "inline-pill-value")
-                            .width(Auto)
-                            .height(Stretch(1.0))
-                            .child_top(Stretch(1.0))
-                            .child_bottom(Stretch(1.0))
-                            .hoverable(false);
-                    }),
-                )
+                let text_lens = ParamWidgetBase::make_lens(params, params_to_param, |param| {
+                    format_inline_value(
+                        param.normalized_value_to_string(param.modulated_normalized_value(), true),
+                    )
+                });
+                HStack::new(cx, move |cx| {
+                    bold_label(cx, title, "inline-pill-label")
+                        .width(Auto)
+                        .height(Stretch(1.0))
+                        .child_top(Stretch(1.0))
+                        .child_bottom(Stretch(1.0))
+                        .hoverable(false);
+                    Element::new(cx).width(Stretch(1.0)).hoverable(false);
+                    bold_label(cx, text_lens, "inline-pill-value")
+                        .width(Auto)
+                        .height(Stretch(1.0))
+                        .child_top(Stretch(1.0))
+                        .child_bottom(Stretch(1.0))
+                        .hoverable(false);
+                })
+                .col_between(Pixels(4.0))
                 .width(Stretch(1.0))
                 .height(Stretch(1.0))
-                .child_left(Pixels(2.0))
-                .child_right(Pixels(2.0))
+                .child_left(Pixels(3.0))
+                .child_right(Pixels(3.0))
                 .hoverable(false);
             } else {
                 ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
@@ -1167,6 +1230,15 @@ impl View for ParamStepPill {
         });
 
         event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseOver => {
+                self.hovered = true;
+            }
+            WindowEvent::MouseOut => {
+                self.hovered = false;
+                if self.mod_depth_drag.is_none() {
+                    cx.emit(UiEvent::HideTooltip);
+                }
+            }
             WindowEvent::MouseDown(MouseButton::Left)
             | WindowEvent::MouseDoubleClick(MouseButton::Left)
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
@@ -1181,6 +1253,7 @@ impl View for ParamStepPill {
                             mb.mod_ui.focus_slot(mb.dest, slot_idx);
                             cx.capture();
                             cx.emit(UiEvent::ModUiChanged);
+                            self.emit_tooltip(cx);
                             cx.needs_redraw();
                             meta.consume();
                             return;
@@ -1192,6 +1265,7 @@ impl View for ParamStepPill {
                     self.param_base.begin_set_parameter(cx);
                     self.param_base.set_normalized_value(cx, def);
                     self.param_base.end_set_parameter(cx);
+                    cx.emit(UiEvent::ModUiChanged);
                 } else {
                     self.drag_active = true;
                     self.drag_moved = false;
@@ -1233,12 +1307,14 @@ impl View for ParamStepPill {
                 self.param_base
                     .set_normalized_value(cx, (prev_idx as f32) * step);
                 self.param_base.end_set_parameter(cx);
+                cx.emit(UiEvent::ModUiChanged);
                 meta.consume();
             }
             WindowEvent::MouseUp(MouseButton::Left) => {
                 if self.mod_depth_drag.is_some() {
                     self.mod_depth_drag = None;
                     cx.release();
+                    cx.emit(UiEvent::HideTooltip);
                     cx.needs_redraw();
                     meta.consume();
                 } else if self.drag_active {
@@ -1255,11 +1331,13 @@ impl View for ParamStepPill {
                     self.drag_moved = false;
                     cx.release();
                     self.param_base.end_set_parameter(cx);
+                    cx.emit(UiEvent::ModUiChanged);
                     meta.consume();
                 }
             }
             WindowEvent::MouseMove(_x, y) => {
                 if handle_mod_depth_move(&mut self.mod_depth_drag, &self.mod_binding, cx, *y) {
+                    self.emit_tooltip(cx);
                     meta.consume();
                     return;
                 }
@@ -1270,6 +1348,7 @@ impl View for ParamStepPill {
                         let dy = (self.start_y - *y) / (90.0 * cx.scale_factor());
                         let new_val = (self.start_val + dy).clamp(0.0, 1.0);
                         self.param_base.set_normalized_value(cx, new_val);
+                        cx.emit(UiEvent::ModUiChanged);
                     }
                     meta.consume();
                 }
@@ -1281,6 +1360,7 @@ impl View for ParamStepPill {
                 let next = (cur + sy.signum() * step).clamp(0.0, 1.0);
                 self.param_base.set_normalized_value(cx, next);
                 self.param_base.end_set_parameter(cx);
+                cx.emit(UiEvent::ModUiChanged);
                 meta.consume();
             }
             _ => {}

@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub const NUM_MOD_SLOTS: usize = 32;
 pub const NUM_ACTIVE_SOURCES: usize = 12;
-pub const NUM_MOD_DESTS: usize = 63;
+pub const NUM_MOD_DESTS: usize = 67;
 
 /// Modulation sources assignable in any matrix slot.
 #[repr(u8)]
@@ -202,6 +202,10 @@ pub enum ModDestination {
     FilterMix = 60,
     FeedbackAmount = 61,
     GlideMs = 62,
+    ModSeq1Rate = 63,
+    ModSeq2Rate = 64,
+    ModSeq3Rate = 65,
+    ModSeq4Rate = 66,
 }
 
 impl ModDestination {
@@ -215,7 +219,7 @@ impl ModDestination {
         if idx >= NUM_MOD_DESTS {
             return None;
         }
-        // Safe exhaustive match over 0..63
+        // Safe exhaustive match over 0..67
         Some(match idx {
             0 => Self::Osc1WtPos,
             1 => Self::Osc2WtPos,
@@ -279,7 +283,11 @@ impl ModDestination {
             59 => Self::NoiseFilterSend,
             60 => Self::FilterMix,
             61 => Self::FeedbackAmount,
-            _ => Self::GlideMs,
+            62 => Self::GlideMs,
+            63 => Self::ModSeq1Rate,
+            64 => Self::ModSeq2Rate,
+            65 => Self::ModSeq3Rate,
+            _ => Self::ModSeq4Rate,
         })
     }
 
@@ -447,6 +455,16 @@ impl ModDestination {
         }
     }
 
+    #[inline]
+    pub const fn modseq_rate(idx: usize) -> Self {
+        match idx {
+            0 => Self::ModSeq1Rate,
+            1 => Self::ModSeq2Rate,
+            2 => Self::ModSeq3Rate,
+            _ => Self::ModSeq4Rate,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Osc1WtPos => "OSC1 WT",
@@ -512,6 +530,10 @@ impl ModDestination {
             Self::FilterMix => "F1/2 MIX",
             Self::FeedbackAmount => "FEEDBACK",
             Self::GlideMs => "GLIDE",
+            Self::ModSeq1Rate => "MS1 RATE",
+            Self::ModSeq2Rate => "MS2 RATE",
+            Self::ModSeq3Rate => "MS3 RATE",
+            Self::ModSeq4Rate => "MS4 RATE",
         }
     }
 }

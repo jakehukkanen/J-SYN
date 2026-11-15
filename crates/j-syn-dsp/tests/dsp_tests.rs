@@ -1293,3 +1293,183 @@ fn test_modseq_stamps_and_mseg_curve() {
     assert!(tel.modseq_phase(0) > 0.2 && tel.modseq_phase(0) < 0.35);
     assert!(tel.dest_offset(ModDestination::Filter1Cutoff) > 0.35);
 }
+
+#[test]
+fn osc_octave_range_minus_4_to_plus_4() {
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    let render = |note: u8, octave: i32| {
+        let mut params = SynthParams::default();
+        params.amp_attack_s = 0.001;
+        params.filters[0].enabled = false;
+        params.filters[1].enabled = false;
+        params.oscs[0].enabled = true;
+        params.oscs[0].keytrack = true;
+        params.oscs[0].octave = octave;
+        params.oscs[0].semi = 0;
+
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.note_on(0, note, 0.9, None, &params);
+        // Skip attack transient so steady-state periodic waveform is measured cleanly
+        for _ in 0..512 {
+            let (l, r) = eng.process_sample(&params, &bank);
+            assert!(l.is_finite() && r.is_finite());
+        }
+        let mut buf = Vec::with_capacity(32_768);
+        for _ in 0..32_768 {
+            let (l, r) = eng.process_sample(&params, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            buf.push(l);
+        }
+        buf
+    };
+
+    let dft_mag = |buf: &[f32], freq_hz: f32| -> f32 {
+        let step = core::f32::consts::TAU * freq_hz / sample_rate;
+        let mut re = 0.0_f32;
+        let mut im = 0.0_f32;
+        for (i, &s) in buf.iter().enumerate() {
+            let angle = step * i as f32;
+            re += s * angle.cos();
+            im -= s * angle.sin();
+        }
+        (re * re + im * im).sqrt() / buf.len() as f32
+    };
+
+    // Note 57 = A3 (220 Hz): -4 oct = 13.75 Hz, 0 oct = 220 Hz, +4 oct = 3520 Hz
+    let buf_m4 = render(57, -4);
+    let buf_0 = render(57, 0);
+    let buf_p4 = render(57, 4);
+
+    let peak_m4 = buf_m4.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+    let peak_0 = buf_0.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+    let peak_p4 = buf_p4.iter().fold(0.0_f32, |m, s| m.max(s.abs()));
+    assert!(peak_m4 > 0.05 && peak_0 > 0.05 && peak_p4 > 0.05);
+
+    let m4_fund = dft_mag(&buf_m4, 13.75);
+    let m4_oct = dft_mag(&buf_m4, 27.5);
+    let m4_base = dft_mag(&buf_m4, 220.0);
+    assert!(
+        m4_fund > m4_oct * 1.5 && m4_fund > m4_base * 3.0,
+        "Expected -4 oct fundamental at 13.75 Hz: fund={m4_fund}, 27.5Hz={m4_oct}, 220Hz={m4_base}"
+    );
+
+    let z_fund = dft_mag(&buf_0, 220.0);
+    let z_sub = dft_mag(&buf_0, 110.0);
+    let z_low = dft_mag(&buf_0, 13.75);
+    assert!(
+        z_fund > z_sub * 3.0 && z_fund > z_low * 3.0,
+        "Expected 0 oct fundamental at 220 Hz: fund={z_fund}, 110Hz={z_sub}, 13.75Hz={z_low}"
+    );
+
+    let p4_fund = dft_mag(&buf_p4, 3520.0);
+    let p4_sub = dft_mag(&buf_p4, 1760.0);
+    let p4_base = dft_mag(&buf_p4, 220.0);
+    assert!(
+        p4_fund > p4_sub * 3.0 && p4_fund > p4_base * 3.0,
+        "Expected +4 oct fundamental at 3520 Hz: fund={p4_fund}, 1760Hz={p4_sub}, 220Hz={p4_base}"
+    );
+
+    // Also verify exact pitch equivalence with +/- 48 MIDI semitones
+    let equiv_m4 = render(12, 0);
+    let ref_m4 = render(60, -4);
+    let diff_m4: f32 = equiv_m4
+        .iter()
+        .zip(ref_m4.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f32::max);
+    assert!(diff_m4 < 1e-4, "note 60 @ -4 oct must match note 12 @ 0 oct, diff={diff_m4}");
+
+    let equiv_p4 = render(96, 0);
+    let ref_p4 = render(48, 4);
+    let diff_p4: f32 = equiv_p4
+        .iter()
+        .zip(ref_p4.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f32::max);
+    assert!(diff_p4 < 1e-4, "note 48 @ +4 oct must match note 96 @ 0 oct, diff={diff_p4}");
+}
+
+#[test]
+fn mod_matrix_modseq_rate_modulation_free_and_sync() {
+    use j_syn_dsp::{
+        ModDestination, ModMatrixSource, ModSeqPlayMode, ModSeqRate, ModSeqRetrig, ModSeqSyncMode,
+        ModSlot,
+    };
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    assert_eq!(ModDestination::modseq_rate(0), ModDestination::ModSeq1Rate);
+    assert_eq!(ModDestination::modseq_rate(3), ModDestination::ModSeq4Rate);
+    assert_eq!(ModDestination::ModSeq1Rate.name(), "MS1 RATE");
+
+    // 1. FreeHz mode (PolyVoice): +0.5 depth * +1.0 ModWheel -> 2^(0.5 * 4) = 4x rate
+    let mut free_params = SynthParams::default();
+    free_params.modseqs[0].sync_mode = ModSeqSyncMode::FreeHz;
+    free_params.modseqs[0].free_hz = 2.0;
+    free_params.modseqs[0].play_mode = ModSeqPlayMode::Loop;
+    free_params.modseqs[0].retrig = ModSeqRetrig::PolyVoice;
+    free_params.mod_matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::ModWheel,
+        destination: ModDestination::ModSeq1Rate,
+        depth: 0.5,
+        bipolar: false,
+        enabled: true,
+    };
+
+    let run_phase = |params: &SynthParams, mod_wheel: f32, samples: usize| -> f32 {
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.set_mod_wheel(mod_wheel);
+        eng.note_on(0, 60, 0.9, None, params);
+        for _ in 0..samples {
+            let (l, r) = eng.process_sample(params, &bank);
+            assert!(l.is_finite() && r.is_finite());
+        }
+        eng.telemetry().modseq_phase(0)
+    };
+
+    let free_base = run_phase(&free_params, 0.0, 2400);
+    let free_fast = run_phase(&free_params, 1.0, 2400);
+    assert!(
+        (0.08..0.12).contains(&free_base),
+        "Expected FreeHz baseline phase ~0.10, got {free_base}"
+    );
+    assert!(
+        (0.36..0.44).contains(&free_fast) && free_fast > free_base * 3.5,
+        "Expected FreeHz modulated phase ~0.40 (4x base), got fast={free_fast}, base={free_base}"
+    );
+
+    // 2. TempoSync mode (PolyVoice): 120 BPM Bars1 = 0.5 Hz, +0.5 depth -> 2^(0.5 * 2) = 2x rate
+    let mut sync_poly = SynthParams::default();
+    sync_poly.tempo_bpm = 120.0;
+    sync_poly.modseqs[0].sync_mode = ModSeqSyncMode::TempoSync;
+    sync_poly.modseqs[0].sync_rate = ModSeqRate::Bars1;
+    sync_poly.modseqs[0].play_mode = ModSeqPlayMode::Loop;
+    sync_poly.modseqs[0].retrig = ModSeqRetrig::PolyVoice;
+    sync_poly.mod_matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::ModWheel,
+        destination: ModDestination::ModSeq1Rate,
+        depth: 0.5,
+        bipolar: false,
+        enabled: true,
+    };
+
+    let sync_poly_base = run_phase(&sync_poly, 0.0, 4800);
+    let sync_poly_fast = run_phase(&sync_poly, 1.0, 4800);
+    assert!(
+        sync_poly_fast > sync_poly_base * 1.85 && sync_poly_fast < sync_poly_base * 2.15,
+        "Expected TempoSync PolyVoice ~2x speedup: base={sync_poly_base}, fast={sync_poly_fast}"
+    );
+
+    // 3. TempoSync mode (MonoGlobal): global ModWheel drives global_modseqs[0]
+    let mut sync_mono = sync_poly;
+    sync_mono.modseqs[0].retrig = ModSeqRetrig::MonoGlobal;
+    let sync_mono_base = run_phase(&sync_mono, 0.0, 4800);
+    let sync_mono_fast = run_phase(&sync_mono, 1.0, 4800);
+    assert!(
+        sync_mono_fast > sync_mono_base * 1.85 && sync_mono_fast < sync_mono_base * 2.15,
+        "Expected TempoSync MonoGlobal ~2x speedup: base={sync_mono_base}, fast={sync_mono_fast}"
+    );
+}

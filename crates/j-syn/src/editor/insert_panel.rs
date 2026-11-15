@@ -32,11 +32,6 @@ fn insert_slot_check(slot_idx: usize) -> fn(&JSynPluginParams) -> bool {
     }
 }
 
-#[inline]
-fn any_insert_enabled(p: &JSynPluginParams) -> bool {
-    insert0_enabled(p) || insert1_enabled(p)
-}
-
 pub(super) const INSERT_MODE_ITEMS: &[(&str, InsertModeParam)] = &[
     ("Off", InsertModeParam::Off),
     ("Tube", InsertModeParam::Tube),
@@ -65,7 +60,8 @@ fn build_insert_slot_row(
     accent: (u8, u8, u8),
 ) {
     let slot_check = insert_slot_check(slot_idx);
-    let p_row_dim = params.clone();
+    let p_pos_dim = params.clone();
+    let p_drv_dim = params.clone();
     let p_knob_dim = params.clone();
     HStack::new(cx, move |cx| {
         VStack::new(cx, {
@@ -112,6 +108,11 @@ fn build_insert_slot_row(
                     .width(Stretch(1.0))
                     .height(Pixels(19.0));
                 })
+                .class("insert-pos-row")
+                .toggle_class(
+                    "slot-disabled",
+                    UiData::mod_ui_rev.map(move |_| !slot_check(&p_pos_dim)),
+                )
                 .col_between(Pixels(4.0))
                 .height(Pixels(19.0))
                 .width(Stretch(1.0));
@@ -140,14 +141,15 @@ fn build_insert_slot_row(
                 );
             }
         })
+        .class("insert-drive-cell")
+        .toggle_class(
+            "slot-disabled",
+            UiData::mod_ui_rev.map(move |_| !slot_check(&p_drv_dim)),
+        )
         .width(Pixels(54.0))
         .height(Auto);
     })
     .class("insert-slot-row")
-    .toggle_class(
-        "slot-disabled",
-        UiData::mod_ui_rev.map(move |_| !slot_check(&p_row_dim)),
-    )
     .col_between(Pixels(6.0))
     .child_top(Stretch(1.0))
     .child_bottom(Stretch(1.0))
@@ -161,7 +163,6 @@ pub(super) fn build_insert_panel(
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
-    let p_card_dim = params.clone();
     VStack::new(cx, move |cx| {
         build_module_header(cx, "INSERT SHAPERS", 18.0);
 
@@ -177,10 +178,6 @@ pub(super) fn build_insert_panel(
         build_insert_slot_row(cx, 1, "INS 2", params, gui_context, mod_ui, CORAL_RGB);
     })
     .class("hardware-module")
-    .toggle_class(
-        "module-disabled",
-        UiData::mod_ui_rev.map(move |_| !any_insert_enabled(&p_card_dim)),
-    )
     .row_between(Pixels(4.0))
     .width(Stretch(1.0))
     .height(Stretch(1.0));

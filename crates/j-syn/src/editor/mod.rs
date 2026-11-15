@@ -717,7 +717,7 @@ pub(crate) fn create(
             })
             .position_type(PositionType::SelfDirected)
             .left(UiData::tooltip.map(|tt| {
-                Pixels((tt.center_x - 64.0).clamp(4.0, BASE_WIDTH as f32 - 132.0))
+                Pixels((tt.center_x - 110.0).clamp(4.0, BASE_WIDTH as f32 - 224.0))
             }))
             .top(UiData::tooltip.map(|tt| {
                 let top_y = if tt.anchor_top >= 26.0 {
@@ -729,7 +729,7 @@ pub(crate) fn create(
             }))
             .child_left(Stretch(1.0))
             .child_right(Stretch(1.0))
-            .width(Pixels(128.0))
+            .width(Pixels(220.0))
             .height(Pixels(20.0))
             .z_index(300)
             .display(UiData::tooltip.map(|tt| tt.visible))

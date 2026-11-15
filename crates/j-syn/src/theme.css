@@ -669,17 +669,26 @@ led-toggle:checked .switch-label {
   border-color: #39312a;
 }
 
-.insert-slot-row.slot-disabled .mini-label {
+.insert-pos-row.slot-disabled .mini-label,
+.insert-drive-cell.slot-disabled .knob-title {
   color: #6b6157;
 }
 
-.insert-slot-row.slot-disabled .compact-pill-text {
+.insert-pos-row.slot-disabled .compact-pill-text {
   color: #84786c;
 }
 
-.insert-slot-row.slot-disabled dropdown {
+.insert-pos-row.slot-disabled dropdown {
   background-color: #1c1814;
   border-color: #39312a;
+}
+
+.inline-pill.pill-dimmed .inline-pill-label {
+  color: #5f554c;
+}
+
+.inline-pill.pill-dimmed .inline-pill-value {
+  color: #7c7064;
 }
 
 /* Borderless inline oscillator numeric readouts */

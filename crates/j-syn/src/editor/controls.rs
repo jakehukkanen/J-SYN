@@ -12,7 +12,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
 use super::mod_bar::ModUiState;
-use super::widgets::{KnobDimExt, ParamStepPill, RotaryKnob};
+use super::widgets::{KnobDimExt, ParamStepPill, RotaryKnob, ValueFormatter};
 use super::{BottomTab, UiData, UiEvent};
 use crate::{JSynPluginParams, WavetableChoice};
 
@@ -39,6 +39,7 @@ where
         .height(Stretch(1.0))
         .child_top(Stretch(1.0))
         .child_bottom(Stretch(1.0))
+        .overflow(Overflow::Hidden)
         .hoverable(false);
     bold_label(cx, "▾", "compact-pill-text")
         .width(Pixels(10.0))
@@ -67,8 +68,12 @@ impl ScrollDropdown {
             on_step: Box::new(on_step),
         }
         .build(cx, |cx| {
-            build_inner(cx).width(Stretch(1.0)).height(Stretch(1.0));
+            build_inner(cx)
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .overflow(Overflow::Hidden);
         })
+        .overflow(Overflow::Hidden)
     }
 }
 
@@ -141,23 +146,22 @@ where
             Dropdown::new(
                 cx,
                 move |cx| {
-                    HStack::new(
-                        cx,
-                        ParamWidgetBase::build_view(
-                            UiData::params,
-                            params_to_param,
-                            move |cx, param_data| {
-                                let text_lens = param_data.make_lens(|param| {
-                                    param.normalized_value_to_string(
-                                        param.modulated_normalized_value(),
-                                        true,
-                                    )
-                                });
-                                build_dropdown_trigger_labels(cx, text_lens);
-                            },
-                        ),
-                    )
+                    let text_lens = ParamWidgetBase::make_lens(
+                        UiData::params,
+                        params_to_param,
+                        |param| {
+                            param.normalized_value_to_string(
+                                param.modulated_normalized_value(),
+                                true,
+                            )
+                        },
+                    );
+                    HStack::new(cx, move |cx| {
+                        build_dropdown_trigger_labels(cx, text_lens);
+                    })
+                    .width(Stretch(1.0))
                     .height(Stretch(1.0))
+                    .overflow(Overflow::Hidden)
                 },
                 move |cx| {
                     for &(label, val) in items {
@@ -215,24 +219,23 @@ where
             Dropdown::new(
                 cx,
                 move |cx| {
-                    HStack::new(
-                        cx,
-                        ParamWidgetBase::build_view(
-                            UiData::params,
-                            params_to_param,
-                            move |cx, param_data| {
-                                let text_lens = param_data.make_lens(move |param| {
-                                    if param.modulated_normalized_value() >= 0.5 {
-                                        true_label.to_string()
-                                    } else {
-                                        false_label.to_string()
-                                    }
-                                });
-                                build_dropdown_trigger_labels(cx, text_lens);
-                            },
-                        ),
-                    )
+                    let text_lens = ParamWidgetBase::make_lens(
+                        UiData::params,
+                        params_to_param,
+                        move |param| {
+                            if param.modulated_normalized_value() >= 0.5 {
+                                true_label.to_string()
+                            } else {
+                                false_label.to_string()
+                            }
+                        },
+                    );
+                    HStack::new(cx, move |cx| {
+                        build_dropdown_trigger_labels(cx, text_lens);
+                    })
+                    .width(Stretch(1.0))
                     .height(Stretch(1.0))
+                    .overflow(Overflow::Hidden)
                 },
                 move |cx| {
                     for &(label, val) in &[(false_label, false), (true_label, true)] {
@@ -290,23 +293,22 @@ pub(super) fn build_wavetable_dropdown(
             Dropdown::new(
                 cx,
                 move |cx| {
-                    HStack::new(
-                        cx,
-                        ParamWidgetBase::build_view(
-                            UiData::params,
-                            move |p| &p.oscs[osc_idx].wt_select,
-                            move |cx, param_data| {
-                                let text_lens = param_data.make_lens(|param| {
-                                    param.normalized_value_to_string(
-                                        param.modulated_normalized_value(),
-                                        true,
-                                    )
-                                });
-                                build_dropdown_trigger_labels(cx, text_lens);
-                            },
-                        ),
-                    )
+                    let text_lens = ParamWidgetBase::make_lens(
+                        UiData::params,
+                        move |p| &p.oscs[osc_idx].wt_select,
+                        |param| {
+                            param.normalized_value_to_string(
+                                param.modulated_normalized_value(),
+                                true,
+                            )
+                        },
+                    );
+                    HStack::new(cx, move |cx| {
+                        build_dropdown_trigger_labels(cx, text_lens);
+                    })
+                    .width(Stretch(1.0))
                     .height(Stretch(1.0))
+                    .overflow(Overflow::Hidden)
                 },
                 move |cx| {
                     for &(label, val) in WT_ITEMS {
@@ -409,7 +411,9 @@ pub(super) fn build_ui_scale_dropdown(cx: &mut Context) {
                                 UiData::ui_scale_pct.map(|pct| format!("{pct}%")),
                             );
                         })
+                        .width(Stretch(1.0))
                         .height(Stretch(1.0))
+                        .overflow(Overflow::Hidden)
                     },
                     move |cx| {
                         for &(label, pct, factor) in SCALE_ITEMS {
@@ -686,6 +690,54 @@ pub(super) fn build_knob_cell<L, Params, P, FMap>(
     .row_between(Pixels(2.0));
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    accent_rgb: (u8, u8, u8),
+    knob_sz: f32,
+    cell_w: f32,
+    dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+    tab_tag: u8,
+    value_formatter: ValueFormatter,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        bold_label(cx, title, "knob-title")
+            .width(Stretch(1.0))
+            .height(Pixels(14.0))
+            .child_space(Stretch(1.0));
+
+        RotaryKnob::new_with_mod_formatter(
+            cx,
+            params,
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            dest,
+            mod_ui,
+            tab_tag,
+            value_formatter,
+        )
+        .width(Pixels(knob_sz))
+        .height(Pixels(knob_sz))
+        .left(Stretch(1.0))
+        .right(Stretch(1.0));
+    })
+    .class("knob-cell")
+    .width(Pixels(cell_w))
+    .height(Auto)
+    .row_between(Pixels(2.0));
+}
+
 fn build_flex_knob_cell_mod_inner<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
@@ -798,15 +850,16 @@ pub(super) fn build_flex_knob_cell_mod_dim<L, Params, P, FMap>(
     );
 }
 
-fn build_inline_pill_cell_inner<L, Params, P, FMap>(
-    cx: &mut Context,
+fn build_inline_pill_cell_inner<'a, L, Params, P, FMap>(
+    cx: &'a mut Context,
     params: L,
     params_to_param: FMap,
     title: &'static str,
     num_steps: usize,
     weight: f32,
     mod_target: Option<(ModDestination, Arc<ModUiState>, u8)>,
-) where
+) -> Handle<'a, ParamStepPill>
+where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
     P: Param + 'static,
@@ -825,27 +878,29 @@ fn build_inline_pill_cell_inner<L, Params, P, FMap>(
         ),
         None => ParamStepPill::new_inline(cx, params, params_to_param, num_steps, title),
     };
-    handle.width(Stretch(weight)).height(Pixels(20.0));
+    handle.width(Stretch(weight)).height(Pixels(18.0))
 }
 
-pub(super) fn build_inline_pill_cell<L, Params, P, FMap>(
-    cx: &mut Context,
+pub(super) fn build_inline_pill_cell<'a, L, Params, P, FMap>(
+    cx: &'a mut Context,
     params: L,
     params_to_param: FMap,
     title: &'static str,
     num_steps: usize,
     weight: f32,
-) where
+) -> Handle<'a, ParamStepPill>
+where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
     P: Param + 'static,
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
-    build_inline_pill_cell_inner(cx, params, params_to_param, title, num_steps, weight, None);
+    build_inline_pill_cell_inner(cx, params, params_to_param, title, num_steps, weight, None)
 }
 
-pub(super) fn build_inline_pill_cell_mod<L, Params, P, FMap>(
-    cx: &mut Context,
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_inline_pill_cell_mod<'a, L, Params, P, FMap>(
+    cx: &'a mut Context,
     params: L,
     params_to_param: FMap,
     title: &'static str,
@@ -854,7 +909,8 @@ pub(super) fn build_inline_pill_cell_mod<L, Params, P, FMap>(
     dest: ModDestination,
     mod_ui: Arc<ModUiState>,
     tab_tag: u8,
-) where
+) -> Handle<'a, ParamStepPill>
+where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
     P: Param + 'static,
@@ -868,7 +924,7 @@ pub(super) fn build_inline_pill_cell_mod<L, Params, P, FMap>(
         num_steps,
         weight,
         Some((dest, mod_ui, tab_tag)),
-    );
+    )
 }
 
 pub(super) fn build_mini_pill_cell<L, Params, P, FMap>(

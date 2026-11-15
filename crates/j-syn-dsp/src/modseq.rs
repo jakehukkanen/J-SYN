@@ -577,6 +577,7 @@ pub struct ModSeqParams {
     pub retrig: ModSeqRetrig,
     pub num_steps: usize,
     pub smooth: f32,
+    pub rate_mod: f32,
 }
 
 impl Default for ModSeqParams {
@@ -590,6 +591,7 @@ impl Default for ModSeqParams {
             retrig: ModSeqRetrig::PolyVoice,
             num_steps: 8,
             smooth: 0.05,
+            rate_mod: 0.0,
         }
     }
 }
@@ -756,9 +758,16 @@ impl ModSeqState {
     ) -> f32 {
         let freq_hz = match params.sync_mode {
             ModSeqSyncMode::TempoSync => {
-                (tempo_bpm.clamp(20.0, 300.0) / 60.0) * params.sync_rate.cycles_per_beat()
+                let base =
+                    (tempo_bpm.clamp(20.0, 300.0) / 60.0) * params.sync_rate.cycles_per_beat();
+                let mult = 2.0_f32.powf(params.rate_mod * 2.0);
+                (base * mult).clamp(0.01, 100.0)
             }
-            ModSeqSyncMode::FreeHz => params.free_hz.clamp(0.05, 30.0),
+            ModSeqSyncMode::FreeHz => {
+                let base = params.free_hz.clamp(0.05, 30.0);
+                let mult = 2.0_f32.powf(params.rate_mod * 4.0);
+                (base * mult).clamp(0.02, 100.0)
+            }
         };
         let d_phase = freq_hz * dt_seconds.max(0.0);
 

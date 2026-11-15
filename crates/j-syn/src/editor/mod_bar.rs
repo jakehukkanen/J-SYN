@@ -68,13 +68,16 @@ impl ModUiState {
         ModSeqStepShape::from_u8(self.active_stamp.load(Ordering::Relaxed))
     }
 
-    /// Packs module enable states (OSC1..4, Noise, F1..2, INS1..2) into a bitmask so host
-    /// automation changes trigger panel dim/undim updates even without mouse clicks.
+    /// Packs module enable states (OSC1..4, Noise, F1..2, INS1..2, OSC1..4 unison>1) into a
+    /// bitmask so host automation or control changes trigger dim/undim updates automatically.
     pub fn compute_enabled_mask(params: &JSynPluginParams) -> u16 {
         let mut mask = 0u16;
         for (i, osc) in params.oscs.iter().enumerate() {
             if osc.enabled.value() {
                 mask |= 1 << i;
+            }
+            if osc.unison.value() > 1 {
+                mask |= 1 << (9 + i);
             }
         }
         if params.noise.enabled.value() {

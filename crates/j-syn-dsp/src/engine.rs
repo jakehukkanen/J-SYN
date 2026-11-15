@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::mod_matrix::{ModUiTelemetry, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS};
+use crate::mod_matrix::{ModDestination, ModUiTelemetry, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS};
 use crate::modseq::{ModSeqRetrig, ModSeqState};
 use crate::oscillator::EngineMode;
 use crate::voice::{PolyMode, SynthParams, TailVoice, Voice};
@@ -396,11 +396,14 @@ impl SynthEngine {
 
         if params.engine_mode == EngineMode::Hq {
             let dt_sample = 1.0 / self.sample_rate;
+            let rate_mods = self.current_global_modseq_rate_mods(params);
             for i in 0..4 {
+                let mut ms_p = params.modseqs[i];
+                ms_p.rate_mod = rate_mods[i];
                 self.global_modseq_vals[i] = self.global_modseqs[i].advance_with_mseg(
                     dt_sample,
                     params.tempo_bpm,
-                    &params.modseqs[i],
+                    &ms_p,
                     &params.modseq_steps.seqs[i],
                     &params.modseq_steps.msegs[i],
                 );
@@ -419,11 +422,14 @@ impl SynthEngine {
             }
         } else if is_control_tick {
             let dt_tick = (self.control_tick_period as f32) / self.sample_rate;
+            let rate_mods = self.current_global_modseq_rate_mods(params);
             for i in 0..4 {
+                let mut ms_p = params.modseqs[i];
+                ms_p.rate_mod = rate_mods[i];
                 self.global_modseq_vals[i] = self.global_modseqs[i].advance_with_mseg(
                     dt_tick,
                     params.tempo_bpm,
-                    &params.modseqs[i],
+                    &ms_p,
                     &params.modseq_steps.seqs[i],
                     &params.modseq_steps.msegs[i],
                 );
@@ -483,6 +489,26 @@ impl SynthEngine {
         const HEADROOM: f32 = 0.35;
         let out_gain = HEADROOM * self.smoothed_master_gain;
         (mix_l * out_gain, mix_r * out_gain)
+    }
+
+    #[inline]
+    fn current_global_modseq_rate_mods(&self, params: &SynthParams) -> [f32; 4] {
+        if let Some(v) = self.voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {
+            return std::array::from_fn(|i| v.mod_offsets[ModDestination::modseq_rate(i).index()]);
+        }
+        let mut idle_sources = [0.0_f32; NUM_ACTIVE_SOURCES];
+        for i in 0..4 {
+            if params.modseqs[i].retrig == ModSeqRetrig::MonoGlobal {
+                idle_sources[4 + i] = self.global_modseq_vals[i];
+            }
+        }
+        idle_sources[10] = self.mod_wheel.clamp(0.0, 1.0);
+        idle_sources[11] = self.aftertouch.clamp(0.0, 1.0);
+        let mut idle_offsets = [0.0_f32; NUM_MOD_DESTS];
+        params
+            .mod_matrix
+            .evaluate_destinations(&idle_sources, &mut idle_offsets);
+        std::array::from_fn(|i| idle_offsets[ModDestination::modseq_rate(i).index()])
     }
 
     fn publish_telemetry(&self, params: &SynthParams) {

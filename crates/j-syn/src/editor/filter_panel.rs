@@ -373,7 +373,7 @@ fn build_filter_aux_knob_cell(
             ModDestination::filter_aux(filter_idx),
             mod_ui,
             0,
-            Arc::new(move |aux_param| {
+            Arc::new(move |norm, _mod_offset| {
                 let mode = p_tt.filters[filter_idx].mode.value();
                 if matches!(
                     mode,
@@ -382,14 +382,12 @@ fn build_filter_aux_knob_cell(
                         | FilterModeParam::LpNotch
                         | FilterModeParam::LpPeak
                 ) {
-                    let hz =
-                        j_syn_dsp::filter::aux_to_freq2_hz(aux_param.modulated_plain_value());
+                    let hz = j_syn_dsp::filter::aux_to_freq2_hz(norm);
                     format_freq_hz(hz)
                 } else {
-                    aux_param.normalized_value_to_string(
-                        aux_param.modulated_normalized_value(),
-                        true,
-                    )
+                    p_tt.filters[filter_idx]
+                        .aux
+                        .normalized_value_to_string(norm, true)
                 }
             }),
         )
