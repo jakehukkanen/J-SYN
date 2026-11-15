@@ -479,7 +479,7 @@ fn build_bottom_tabs(
         })
         .class("tab-bar")
         .col_between(Pixels(4.0))
-        .height(Pixels(22.0))
+        .height(Pixels(26.0))
         .width(Stretch(1.0));
 
         let mod_ui_tabs = mod_ui.clone();

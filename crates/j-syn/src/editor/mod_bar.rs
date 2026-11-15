@@ -514,8 +514,11 @@ impl ModSourcePill {
         .build(cx, |cx| {
             bold_label(cx, source.short_label(), "mod-src-label")
                 .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .child_space(Stretch(1.0))
+                .height(Auto)
+                .top(Stretch(1.0))
+                .bottom(Stretch(1.0))
+                .child_left(Stretch(1.0))
+                .child_right(Stretch(1.0))
                 .hoverable(false);
         })
     }
@@ -699,8 +702,11 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 HStack::new(cx, move |cx| {
                     bold_label(cx, &text, "mod-insp-drag")
                         .width(Stretch(1.0))
-                        .height(Stretch(1.0))
-                        .child_space(Stretch(1.0));
+                        .height(Auto)
+                        .top(Stretch(1.0))
+                        .bottom(Stretch(1.0))
+                        .child_left(Stretch(1.0))
+                        .child_right(Stretch(1.0));
                 })
                 .width(Stretch(1.0))
                 .height(Stretch(1.0))
@@ -729,9 +735,9 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                         move |cx| {
                             bold_label(cx, &summary, "mod-insp-text")
                                 .width(Stretch(1.0))
-                                .height(Stretch(1.0))
-                                .child_top(Stretch(1.0))
-                                .child_bottom(Stretch(1.0))
+                                .height(Auto)
+                                .top(Stretch(1.0))
+                                .bottom(Stretch(1.0))
                                 .hoverable(false)
                         },
                     )
@@ -795,8 +801,11 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                         move |cx| {
                             bold_label(cx, &hint, "mod-insp-hint")
                                 .width(Stretch(1.0))
-                                .height(Stretch(1.0))
-                                .child_space(Stretch(1.0))
+                                .height(Auto)
+                                .top(Stretch(1.0))
+                                .bottom(Stretch(1.0))
+                                .child_left(Stretch(1.0))
+                                .child_right(Stretch(1.0))
                                 .hoverable(false)
                         },
                     )
@@ -813,7 +822,7 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     })
     .class("mod-insp-bar")
     .width(Stretch(1.0))
-    .height(Pixels(18.0))
+    .height(Pixels(19.0))
     .top(Stretch(1.0))
     .bottom(Stretch(1.0));
 }

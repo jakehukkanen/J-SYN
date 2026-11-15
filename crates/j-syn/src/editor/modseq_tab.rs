@@ -1275,9 +1275,9 @@ pub(super) fn build_modseq_tab(
                                                         "mini-label",
                                                     )
                                                     .width(Auto)
-                                                    .height(Stretch(1.0))
-                                                    .child_top(Stretch(1.0))
-                                                    .child_bottom(Stretch(1.0));
+                                                    .height(Auto)
+                                                    .top(Stretch(1.0))
+                                                    .bottom(Stretch(1.0));
 
                                                     LfoPresetBar::new(cx, seq_idx, p_mode.clone())
                                                         .width(Pixels(306.0))
@@ -1316,9 +1316,9 @@ pub(super) fn build_modseq_tab(
                                                         "mini-label",
                                                     )
                                                     .width(Auto)
-                                                    .height(Stretch(1.0))
-                                                    .child_top(Stretch(1.0))
-                                                    .child_bottom(Stretch(1.0));
+                                                    .height(Auto)
+                                                    .top(Stretch(1.0))
+                                                    .bottom(Stretch(1.0));
 
                                                     let p_fill = p_mode.clone();
                                                     let u_fill = u_mode;
@@ -1404,7 +1404,7 @@ pub(super) fn build_modseq_tab(
         })
         .col_between(Pixels(3.0))
         .width(Stretch(1.0))
-        .height(Pixels(18.0));
+        .height(Pixels(20.0));
 
         // Main subtab body
         let params_body = params.clone();

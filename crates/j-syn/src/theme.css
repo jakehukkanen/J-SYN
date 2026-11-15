@@ -272,8 +272,8 @@ led-toggle:checked .switch-label {
   border-radius: 4px;
   child-left: 4px;
   child-right: 4px;
-  child-top: 3px;
-  child-bottom: 3px;
+  child-top: 2px;
+  child-bottom: 2px;
 }
 
 .tab-btn {
