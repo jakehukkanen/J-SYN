@@ -1,19 +1,58 @@
-//! Dedicated full-panel Settings view (`Gear` tab) for Output & Safety DSP toggles
-//! (`DC Blocker`, `Safety Limiter`) and File Directories (`Presets`, `Wavetables`).
+//! Dedicated full-panel Settings view (`Gear` tab) for Engine Quality (`Dirty` / `Clean`),
+//! Output & Safety DSP toggles (`DC Blocker`, `Safety Limiter`), and File Directories (`Presets`, `Wavetables`).
 
+use std::sync::Arc;
+
+use nih_plug::prelude::GuiContext;
 use nih_plug_vizia::vizia::prelude::*;
 
-use super::controls::{bold_label, build_module_header};
+use crate::JSynPluginParams;
+
+use super::controls::{bold_label, build_bool_dropdown, build_module_header};
 use super::widgets::LedToggleSwitch;
 use super::{UiData, UiEvent, AMBER_RGB, CORAL_RGB};
 
-pub(super) fn build_settings_view(cx: &mut Context) {
-    VStack::new(cx, |cx| {
-        // Card 1: Output & Safety DSP
-        VStack::new(cx, |cx| {
-            build_module_header(cx, "OUTPUT & SAFETY DSP", 22.0);
+pub(super) fn build_settings_view(
+    cx: &mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+) {
+    VStack::new(cx, move |cx| {
+        // Card 1: Engine & Safety DSP
+        let p_eng = params.clone();
+        let g_eng = gui_context.clone();
+        VStack::new(cx, move |cx| {
+            build_module_header(cx, "ENGINE & SAFETY DSP", 22.0);
 
-            VStack::new(cx, |cx| {
+            VStack::new(cx, move |cx| {
+                HStack::new(cx, move |cx| {
+                    build_bool_dropdown(
+                        cx,
+                        p_eng.clone(),
+                        g_eng.clone(),
+                        |p| &p.hq_mode,
+                        "Dirty",
+                        "Clean",
+                    )
+                    .width(Pixels(142.0))
+                    .height(Pixels(26.0))
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0));
+
+                    bold_label(
+                        cx,
+                        "Engine interpolation quality: Dirty (classic 2007-style table lookup) vs. Clean (band-limited HQ mip-map interpolation).",
+                        "setting-desc",
+                    )
+                    .width(Stretch(1.0))
+                    .height(Auto)
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0));
+                })
+                .col_between(Pixels(14.0))
+                .width(Stretch(1.0))
+                .height(Pixels(34.0));
+
                 HStack::new(cx, |cx| {
                     LedToggleSwitch::new(
                         cx,

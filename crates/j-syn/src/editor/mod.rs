@@ -480,30 +480,29 @@ impl View for GearIcon {
         if bounds.w <= 2.0 || bounds.h <= 2.0 {
             return;
         }
-        let dpx = cx.scale_factor();
         let active = UiData::view_mode.get(cx) == MainViewMode::Settings;
         let color = if active {
             vg::Color::rgb(245, 179, 73)
         } else {
-            vg::Color::rgb(196, 184, 172)
+            vg::Color::rgb(208, 196, 184)
         };
 
         let cx_p = bounds.x + bounds.w * 0.5;
         let cy_p = bounds.y + bounds.h * 0.5;
-        let r_outer = bounds.w.min(bounds.h) * 0.38;
-        let r_inner = r_outer * 0.72;
-        let r_hole = r_outer * 0.34;
-        let teeth = 8usize;
+        let r_outer = bounds.w.min(bounds.h) * 0.43;
+        let r_inner = r_outer * 0.68;
+        let r_hole = r_outer * 0.31;
+        let teeth = 6usize;
 
         let mut gear = vg::Path::new();
         for i in 0..teeth {
             let base = (i as f32 / teeth as f32) * std::f32::consts::TAU;
             let step = std::f32::consts::TAU / (teeth as f32 * 4.0);
-            let a0 = base - step * 1.1;
-            let a1 = base - step * 0.55;
-            let a2 = base + step * 0.55;
-            let a3 = base + step * 1.1;
-            let a4 = base + step * 2.0;
+            let a0 = base - step * 1.15;
+            let a1 = base - step * 0.60;
+            let a2 = base + step * 0.60;
+            let a3 = base + step * 1.15;
+            let a4 = base + step * 2.00;
 
             let p0 = (cx_p + r_inner * a0.cos(), cy_p + r_inner * a0.sin());
             let p1 = (cx_p + r_outer * a1.cos(), cy_p + r_outer * a1.sin());
@@ -521,24 +520,14 @@ impl View for GearIcon {
             gear.line_to(p4.0, p4.1);
         }
         gear.close();
+        gear.circle(cx_p, cy_p, r_hole);
+        gear.solidity(vg::Solidity::Hole);
 
-        let mut stroke = vg::Paint::color(color);
-        stroke.set_line_width(1.35 * dpx);
-        stroke.set_line_join(vg::LineJoin::Round);
-        canvas.stroke_path(&gear, &stroke);
-
-        let mut hole = vg::Path::new();
-        hole.circle(cx_p, cy_p, r_hole);
-        canvas.stroke_path(&hole, &stroke);
+        canvas.fill_path(&gear, &vg::Paint::color(color));
     }
 }
 
-fn build_header_bar(
-    cx: &mut Context,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-    mod_ui: Arc<ModUiState>,
-) {
+fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     HStack::new(cx, move |cx| {
         Element::new(cx).class("rack-screw");
         HStack::new(cx, move |cx| {
@@ -593,7 +582,7 @@ fn build_header_bar(
             )
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Settings))
-            .width(Pixels(32.0))
+            .width(Pixels(34.0))
             .height(Pixels(22.0));
         })
         .class("view-switch-group")
@@ -608,14 +597,10 @@ fn build_header_bar(
             Button::new(
                 cx,
                 |cx| cx.emit(UiEvent::StepPreset(-1)),
-                |cx| {
-                    bold_label(cx, "<", "preset-btn-label")
-                        .child_space(Stretch(1.0))
-                        .hoverable(false)
-                },
+                |cx| bold_label(cx, "<", "preset-btn-label").hoverable(false),
             )
             .class("preset-btn")
-            .width(Pixels(18.0))
+            .width(Pixels(20.0))
             .height(Pixels(22.0));
 
             Dropdown::new(
@@ -655,59 +640,43 @@ fn build_header_bar(
                     });
                 },
             )
-            .width(Pixels(146.0))
+            .width(Pixels(160.0))
             .height(Pixels(22.0));
 
             Button::new(
                 cx,
                 |cx| cx.emit(UiEvent::StepPreset(1)),
-                |cx| {
-                    bold_label(cx, ">", "preset-btn-label")
-                        .child_space(Stretch(1.0))
-                        .hoverable(false)
-                },
+                |cx| bold_label(cx, ">", "preset-btn-label").hoverable(false),
             )
             .class("preset-btn")
-            .width(Pixels(18.0))
+            .width(Pixels(20.0))
             .height(Pixels(22.0));
 
             Button::new(
                 cx,
                 |cx| cx.emit(UiEvent::InitPatch),
-                |cx| {
-                    bold_label(cx, "INIT", "preset-btn-label")
-                        .child_space(Stretch(1.0))
-                        .hoverable(false)
-                },
+                |cx| bold_label(cx, "INIT", "preset-btn-label").hoverable(false),
             )
             .class("preset-btn")
-            .width(Pixels(32.0))
+            .width(Pixels(36.0))
             .height(Pixels(22.0));
 
             Button::new(
                 cx,
                 |cx| cx.emit(UiEvent::SavePatch),
-                |cx| {
-                    bold_label(cx, "SAVE", "preset-btn-label")
-                        .child_space(Stretch(1.0))
-                        .hoverable(false)
-                },
+                |cx| bold_label(cx, "SAVE", "preset-btn-label").hoverable(false),
             )
             .class("preset-btn")
-            .width(Pixels(36.0))
+            .width(Pixels(40.0))
             .height(Pixels(22.0));
 
             Button::new(
                 cx,
                 |cx| cx.emit(UiEvent::LoadPatchDialog),
-                |cx| {
-                    bold_label(cx, "LOAD", "preset-btn-label")
-                        .child_space(Stretch(1.0))
-                        .hoverable(false)
-                },
+                |cx| bold_label(cx, "LOAD", "preset-btn-label").hoverable(false),
             )
             .class("preset-btn")
-            .width(Pixels(36.0))
+            .width(Pixels(40.0))
             .height(Pixels(22.0));
         })
         .col_between(Pixels(3.0))
@@ -718,45 +687,8 @@ fn build_header_bar(
 
         Element::new(cx).width(Stretch(1.0));
 
-        let params_hdr = params.clone();
-        let gui_ctx_hdr = gui_context.clone();
         let mod_ui_hdr = mod_ui.clone();
         HStack::new(cx, move |cx| {
-            build_bool_dropdown(
-                cx,
-                params_hdr.clone(),
-                gui_ctx_hdr.clone(),
-                |p| &p.hq_mode,
-                "Dirty",
-                "Clean",
-            )
-            .width(Pixels(78.0))
-            .height(Pixels(24.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
-
-            build_bool_dropdown(
-                cx,
-                params_hdr.clone(),
-                gui_ctx_hdr.clone(),
-                |p| &p.mono_legato,
-                "Poly 64",
-                "Mono Legato",
-            )
-            .width(Pixels(96.0))
-            .height(Pixels(24.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
-
-            build_mini_pill_cell(
-                cx,
-                UiData::params,
-                |p| &p.pitch_bend_range,
-                "PB RNG",
-                24,
-                48.0,
-            );
-
             build_ui_scale_dropdown(cx);
 
             build_header_knob_cell_mod(
@@ -785,7 +717,7 @@ fn build_header_bar(
                 .top(Stretch(1.0))
                 .bottom(Stretch(1.0));
         })
-        .col_between(Pixels(6.0))
+        .col_between(Pixels(8.0))
         .child_top(Stretch(1.0))
         .child_bottom(Stretch(1.0))
         .width(Auto)
@@ -988,7 +920,58 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(1.55))
+                        .width(Stretch(1.35))
+                        .height(Stretch(1.0));
+
+                        VStack::new(cx, {
+                            let params_v = params.clone();
+                            let gui_v = gui_context.clone();
+                            move |cx| {
+                                build_module_header(cx, "VOICING", 18.0);
+                                HStack::new(cx, move |cx| {
+                                    VStack::new(cx, move |cx| {
+                                        bold_label(cx, "MODE", "mini-label")
+                                            .width(Stretch(1.0))
+                                            .height(Pixels(13.0))
+                                            .child_space(Stretch(1.0));
+                                        build_bool_dropdown(
+                                            cx,
+                                            params_v.clone(),
+                                            gui_v.clone(),
+                                            |p| &p.mono_legato,
+                                            "Poly",
+                                            "Mono",
+                                        )
+                                        .width(Stretch(1.0))
+                                        .height(Pixels(24.0));
+                                    })
+                                    .row_between(Pixels(2.0))
+                                    .width(Pixels(84.0))
+                                    .height(Auto)
+                                    .top(Stretch(1.0))
+                                    .bottom(Stretch(1.0));
+
+                                    build_mini_pill_cell(
+                                        cx,
+                                        UiData::params,
+                                        |p| &p.pitch_bend_range,
+                                        "PB RANGE",
+                                        24,
+                                        64.0,
+                                    );
+                                })
+                                .col_between(Pixels(12.0))
+                                .child_left(Stretch(1.0))
+                                .child_right(Stretch(1.0))
+                                .child_top(Stretch(1.0))
+                                .child_bottom(Stretch(1.0))
+                                .width(Stretch(1.0))
+                                .height(Stretch(1.0));
+                            }
+                        })
+                        .class("hardware-module")
+                        .class("drawer-module")
+                        .width(Stretch(0.75))
                         .height(Stretch(1.0));
 
                         VStack::new(cx, {
@@ -1098,12 +1081,7 @@ pub(crate) fn create(
         let mod_ui_for_ui = mod_ui.clone();
 
         VStack::new(cx, move |cx| {
-            build_header_bar(
-                cx,
-                params_for_ui.clone(),
-                gui_ctx_for_ui.clone(),
-                mod_ui_for_ui.clone(),
-            );
+            build_header_bar(cx, mod_ui_for_ui.clone());
 
             // Main chassis: 3-Column Rack or MATRIX Overview + 4-Tab Bottom Drawer
             VStack::new(cx, move |cx| {
@@ -1155,7 +1133,11 @@ pub(crate) fn create(
                                 build_matrix_view(cx, mod_ui_m.clone());
                             }
                             MainViewMode::Settings => {
-                                settings_view::build_settings_view(cx);
+                                settings_view::build_settings_view(
+                                    cx,
+                                    params_m.clone(),
+                                    gui_m.clone(),
+                                );
                             }
                         }
                     });
