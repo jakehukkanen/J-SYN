@@ -2,12 +2,14 @@
 
 use std::sync::Arc;
 
+use j_syn_dsp::mod_matrix::ModDestination;
 use nih_plug::prelude::GuiContext;
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
-    bold_label, build_enum_dropdown, build_flex_knob_cell, build_module_header,
+    bold_label, build_enum_dropdown, build_flex_knob_cell_mod, build_module_header,
 };
+use super::mod_bar::ModUiState;
 use super::{AMBER_RGB, CORAL_RGB, UiData};
 use crate::{InsertModeParam, InsertPosParam, JSynPluginParams};
 
@@ -35,6 +37,7 @@ fn build_insert_slot_row(
     slot_label: &'static str,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
     accent: (u8, u8, u8),
 ) {
     HStack::new(cx, move |cx| {
@@ -91,16 +94,22 @@ fn build_insert_slot_row(
         .height(Auto)
         .row_between(Pixels(3.0));
 
-        HStack::new(cx, move |cx| {
-            build_flex_knob_cell(
-                cx,
-                UiData::params,
-                move |p| &p.routing.inserts[slot_idx].drive,
-                "DRIVE",
-                false,
-                accent,
-                24.0,
-            );
+        HStack::new(cx, {
+            let mod_ui = mod_ui.clone();
+            move |cx| {
+                build_flex_knob_cell_mod(
+                    cx,
+                    UiData::params,
+                    move |p| &p.routing.inserts[slot_idx].drive,
+                    "DRIVE",
+                    false,
+                    accent,
+                    24.0,
+                    ModDestination::insert_drive(slot_idx),
+                    mod_ui.clone(),
+                    0,
+                );
+            }
         })
         .width(Pixels(54.0))
         .height(Auto);
@@ -116,12 +125,21 @@ pub(super) fn build_insert_panel(
     cx: &mut Context,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
 ) {
     VStack::new(cx, move |cx| {
         build_module_header(cx, "INSERT SHAPERS", 18.0);
 
-        build_insert_slot_row(cx, 0, "INS 1", params.clone(), gui_context.clone(), AMBER_RGB);
-        build_insert_slot_row(cx, 1, "INS 2", params, gui_context, CORAL_RGB);
+        build_insert_slot_row(
+            cx,
+            0,
+            "INS 1",
+            params.clone(),
+            gui_context.clone(),
+            mod_ui.clone(),
+            AMBER_RGB,
+        );
+        build_insert_slot_row(cx, 1, "INS 2", params, gui_context, mod_ui, CORAL_RGB);
     })
     .class("hardware-module")
     .row_between(Pixels(4.0))

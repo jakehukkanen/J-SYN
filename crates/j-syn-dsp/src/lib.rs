@@ -5,6 +5,8 @@ pub mod engine;
 pub mod envelope;
 pub mod filter;
 pub mod insert;
+pub mod mod_matrix;
+pub mod modseq;
 pub mod noise;
 pub mod oscillator;
 pub mod oversample;
@@ -12,7 +14,7 @@ pub mod voice;
 pub mod wavetable;
 
 pub use engine::{SynthEngine, MAX_TAIL_VOICES, MAX_VOICES};
-pub use envelope::{AdsrStage, AmpAdsr};
+pub use envelope::{evaluate_adsr_preview, AdsrParams, AdsrStage, AmpAdsr};
 pub use filter::{
     evaluate_filter_response_db, fast_tanh, FilterMode, FilterParams, FilterSlope, FilterState,
     FilterSvfCore, StereoZdfSvf, COMB_BUF_LEN,
@@ -20,6 +22,14 @@ pub use filter::{
 pub use insert::{
     FilterRouting, InsertMode, InsertParams, InsertPosition, InsertShaperState, InsertState,
     RoutingParams, VoiceFeedbackState,
+};
+pub use mod_matrix::{
+    ModDestination, ModMatrixSource, ModMatrixState, ModSlot, ModUiTelemetry, NUM_ACTIVE_SOURCES,
+    NUM_MOD_DESTS, NUM_MOD_SLOTS,
+};
+pub use modseq::{
+    evaluate_modseq_curve, ModSeqParams, ModSeqPlayMode, ModSeqRate, ModSeqRetrig,
+    ModSeqShapePreset, ModSeqState, ModSeqStep, ModSeqStepBank, ModSeqSyncMode, MAX_MODSEQ_STEPS,
 };
 pub use noise::{NoiseParams, NoiseState, NoiseType};
 pub use oscillator::{

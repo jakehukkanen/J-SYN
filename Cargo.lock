@@ -2143,6 +2143,7 @@ dependencies = [
  "nih_plug_vizia",
  "objc",
  "rfd",
+ "serde",
 ]
 
 [[package]]
@@ -2152,6 +2153,7 @@ dependencies = [
  "arc-swap",
  "hound",
  "rustfft",
+ "serde",
 ]
 
 [[package]]

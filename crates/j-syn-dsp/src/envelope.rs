@@ -7,8 +7,55 @@ pub enum AdsrStage {
     Release,
 }
 
+/// Parameters for an ADSR envelope generator.
+#[derive(Debug, Clone, Copy)]
+pub struct AdsrParams {
+    pub attack_s: f32,
+    pub decay_s: f32,
+    pub sustain: f32,
+    pub release_s: f32,
+}
+
+impl Default for AdsrParams {
+    fn default() -> Self {
+        Self {
+            attack_s: 0.01,
+            decay_s: 0.30,
+            sustain: 0.50,
+            release_s: 0.25,
+        }
+    }
+}
+
+/// Evaluates an approximate ADSR curve amplitude in `[0.0, 1.0]` over normalized preview time
+/// `t_norm in 0.0..=1.0` for the UI envelope display.
+pub fn evaluate_adsr_preview(params: &AdsrParams, t_norm: f32) -> f32 {
+    let atk = params.attack_s.clamp(0.001, 5.0);
+    let dec = params.decay_s.clamp(0.002, 5.0);
+    let sus = params.sustain.clamp(0.0, 1.0);
+    let rel = params.release_s.clamp(0.002, 8.0);
+    let hold = 0.25 * (atk + dec + rel).clamp(0.05, 1.0);
+    let total = (atk + dec + hold + rel).max(0.01);
+    let t = t_norm.clamp(0.0, 1.0) * total;
+
+    if t < atk {
+        let x = t / atk;
+        let curve = (1.0 - (-1.609_437_9 * x).exp()) / 0.8;
+        curve.clamp(0.0, 1.0)
+    } else if t < atk + dec {
+        let x = (t - atk) / dec;
+        let curve = (-6.907_755_4 * x).exp();
+        (sus + (1.0 - sus) * curve).clamp(0.0, 1.0)
+    } else if t < atk + dec + hold {
+        sus
+    } else {
+        let x = (t - atk - dec - hold) / rel;
+        (sus * (-9.210_34 * x).exp()).clamp(0.0, 1.0)
+    }
+}
+
 /// Per-voice exponential/concave ADSR amplitude envelope.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AmpAdsr {
     stage: AdsrStage,
     level: f32,

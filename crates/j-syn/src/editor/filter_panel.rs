@@ -3,13 +3,15 @@
 
 use std::sync::Arc;
 
+use j_syn_dsp::mod_matrix::ModDestination;
 use nih_plug::prelude::{GuiContext, Param};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::RawParamEvent;
 
-use super::controls::{bold_label, build_enum_dropdown, build_flex_knob_cell};
+use super::controls::{bold_label, build_enum_dropdown, build_flex_knob_cell_mod};
+use super::mod_bar::ModUiState;
 use super::widgets::{LedToggleSwitch, RotaryKnob};
 use super::UiData;
 use crate::{FilterModeParam, FilterPluginParams, FilterSlopeParam, JSynPluginParams};
@@ -249,6 +251,7 @@ fn build_filter_aux_knob_cell(
     cx: &mut Context,
     filter_idx: usize,
     params: Arc<JSynPluginParams>,
+    mod_ui: Arc<ModUiState>,
     accent_rgb: (u8, u8, u8),
     knob_sz: f32,
 ) {
@@ -272,12 +275,15 @@ fn build_filter_aux_knob_cell(
         .width(Stretch(1.0))
         .height(Pixels(12.0));
 
-        RotaryKnob::new(
+        RotaryKnob::new_with_mod(
             cx,
             UiData::params,
             move |p| &p.filters[filter_idx].aux,
             false,
             accent_rgb,
+            ModDestination::filter_aux(filter_idx),
+            mod_ui,
+            0,
         )
         .width(Pixels(knob_sz))
         .height(Pixels(knob_sz))
@@ -333,6 +339,7 @@ pub(super) fn build_filter_panel(
     filter_idx: usize,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
     accent: (u8, u8, u8),
 ) {
     let label = if filter_idx == 0 {
@@ -388,8 +395,9 @@ pub(super) fn build_filter_panel(
 
         HStack::new(cx, {
             let params = params.clone();
+            let mod_ui = mod_ui.clone();
             move |cx| {
-                build_flex_knob_cell(
+                build_flex_knob_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &p.filters[filter_idx].cutoff,
@@ -397,8 +405,11 @@ pub(super) fn build_filter_panel(
                     false,
                     accent,
                     32.0,
+                    ModDestination::filter_cutoff(filter_idx),
+                    mod_ui.clone(),
+                    0,
                 );
-                build_flex_knob_cell(
+                build_flex_knob_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &p.filters[filter_idx].resonance,
@@ -406,8 +417,11 @@ pub(super) fn build_filter_panel(
                     false,
                     accent,
                     32.0,
+                    ModDestination::filter_res(filter_idx),
+                    mod_ui.clone(),
+                    0,
                 );
-                build_flex_knob_cell(
+                build_flex_knob_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &p.filters[filter_idx].drive,
@@ -415,8 +429,18 @@ pub(super) fn build_filter_panel(
                     false,
                     accent,
                     32.0,
+                    ModDestination::filter_drive(filter_idx),
+                    mod_ui.clone(),
+                    0,
                 );
-                build_filter_aux_knob_cell(cx, filter_idx, params.clone(), accent, 32.0);
+                build_filter_aux_knob_cell(
+                    cx,
+                    filter_idx,
+                    params.clone(),
+                    mod_ui.clone(),
+                    accent,
+                    32.0,
+                );
             }
         })
         .col_between(Pixels(4.0))

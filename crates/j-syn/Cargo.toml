@@ -15,6 +15,7 @@ nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["a
 nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 arc-swap = "1.7"
 rfd = "0.15"
+serde = { version = "1.0", features = ["derive"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

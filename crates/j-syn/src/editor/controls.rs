@@ -3,12 +3,14 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::WavetableBank;
 use nih_plug::prelude::{Enum, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::assets;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
+use super::mod_bar::ModUiState;
 use super::widgets::{ParamStepPill, RotaryKnob};
 use super::{BottomTab, UiData, UiEvent};
 use crate::{JSynPluginParams, WavetableChoice};
@@ -306,13 +308,36 @@ pub(super) fn build_ui_scale_dropdown(cx: &mut Context) {
     .row_between(Pixels(2.0));
 }
 
-pub(super) fn build_header_knob_cell<L, Params, P, FMap>(
+fn build_rotary_knob_with_opt_mod<'a, L, Params, P, FMap>(
+    cx: &'a mut Context,
+    params: L,
+    params_to_param: FMap,
+    bipolar: bool,
+    accent_rgb: (u8, u8, u8),
+    mod_target: Option<(ModDestination, Arc<ModUiState>, u8)>,
+) -> Handle<'a, RotaryKnob>
+where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    match mod_target {
+        Some((dest, mod_ui, tab_tag)) => {
+            RotaryKnob::new_with_mod(cx, params, params_to_param, bipolar, accent_rgb, dest, mod_ui, tab_tag)
+        }
+        None => RotaryKnob::new(cx, params, params_to_param, bipolar, accent_rgb),
+    }
+}
+
+fn build_header_knob_cell_inner<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
     title: &'static str,
     bipolar: bool,
     accent_rgb: (u8, u8, u8),
+    mod_target: Option<(ModDestination, Arc<ModUiState>, u8)>,
 ) where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
@@ -320,11 +345,18 @@ pub(super) fn build_header_knob_cell<L, Params, P, FMap>(
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
     HStack::new(cx, move |cx| {
-        RotaryKnob::new(cx, params.clone(), params_to_param, bipolar, accent_rgb)
-            .width(Pixels(30.0))
-            .height(Pixels(30.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
+        build_rotary_knob_with_opt_mod(
+            cx,
+            params.clone(),
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            mod_target.clone(),
+        )
+        .width(Pixels(30.0))
+        .height(Pixels(30.0))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0));
 
         VStack::new(cx, move |cx| {
             bold_label(cx, title, "knob-title")
@@ -348,6 +380,48 @@ pub(super) fn build_header_knob_cell<L, Params, P, FMap>(
     .col_between(Pixels(5.0));
 }
 
+pub(super) fn build_header_knob_cell<L, Params, P, FMap>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    accent_rgb: (u8, u8, u8),
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    build_header_knob_cell_inner(cx, params, params_to_param, title, bipolar, accent_rgb, None);
+}
+
+pub(super) fn build_header_knob_cell_mod<L, Params, P, FMap>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    accent_rgb: (u8, u8, u8),
+    dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    build_header_knob_cell_inner(
+        cx,
+        params,
+        params_to_param,
+        title,
+        bipolar,
+        accent_rgb,
+        Some((dest, mod_ui, 0)),
+    );
+}
+
 pub(super) fn build_knob_cell<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
@@ -369,7 +443,7 @@ pub(super) fn build_knob_cell<L, Params, P, FMap>(
             .height(Pixels(13.0))
             .child_space(Stretch(1.0));
 
-        RotaryKnob::new(cx, params.clone(), params_to_param, bipolar, accent_rgb)
+        build_rotary_knob_with_opt_mod(cx, params.clone(), params_to_param, bipolar, accent_rgb, None)
             .width(Pixels(knob_sz))
             .height(Pixels(knob_sz))
             .left(Stretch(1.0))
@@ -387,7 +461,7 @@ pub(super) fn build_knob_cell<L, Params, P, FMap>(
     .row_between(Pixels(2.0));
 }
 
-pub(super) fn build_flex_knob_cell<L, Params, P, FMap>(
+pub(super) fn build_flex_knob_cell_mod<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
@@ -395,6 +469,9 @@ pub(super) fn build_flex_knob_cell<L, Params, P, FMap>(
     bipolar: bool,
     accent_rgb: (u8, u8, u8),
     knob_sz: f32,
+    dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+    tab_tag: u8,
 ) where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
@@ -407,11 +484,18 @@ pub(super) fn build_flex_knob_cell<L, Params, P, FMap>(
             .height(Pixels(12.0))
             .child_space(Stretch(1.0));
 
-        RotaryKnob::new(cx, params.clone(), params_to_param, bipolar, accent_rgb)
-            .width(Pixels(knob_sz))
-            .height(Pixels(knob_sz))
-            .left(Stretch(1.0))
-            .right(Stretch(1.0));
+        build_rotary_knob_with_opt_mod(
+            cx,
+            params.clone(),
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            Some((dest, mod_ui, tab_tag)),
+        )
+        .width(Pixels(knob_sz))
+        .height(Pixels(knob_sz))
+        .left(Stretch(1.0))
+        .right(Stretch(1.0));
 
         build_param_readout_box(cx, params, params_to_param)
             .width(Stretch(1.0))
@@ -453,12 +537,13 @@ pub(super) fn build_mini_pill_cell<L, Params, P, FMap>(
     .row_between(Pixels(2.0));
 }
 
-pub(super) fn build_flex_pill_cell<L, Params, P, FMap>(
+fn build_flex_pill_cell_inner<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
     title: &'static str,
     num_steps: usize,
+    mod_target: Option<(ModDestination, Arc<ModUiState>, u8)>,
 ) where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
@@ -471,13 +556,63 @@ pub(super) fn build_flex_pill_cell<L, Params, P, FMap>(
             .height(Pixels(10.0))
             .child_space(Stretch(1.0));
 
-        ParamStepPill::new(cx, params, params_to_param, num_steps)
-            .width(Stretch(1.0))
-            .height(Pixels(17.0));
+        let handle = match mod_target.clone() {
+            Some((dest, mod_ui, tab_tag)) => ParamStepPill::new_with_mod(
+                cx,
+                params,
+                params_to_param,
+                num_steps,
+                dest,
+                mod_ui,
+                tab_tag,
+            ),
+            None => ParamStepPill::new(cx, params, params_to_param, num_steps),
+        };
+        handle.width(Stretch(1.0)).height(Pixels(17.0));
     })
     .width(Stretch(1.0))
     .height(Auto)
     .row_between(Pixels(1.0));
+}
+
+pub(super) fn build_flex_pill_cell<L, Params, P, FMap>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    num_steps: usize,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    build_flex_pill_cell_inner(cx, params, params_to_param, title, num_steps, None);
+}
+
+pub(super) fn build_flex_pill_cell_mod<L, Params, P, FMap>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    num_steps: usize,
+    dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+    tab_tag: u8,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    build_flex_pill_cell_inner(
+        cx,
+        params,
+        params_to_param,
+        title,
+        num_steps,
+        Some((dest, mod_ui, tab_tag)),
+    );
 }
 
 pub(super) fn build_module_header(cx: &mut Context, title: &'static str, height_px: f32) {
@@ -489,7 +624,12 @@ pub(super) fn build_module_header(cx: &mut Context, title: &'static str, height_
     .width(Stretch(1.0));
 }
 
-pub(super) fn build_tab_button(cx: &mut Context, tab: BottomTab, title: &'static str) {
+pub(super) fn build_tab_button(
+    cx: &mut Context,
+    tab: BottomTab,
+    title: &'static str,
+    width_px: f32,
+) {
     Button::new(
         cx,
         move |cx| cx.emit(UiEvent::SelectTab(tab)),
@@ -497,7 +637,7 @@ pub(super) fn build_tab_button(cx: &mut Context, tab: BottomTab, title: &'static
     )
     .class("tab-btn")
     .checked(UiData::active_tab.map(move |t| *t == tab))
-    .width(Stretch(1.0))
+    .width(Pixels(width_px))
     .height(Stretch(1.0));
 }
 

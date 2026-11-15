@@ -298,3 +298,133 @@ led-toggle:checked .switch-label {
   font-weight: bold;
   color: #a99582;
 }
+
+.mod-src-label {
+  font-size: 8.5;
+  font-weight: bold;
+  color: #f6ede2;
+}
+
+.mod-insp-bar {
+  background-color: #211c17;
+  border-width: 1px;
+  border-color: #463b32;
+  border-radius: 3px;
+  child-left: 3px;
+  child-right: 2px;
+}
+
+.mod-insp-slot {
+  background-color: transparent;
+  border-width: 0px;
+  child-left: 3px;
+  child-right: 3px;
+  child-top: 1s;
+  child-bottom: 1s;
+}
+
+.mod-insp-slot:hover {
+  background-color: #302822;
+}
+
+.mod-insp-text {
+  font-size: 8.5;
+  font-weight: bold;
+  color: #ffd382;
+}
+
+.mod-insp-drag {
+  font-size: 8.5;
+  font-weight: bold;
+  color: #9be8ff;
+}
+
+.mod-insp-hint {
+  font-size: 8.5;
+  font-weight: bold;
+  color: #9a8675;
+}
+
+.mod-insp-btn {
+  background-color: #362d26;
+  border-width: 1px;
+  border-color: #5b4d42;
+  border-radius: 2px;
+  child-space: 1s;
+}
+
+.mod-insp-btn:hover {
+  background-color: #493b2f;
+  border-color: #f5b349;
+}
+
+.mod-insp-btn:checked {
+  background-color: #4a3f28;
+  border-color: #f2cb61;
+}
+
+.mod-insp-del {
+  background-color: #3f2826;
+  border-width: 1px;
+  border-color: #7a4540;
+  border-radius: 2px;
+  child-space: 1s;
+}
+
+.mod-insp-del:hover {
+  background-color: #6b3632;
+  border-color: #eb8c55;
+}
+
+.mod-insp-btn-text {
+  font-size: 8.5;
+  font-weight: bold;
+  color: #f6efe6;
+}
+
+.subtab-btn {
+  background-color: #2d2620;
+  border-width: 1px;
+  border-color: #4b4037;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.subtab-btn:hover {
+  background-color: #3b322a;
+  border-color: #8a6a42;
+}
+
+.subtab-btn:checked {
+  background-color: #514030;
+  border-color: #f5b349;
+}
+
+.subtab-btn-label {
+  font-size: 8.5;
+  font-weight: bold;
+  color: #d6c3b0;
+}
+
+.subtab-btn:checked .subtab-btn-label {
+  color: #fff6e6;
+}
+
+.preset-btn {
+  background-color: #29221c;
+  border-width: 1px;
+  border-color: #4c4036;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.preset-btn:hover {
+  background-color: #463829;
+  border-color: #f2cb61;
+}
+
+.preset-btn-label {
+  font-size: 8.5;
+  font-weight: bold;
+  color: #e6d1ba;
+}

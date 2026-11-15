@@ -2,14 +2,16 @@
 
 use std::sync::Arc;
 
+use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::WavetableBank;
 use nih_plug::prelude::GuiContext;
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
-    bold_label, build_enum_dropdown, build_flex_knob_cell, build_flex_pill_cell,
-    build_wavetable_dropdown,
+    bold_label, build_enum_dropdown, build_flex_knob_cell_mod, build_flex_pill_cell,
+    build_flex_pill_cell_mod, build_wavetable_dropdown,
 };
+use super::mod_bar::ModUiState;
 use super::scope::WavetableScope;
 use super::widgets::LedToggleSwitch;
 use super::UiData;
@@ -24,6 +26,7 @@ pub(super) fn build_osc_panel(
     bank: Arc<WavetableBank>,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
     accent: (u8, u8, u8),
 ) {
     const WARP_ITEMS: &[(&str, WarpModeParam)] = &[
@@ -163,8 +166,9 @@ pub(super) fn build_osc_panel(
         .row_between(Pixels(3.0));
 
         // Right sub-block: 7 draggable value boxes (OCT/SEMI/FINE/PHASE/UNI/DETUNE/SPREAD) + 5 enlarged knobs
-        VStack::new(cx, |cx| {
-            HStack::new(cx, |cx| {
+        VStack::new(cx, move |cx| {
+            let ui_pills = mod_ui.clone();
+            HStack::new(cx, move |cx| {
                 build_flex_pill_cell(
                     cx,
                     UiData::params,
@@ -172,26 +176,35 @@ pub(super) fn build_osc_panel(
                     "OCT",
                     7,
                 );
-                build_flex_pill_cell(
+                build_flex_pill_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).semi,
                     "SEMI",
                     25,
+                    ModDestination::osc_semi(osc_idx),
+                    ui_pills.clone(),
+                    0,
                 );
-                build_flex_pill_cell(
+                build_flex_pill_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).fine,
                     "FINE",
                     201,
+                    ModDestination::osc_fine(osc_idx),
+                    ui_pills.clone(),
+                    0,
                 );
-                build_flex_pill_cell(
+                build_flex_pill_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).phase,
                     "PHASE",
                     361,
+                    ModDestination::osc_phase(osc_idx),
+                    ui_pills.clone(),
+                    0,
                 );
                 build_flex_pill_cell(
                     cx,
@@ -200,27 +213,34 @@ pub(super) fn build_osc_panel(
                     "UNI",
                     8,
                 );
-                build_flex_pill_cell(
+                build_flex_pill_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).detune,
                     "DETUNE",
                     101,
+                    ModDestination::osc_detune(osc_idx),
+                    ui_pills.clone(),
+                    0,
                 );
-                build_flex_pill_cell(
+                build_flex_pill_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).spread,
                     "SPREAD",
                     101,
+                    ModDestination::osc_spread(osc_idx),
+                    ui_pills.clone(),
+                    0,
                 );
             })
             .col_between(Pixels(3.0))
             .height(Pixels(28.0))
             .width(Stretch(1.0));
 
-            HStack::new(cx, |cx| {
-                build_flex_knob_cell(
+            let ui_knobs = mod_ui.clone();
+            HStack::new(cx, move |cx| {
+                build_flex_knob_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).wt_pos,
@@ -228,8 +248,11 @@ pub(super) fn build_osc_panel(
                     false,
                     accent,
                     36.0,
+                    ModDestination::osc_wt_pos(osc_idx),
+                    ui_knobs.clone(),
+                    0,
                 );
-                build_flex_knob_cell(
+                build_flex_knob_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).warp_amount,
@@ -237,8 +260,11 @@ pub(super) fn build_osc_panel(
                     false,
                     accent,
                     36.0,
+                    ModDestination::osc_warp(osc_idx),
+                    ui_knobs.clone(),
+                    0,
                 );
-                build_flex_knob_cell(
+                build_flex_knob_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).mod_depth,
@@ -246,8 +272,11 @@ pub(super) fn build_osc_panel(
                     false,
                     accent,
                     36.0,
+                    ModDestination::osc_mod_depth(osc_idx),
+                    ui_knobs.clone(),
+                    0,
                 );
-                build_flex_knob_cell(
+                build_flex_knob_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).pan,
@@ -255,8 +284,11 @@ pub(super) fn build_osc_panel(
                     true,
                     accent,
                     36.0,
+                    ModDestination::osc_pan(osc_idx),
+                    ui_knobs.clone(),
+                    0,
                 );
-                build_flex_knob_cell(
+                build_flex_knob_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).level,
@@ -264,6 +296,9 @@ pub(super) fn build_osc_panel(
                     false,
                     accent,
                     36.0,
+                    ModDestination::osc_level(osc_idx),
+                    ui_knobs.clone(),
+                    0,
                 );
             })
             .col_between(Pixels(4.0))

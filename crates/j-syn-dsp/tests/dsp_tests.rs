@@ -1042,3 +1042,149 @@ fn tube_mech_and_cascaded_insert_shapers_per_voice_isolation() {
         );
     }
 }
+
+#[test]
+fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
+    use j_syn_dsp::{
+        evaluate_adsr_preview, evaluate_modseq_curve, ModDestination, ModMatrixSource,
+        ModSeqPlayMode, ModSeqRetrig, ModSeqShapePreset, ModSeqSyncMode, ModSlot, SynthEngine,
+        SynthParams, WavetableBank, MAX_MODSEQ_STEPS, NUM_MOD_SLOTS,
+    };
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    // 1. Verify all 32 modulation matrix slots evaluate simultaneously + bipolar/unipolar math
+    let mut params = SynthParams::default();
+    params.master_gain = 1.0;
+    params.amp_attack_s = 0.001;
+    params.filters[0].enabled = false;
+    params.oscs[0].level = 0.25;
+    for i in 0..NUM_MOD_SLOTS {
+        params.mod_matrix.slots[i] = ModSlot {
+            source: ModMatrixSource::ModWheel,
+            destination: ModDestination::Osc1Level,
+            depth: 0.01,
+            bipolar: false,
+            enabled: true,
+        };
+    }
+    let mut eng_lo = SynthEngine::new(sample_rate);
+    eng_lo.set_mod_wheel(0.0);
+    eng_lo.note_on(0, 60, 1.0, None, &params);
+    let mut eng_hi = SynthEngine::new(sample_rate);
+    eng_hi.set_mod_wheel(1.0);
+    eng_hi.note_on(0, 60, 1.0, None, &params);
+
+    let rms_of = |e: &mut SynthEngine, p: &SynthParams, n: usize| {
+        let mut s = 0.0_f32;
+        for _ in 0..n {
+            let (l, r) = e.process_sample(p, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            s += l * l + r * r;
+        }
+        (s / (2.0 * n as f32)).sqrt()
+    };
+    let rms_lo = rms_of(&mut eng_lo, &params, 512);
+    let rms_hi = rms_of(&mut eng_hi, &params, 512);
+    assert!(
+        rms_hi > rms_lo * 2.0,
+        "Expected 32 ModWheel slots (+0.32 total level) to boost RMS substantially: lo={rms_lo}, hi={rms_hi}"
+    );
+    // Telemetry should reflect summed dest_offset (~0.32) and MW level (~1.0)
+    let tel = eng_hi.telemetry();
+    assert!((tel.dest_offset(ModDestination::Osc1Level) - 0.32).abs() < 1e-3);
+    assert!((tel.source_level(ModMatrixSource::ModWheel) - 1.0).abs() < 1e-3);
+
+    // 2. Bipolar Aftertouch + Env2 + Velocity + Keytrack checks
+    let mut bp_params = SynthParams::default();
+    bp_params.filters[0].enabled = false;
+    bp_params.oscs[0].level = 0.5;
+    bp_params.mod_matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::Aftertouch,
+        destination: ModDestination::Osc1Level,
+        depth: 0.4,
+        bipolar: true,
+        enabled: true,
+    };
+    bp_params.mod_matrix.slots[1] = ModSlot {
+        source: ModMatrixSource::Env2,
+        destination: ModDestination::Filter1Cutoff,
+        depth: 0.5,
+        bipolar: false,
+        enabled: true,
+    };
+    bp_params.mod_matrix.slots[2] = ModSlot {
+        source: ModMatrixSource::Velocity,
+        destination: ModDestination::Osc1WtPos,
+        depth: 0.5,
+        bipolar: false,
+        enabled: true,
+    };
+    bp_params.mod_matrix.slots[3] = ModSlot {
+        source: ModMatrixSource::Keytrack,
+        destination: ModDestination::Osc1Semi,
+        depth: 0.25,
+        bipolar: false,
+        enabled: true,
+    };
+    bp_params.mod_envs[0].attack_s = 0.001;
+    bp_params.mod_envs[0].sustain = 1.0;
+
+    let mut eng_bp = SynthEngine::new(sample_rate);
+    eng_bp.set_aftertouch(0.0); // bipolar -> -1.0 -> -0.4 offset
+    eng_bp.note_on(0, 72, 0.8, None, &bp_params);
+    for _ in 0..256 {
+        eng_bp.process_sample(&bp_params, &bank);
+    }
+    let tel_bp = eng_bp.telemetry();
+    assert!((tel_bp.dest_offset(ModDestination::Osc1Level) - (-0.4)).abs() < 1e-3);
+    assert!(tel_bp.dest_offset(ModDestination::Filter1Cutoff) > 0.2);
+    assert!((tel_bp.dest_offset(ModDestination::Osc1WtPos) - 0.4).abs() < 1e-3);
+    assert!(tel_bp.dest_offset(ModDestination::Osc1Semi) > 0.1);
+    assert!(evaluate_adsr_preview(&bp_params.mod_envs[0], 0.5).is_finite());
+
+    // 3. ModSeq curve presets, tension, Loop / OneShot / PingPong, PolyVoice & MonoGlobal
+    let mut seq_params = SynthParams::default();
+    ModSeqShapePreset::RampUp.apply_to_sequence(&mut seq_params.modseq_steps.seqs[0], 8);
+    seq_params.modseq_steps.seqs[0][0].tension = 0.5;
+    seq_params.modseqs[0].sync_mode = ModSeqSyncMode::FreeHz;
+    seq_params.modseqs[0].free_hz = 10.0;
+    seq_params.modseqs[0].play_mode = ModSeqPlayMode::OneShot;
+    seq_params.modseqs[0].retrig = ModSeqRetrig::MonoGlobal;
+    seq_params.modseqs[0].smooth = 0.0;
+    let c0 = evaluate_modseq_curve(&seq_params.modseq_steps.seqs[0], 8, 0.0);
+    let c1 = evaluate_modseq_curve(&seq_params.modseq_steps.seqs[0], 8, 0.99);
+    assert!(c1 > c0 + 0.7, "RampUp curve expected to rise: c0={c0}, c1={c1}");
+
+    let mut ms_steps = seq_params.modseq_steps.seqs[0];
+    ModSeqShapePreset::SampleAndHold.apply_to_sequence(&mut ms_steps, MAX_MODSEQ_STEPS);
+    assert!(ms_steps[0].start_level == ms_steps[0].end_level);
+
+    seq_params.mod_matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::ModSeq1,
+        destination: ModDestination::Osc1Warp,
+        depth: 0.75,
+        bipolar: false,
+        enabled: true,
+    };
+    let mut eng_ms = SynthEngine::new(sample_rate);
+    eng_ms.note_on(0, 60, 0.9, None, &seq_params);
+    for _ in 0..8000 {
+        let (l, r) = eng_ms.process_sample(&seq_params, &bank);
+        assert!(l.is_finite() && r.is_finite());
+    }
+    let tel_ms = eng_ms.telemetry();
+    // At 10 Hz over 0.166 s, OneShot should be completed near phase 1.0 (offset ~0.75)
+    assert!(tel_ms.modseq_phase(0) > 0.95);
+    assert!(tel_ms.dest_offset(ModDestination::Osc1Warp) > 0.6);
+
+    // PingPong reverses direction cleanly without exceeding [0, 1)
+    seq_params.modseqs[1].play_mode = ModSeqPlayMode::PingPong;
+    seq_params.modseqs[1].retrig = ModSeqRetrig::PolyVoice;
+    for _ in 0..4000 {
+        eng_ms.process_sample(&seq_params, &bank);
+    }
+    let p1 = eng_ms.telemetry().modseq_phase(1);
+    assert!((0.0..=1.0).contains(&p1));
+}

@@ -2,10 +2,12 @@
 
 use std::sync::Arc;
 
+use j_syn_dsp::mod_matrix::ModDestination;
 use nih_plug::prelude::GuiContext;
 use nih_plug_vizia::vizia::prelude::*;
 
-use super::controls::{build_enum_dropdown, build_header_knob_cell};
+use super::controls::{build_enum_dropdown, build_header_knob_cell_mod};
+use super::mod_bar::ModUiState;
 use super::widgets::LedToggleSwitch;
 use super::{AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData};
 use crate::{JSynPluginParams, NoiseTypeParam};
@@ -20,6 +22,7 @@ pub(super) fn build_noise_panel(
     cx: &mut Context,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
 ) {
     HStack::new(cx, move |cx| {
         LedToggleSwitch::new(
@@ -45,31 +48,37 @@ pub(super) fn build_noise_panel(
 
         Element::new(cx).width(Stretch(1.0));
 
-        build_header_knob_cell(
+        build_header_knob_cell_mod(
             cx,
             UiData::params,
             |p| &p.noise.color,
             "COLOR",
             true,
             AMBER_RGB,
+            ModDestination::NoiseColor,
+            mod_ui.clone(),
         );
 
-        build_header_knob_cell(
+        build_header_knob_cell_mod(
             cx,
             UiData::params,
             |p| &p.noise.stereo,
             "STEREO",
             false,
             GOLD_RGB,
+            ModDestination::NoiseStereo,
+            mod_ui.clone(),
         );
 
-        build_header_knob_cell(
+        build_header_knob_cell_mod(
             cx,
             UiData::params,
             |p| &p.noise.level,
             "LEVEL",
             false,
             CORAL_RGB,
+            ModDestination::NoiseLevel,
+            mod_ui.clone(),
         );
     })
     .class("hardware-module")

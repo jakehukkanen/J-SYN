@@ -4,16 +4,65 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use arc_swap::ArcSwap;
 use j_syn_dsp::{
-    EngineMode, FactoryWavetable, FilterMode, FilterParams, FilterRouting, FilterSlope,
-    InsertMode, InsertParams, InsertPosition, ModOrder, ModSource, ModType, NoiseParams,
-    NoiseType, OscParams, PolyMode, RoutingParams, SynthEngine, SynthParams, WarpMode, Wavetable,
-    WavetableBank,
+    AdsrParams, EngineMode, FactoryWavetable, FilterMode, FilterParams, FilterRouting, FilterSlope,
+    InsertMode, InsertParams, InsertPosition, ModMatrixState, ModOrder, ModSeqParams,
+    ModSeqPlayMode, ModSeqRate, ModSeqRetrig, ModSeqStepBank, ModSeqSyncMode, ModSource, ModType,
+    NoiseParams, NoiseType, OscParams, PolyMode, RoutingParams, SynthEngine, SynthParams, WarpMode,
+    Wavetable, WavetableBank,
 };
+use nih_plug::params::persist::PersistentField;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
+use serde::{de::DeserializeOwned, Serialize};
 
 mod editor;
+
+/// Lock-free `ArcSwap<T>` wrapper persisted by `nih-plug` via JSON (`#[persist = "..."]`).
+pub struct PersistedArcSwap<T>(pub Arc<ArcSwap<T>>);
+
+impl<T> Clone for PersistedArcSwap<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<T: Default> Default for PersistedArcSwap<T> {
+    fn default() -> Self {
+        Self(Arc::new(ArcSwap::from_pointee(T::default())))
+    }
+}
+
+impl<T: Copy> PersistedArcSwap<T> {
+    #[inline]
+    pub fn snapshot(&self) -> T {
+        let guard = self.0.load();
+        **guard
+    }
+
+    #[inline]
+    pub fn store_value(&self, val: T) {
+        self.0.store(Arc::new(val));
+    }
+}
+
+impl<'a, T> PersistentField<'a, T> for PersistedArcSwap<T>
+where
+    T: Copy + Default + Serialize + DeserializeOwned + Send + Sync + 'static,
+{
+    fn set(&self, new_value: T) {
+        self.0.store(Arc::new(new_value));
+    }
+
+    fn map<F, R>(&self, f: F) -> R
+    where
+        F: Fn(&T) -> R,
+    {
+        let guard = self.0.load();
+        f(&**guard)
+    }
+}
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WavetableChoice {
@@ -264,6 +313,20 @@ impl From<InsertPosParam> for InsertPosition {
             InsertPosParam::PostFilter => InsertPosition::PostFilter,
         }
     }
+}
+
+fn env_time_param(name: &str, default_val: f32, min: f32, max: f32) -> FloatParam {
+    FloatParam::new(
+        name,
+        default_val,
+        FloatRange::Skewed {
+            min,
+            max,
+            factor: FloatRange::skew_factor(-2.0),
+        },
+    )
+    .with_unit(" s")
+    .with_value_to_string(formatters::v2s_f32_rounded(3))
 }
 
 fn percentage_param(name: &str, default_val: f32) -> FloatParam {
@@ -715,6 +778,195 @@ impl OscPluginParams {
     }
 }
 
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModSeqSyncParam {
+    #[name = "Sync"]
+    TempoSync,
+    #[name = "Hz"]
+    FreeHz,
+}
+
+impl From<ModSeqSyncParam> for ModSeqSyncMode {
+    fn from(val: ModSeqSyncParam) -> Self {
+        match val {
+            ModSeqSyncParam::TempoSync => ModSeqSyncMode::TempoSync,
+            ModSeqSyncParam::FreeHz => ModSeqSyncMode::FreeHz,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModSeqRateParam {
+    #[name = "1/32"]
+    Div1_32,
+    #[name = "1/16"]
+    Div1_16,
+    #[name = "1/8"]
+    Div1_8,
+    #[name = "1/4"]
+    Div1_4,
+    #[name = "1/2"]
+    Div1_2,
+    #[name = "1 Bar"]
+    Bars1,
+    #[name = "2 Bars"]
+    Bars2,
+    #[name = "4 Bars"]
+    Bars4,
+}
+
+impl From<ModSeqRateParam> for ModSeqRate {
+    fn from(val: ModSeqRateParam) -> Self {
+        match val {
+            ModSeqRateParam::Div1_32 => ModSeqRate::Div1_32,
+            ModSeqRateParam::Div1_16 => ModSeqRate::Div1_16,
+            ModSeqRateParam::Div1_8 => ModSeqRate::Div1_8,
+            ModSeqRateParam::Div1_4 => ModSeqRate::Div1_4,
+            ModSeqRateParam::Div1_2 => ModSeqRate::Div1_2,
+            ModSeqRateParam::Bars1 => ModSeqRate::Bars1,
+            ModSeqRateParam::Bars2 => ModSeqRate::Bars2,
+            ModSeqRateParam::Bars4 => ModSeqRate::Bars4,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModSeqPlayParam {
+    #[name = "Loop"]
+    Loop,
+    #[name = "1-Shot"]
+    OneShot,
+    #[name = "PingPong"]
+    PingPong,
+}
+
+impl From<ModSeqPlayParam> for ModSeqPlayMode {
+    fn from(val: ModSeqPlayParam) -> Self {
+        match val {
+            ModSeqPlayParam::Loop => ModSeqPlayMode::Loop,
+            ModSeqPlayParam::OneShot => ModSeqPlayMode::OneShot,
+            ModSeqPlayParam::PingPong => ModSeqPlayMode::PingPong,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModSeqRetrigParam {
+    #[name = "Poly"]
+    PolyVoice,
+    #[name = "Global"]
+    MonoGlobal,
+}
+
+impl From<ModSeqRetrigParam> for ModSeqRetrig {
+    fn from(val: ModSeqRetrigParam) -> Self {
+        match val {
+            ModSeqRetrigParam::PolyVoice => ModSeqRetrig::PolyVoice,
+            ModSeqRetrigParam::MonoGlobal => ModSeqRetrig::MonoGlobal,
+        }
+    }
+}
+
+#[derive(Params)]
+pub struct ModEnvPluginParams {
+    #[id = "atk"]
+    pub attack: FloatParam,
+
+    #[id = "dec"]
+    pub decay: FloatParam,
+
+    #[id = "sus"]
+    pub sustain: FloatParam,
+
+    #[id = "rel"]
+    pub release: FloatParam,
+}
+
+impl Default for ModEnvPluginParams {
+    fn default() -> Self {
+        let d = AdsrParams::default();
+        Self {
+            attack: env_time_param("Attack", d.attack_s, 0.001, 5.0),
+            decay: env_time_param("Decay", d.decay_s, 0.002, 5.0),
+            sustain: percentage_param("Sustain", d.sustain),
+            release: env_time_param("Release", d.release_s, 0.002, 8.0),
+        }
+    }
+}
+
+impl ModEnvPluginParams {
+    pub fn to_dsp(&self) -> AdsrParams {
+        AdsrParams {
+            attack_s: self.attack.value(),
+            decay_s: self.decay.value(),
+            sustain: self.sustain.value(),
+            release_s: self.release.value(),
+        }
+    }
+}
+
+#[derive(Params)]
+pub struct ModSeqPluginParams {
+    #[id = "sync"]
+    pub sync_mode: EnumParam<ModSeqSyncParam>,
+
+    #[id = "rate"]
+    pub sync_rate: EnumParam<ModSeqRateParam>,
+
+    #[id = "hz"]
+    pub free_hz: FloatParam,
+
+    #[id = "play"]
+    pub play_mode: EnumParam<ModSeqPlayParam>,
+
+    #[id = "retrig"]
+    pub retrig: EnumParam<ModSeqRetrigParam>,
+
+    #[id = "steps"]
+    pub num_steps: IntParam,
+
+    #[id = "smooth"]
+    pub smooth: FloatParam,
+}
+
+impl Default for ModSeqPluginParams {
+    fn default() -> Self {
+        Self {
+            sync_mode: EnumParam::new("Sync", ModSeqSyncParam::TempoSync),
+            sync_rate: EnumParam::new("Rate", ModSeqRateParam::Bars1),
+            free_hz: FloatParam::new(
+                "Freq",
+                1.5,
+                FloatRange::Skewed {
+                    min: 0.05,
+                    max: 30.0,
+                    factor: FloatRange::skew_factor(-1.5),
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(formatters::v2s_f32_rounded(2)),
+            play_mode: EnumParam::new("Play Mode", ModSeqPlayParam::Loop),
+            retrig: EnumParam::new("Retrig", ModSeqRetrigParam::PolyVoice),
+            num_steps: IntParam::new("Steps", 8, IntRange::Linear { min: 2, max: 16 }),
+            smooth: percentage_param("Smooth", 0.05),
+        }
+    }
+}
+
+impl ModSeqPluginParams {
+    pub fn to_dsp(&self) -> ModSeqParams {
+        ModSeqParams {
+            sync_mode: self.sync_mode.value().into(),
+            sync_rate: self.sync_rate.value().into(),
+            free_hz: self.free_hz.value(),
+            play_mode: self.play_mode.value().into(),
+            retrig: self.retrig.value().into(),
+            num_steps: self.num_steps.value().clamp(2, 16) as usize,
+            smooth: self.smooth.value(),
+        }
+    }
+}
+
 #[derive(Params)]
 pub struct JSynPluginParams {
     #[persist = "editor-state"]
@@ -722,6 +974,12 @@ pub struct JSynPluginParams {
 
     #[persist = "wavetable_paths"]
     pub wavetable_paths: Arc<Mutex<[String; 4]>>,
+
+    #[persist = "mod_matrix"]
+    pub mod_matrix: PersistedArcSwap<ModMatrixState>,
+
+    #[persist = "modseq_steps"]
+    pub modseq_steps: PersistedArcSwap<ModSeqStepBank>,
 
     #[id = "master_vol"]
     pub master_volume_db: FloatParam,
@@ -761,6 +1019,12 @@ pub struct JSynPluginParams {
 
     #[nested(group = "Routing")]
     pub routing: RoutingPluginParams,
+
+    #[nested(array, group = "Mod Envelopes")]
+    pub mod_envs: [ModEnvPluginParams; 3],
+
+    #[nested(array, group = "Mod Sequencers")]
+    pub modseqs: [ModSeqPluginParams; 4],
 }
 
 impl Default for JSynPluginParams {
@@ -773,6 +1037,8 @@ impl Default for JSynPluginParams {
                 String::new(),
                 String::new(),
             ])),
+            mod_matrix: PersistedArcSwap::default(),
+            modseq_steps: PersistedArcSwap::default(),
             master_volume_db: FloatParam::new(
                 "Master Vol",
                 -3.0,
@@ -806,50 +1072,10 @@ impl Default for JSynPluginParams {
             )
             .with_unit(" st"),
 
-            amp_attack: FloatParam::new(
-                "Attack",
-                0.005,
-                FloatRange::Skewed {
-                    min: 0.001,
-                    max: 5.0,
-                    factor: FloatRange::skew_factor(-2.0),
-                },
-            )
-            .with_unit(" s")
-            .with_value_to_string(formatters::v2s_f32_rounded(3)),
-
-            amp_decay: FloatParam::new(
-                "Decay",
-                0.25,
-                FloatRange::Skewed {
-                    min: 0.002,
-                    max: 5.0,
-                    factor: FloatRange::skew_factor(-2.0),
-                },
-            )
-            .with_unit(" s")
-            .with_value_to_string(formatters::v2s_f32_rounded(3)),
-
-            amp_sustain: FloatParam::new(
-                "Sustain",
-                1.0,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_unit(" %")
-            .with_value_to_string(formatters::v2s_f32_percentage(0))
-            .with_string_to_value(formatters::s2v_f32_percentage()),
-
-            amp_release: FloatParam::new(
-                "Release",
-                0.20,
-                FloatRange::Skewed {
-                    min: 0.002,
-                    max: 8.0,
-                    factor: FloatRange::skew_factor(-2.0),
-                },
-            )
-            .with_unit(" s")
-            .with_value_to_string(formatters::v2s_f32_rounded(3)),
+            amp_attack: env_time_param("Attack", 0.005, 0.001, 5.0),
+            amp_decay: env_time_param("Decay", 0.25, 0.002, 5.0),
+            amp_sustain: percentage_param("Sustain", 1.0),
+            amp_release: env_time_param("Release", 0.20, 0.002, 8.0),
 
             oscs: [
                 OscPluginParams::new(0),
@@ -863,6 +1089,8 @@ impl Default for JSynPluginParams {
                 FilterPluginParams::new(1),
             ],
             routing: RoutingPluginParams::default(),
+            mod_envs: std::array::from_fn(|_| ModEnvPluginParams::default()),
+            modseqs: std::array::from_fn(|_| ModSeqPluginParams::default()),
         }
     }
 }
@@ -916,7 +1144,7 @@ impl Plugin for JSynPlugin {
         ..AudioIOLayout::const_default()
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
+    const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
@@ -931,6 +1159,7 @@ impl Plugin for JSynPlugin {
             self.params.clone(),
             self.params.editor_state.clone(),
             self.wavetable_bank.clone(),
+            self.engine.telemetry(),
         )
     }
 
@@ -960,6 +1189,10 @@ impl Plugin for JSynPlugin {
         if num_samples == 0 {
             return ProcessStatus::Normal;
         }
+
+        let mod_matrix = nih_plug::util::permit_alloc(|| self.params.mod_matrix.snapshot());
+        let modseq_steps = nih_plug::util::permit_alloc(|| self.params.modseq_steps.snapshot());
+        let tempo_bpm = context.transport().tempo.unwrap_or(120.0) as f32;
 
         let synth_params = SynthParams {
             master_gain: util::db_to_gain(self.params.master_volume_db.value()),
@@ -991,6 +1224,20 @@ impl Plugin for JSynPlugin {
                 self.params.filters[1].to_dsp(),
             ],
             routing: self.params.routing.to_dsp(),
+            mod_envs: [
+                self.params.mod_envs[0].to_dsp(),
+                self.params.mod_envs[1].to_dsp(),
+                self.params.mod_envs[2].to_dsp(),
+            ],
+            modseqs: [
+                self.params.modseqs[0].to_dsp(),
+                self.params.modseqs[1].to_dsp(),
+                self.params.modseqs[2].to_dsp(),
+                self.params.modseqs[3].to_dsp(),
+            ],
+            modseq_steps,
+            mod_matrix,
+            tempo_bpm,
         };
 
         let choices = [
@@ -1093,12 +1340,17 @@ impl Plugin for JSynPlugin {
                         self.engine.set_pitch_bend(value);
                     }
                     NoteEvent::MidiCC { cc, value, .. } => {
-                        // CC 120: All Sound Off, CC 123: All Notes Off
-                        if cc == 120 && value >= 0.0 {
+                        if cc == 1 {
+                            self.engine.set_mod_wheel(value);
+                        } else if cc == 120 && value >= 0.0 {
                             self.engine.all_sound_off();
                         } else if cc == 123 && value >= 0.0 {
                             self.engine.all_notes_off();
                         }
+                    }
+                    NoteEvent::MidiChannelPressure { pressure, .. }
+                    | NoteEvent::PolyPressure { pressure, .. } => {
+                        self.engine.set_aftertouch(pressure);
                     }
                     _ => {}
                 }

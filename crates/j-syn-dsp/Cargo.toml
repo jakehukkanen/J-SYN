@@ -10,3 +10,4 @@ description = "J-SYN: Zero-allocation polyphonic wavetable synthesizer DSP engin
 arc-swap = "1.7"
 hound = "3.5"
 rustfft = "6.2"
+serde = { version = "1.0", features = ["derive"] }

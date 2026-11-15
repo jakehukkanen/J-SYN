@@ -1,7 +1,9 @@
 //! Custom skeuomorphic `femtovg` and `ParamWidgetBase` controls (`RotaryKnob`, `LedToggleSwitch`, `ParamStepPill`).
 
 use std::f32::consts::PI;
+use std::sync::Arc;
 
+use j_syn_dsp::mod_matrix::{ModDestination, ModMatrixSource};
 use nih_plug::prelude::Param;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
@@ -10,9 +12,12 @@ use nih_plug_vizia::widgets::util::ModifiersExt;
 use nih_plug_vizia::widgets::RawParamEvent;
 
 use super::controls::bold_label;
+use super::mod_bar::ModUiState;
+use super::UiEvent;
 
 const KNOB_DRAG_PIXELS: f32 = 150.0;
 const KNOB_FINE_MULTIPLIER: f32 = 0.12;
+const MOD_DEPTH_DRAG_PIXELS: f32 = 120.0;
 
 #[derive(Debug, Clone, Copy)]
 struct DragState {
@@ -20,14 +25,55 @@ struct DragState {
     start_val: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ModDepthDrag {
+    slot_idx: usize,
+    start_y: f32,
+    start_depth: f32,
+}
+
+#[derive(Clone)]
+struct ModTargetBinding {
+    dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+    tab_tag: u8,
+}
+
+/// Handles Alt+drag modulation depth changes when active, returning true if handled.
+fn handle_mod_depth_move(
+    mod_depth_drag: &mut Option<ModDepthDrag>,
+    mod_binding: &Option<ModTargetBinding>,
+    cx: &mut EventContext,
+    y: f32,
+) -> bool {
+    let (Some(md), Some(mb)) = (mod_depth_drag.as_mut(), mod_binding.as_ref()) else {
+        return false;
+    };
+    let sensitivity = if cx.modifiers().shift() { 0.2 } else { 1.0 };
+    let dy = (md.start_y - y) / (MOD_DEPTH_DRAG_PIXELS * cx.scale_factor());
+    let new_depth = (md.start_depth + dy * sensitivity).clamp(-1.0, 1.0);
+    let prev_pct = (md.start_depth * 100.0).round() as i32;
+    let next_pct = (new_depth * 100.0).round() as i32;
+    mb.mod_ui.adjust_slot_depth(md.slot_idx, new_depth);
+    md.start_y = y;
+    md.start_depth = new_depth;
+    if prev_pct != next_pct {
+        cx.emit(UiEvent::ModUiChanged);
+    }
+    cx.needs_redraw();
+    true
+}
+
 /// Skeuomorphic 3D rotary knob widget rendered via `femtovg` (`vizia::vg`).
 pub struct RotaryKnob {
     param_base: ParamWidgetBase,
     drag_active: bool,
     drag_state: Option<DragState>,
+    mod_depth_drag: Option<ModDepthDrag>,
     scrolled_lines: f32,
     bipolar: bool,
     accent_rgb: (u8, u8, u8),
+    mod_binding: Option<ModTargetBinding>,
 }
 
 impl RotaryKnob {
@@ -44,13 +90,62 @@ impl RotaryKnob {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
+        Self::build_inner(cx, params, params_to_param, bipolar, accent_rgb, None)
+    }
+
+    pub fn new_with_mod<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        bipolar: bool,
+        accent_rgb: (u8, u8, u8),
+        dest: ModDestination,
+        mod_ui: Arc<ModUiState>,
+        tab_tag: u8,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self::build_inner(
+            cx,
+            params,
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            Some(ModTargetBinding {
+                dest,
+                mod_ui,
+                tab_tag,
+            }),
+        )
+    }
+
+    fn build_inner<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        bipolar: bool,
+        accent_rgb: (u8, u8, u8),
+        mod_binding: Option<ModTargetBinding>,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
             drag_active: false,
             drag_state: None,
+            mod_depth_drag: None,
             scrolled_lines: 0.0,
             bipolar,
             accent_rgb,
+            mod_binding,
         }
         .build(
             cx,
@@ -66,12 +161,16 @@ impl RotaryKnob {
     }
 
     fn reset_to_default(&mut self, cx: &mut EventContext) {
-        if self.drag_active {
+        if self.drag_active || self.mod_depth_drag.is_some() {
+            let was_param_drag = self.drag_active;
             self.drag_active = false;
             self.drag_state = None;
+            self.mod_depth_drag = None;
             cx.release();
             cx.set_active(false);
-            self.param_base.end_set_parameter(cx);
+            if was_param_drag {
+                self.param_base.end_set_parameter(cx);
+            }
         }
         let target = self.param_base.default_normalized_value();
         self.param_base.begin_set_parameter(cx);
@@ -98,29 +197,80 @@ impl View for RotaryKnob {
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
                 if cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL) {
                     self.reset_to_default(cx);
-                } else {
-                    self.drag_active = true;
-                    cx.capture();
-                    cx.focus();
-                    cx.set_active(true);
-                    self.param_base.begin_set_parameter(cx);
-                    self.drag_state = Some(DragState {
-                        start_y: cx.mouse().cursory,
-                        start_val: self.param_base.unmodulated_normalized_value(),
-                    });
-                    cx.needs_redraw();
+                    meta.consume();
+                    return;
                 }
+                if let Some(ref mb) = self.mod_binding {
+                    if let Some((slot_idx, slot)) = mb.mod_ui.primary_slot_for_dest(mb.dest) {
+                        let bounds = cx.bounds();
+                        let dpx = cx.scale_factor();
+                        let center_x = bounds.x + bounds.w * 0.5;
+                        let center_y = bounds.y + bounds.h * 0.52;
+                        let max_r = (bounds.w.min(bounds.h) * 0.5) - 2.0 * dpx;
+                        let dist = (cx.mouse().cursorx - center_x).hypot(cx.mouse().cursory - center_y);
+                        if cx.modifiers().contains(Modifiers::ALT) || dist > max_r * 0.78 {
+                            self.mod_depth_drag = Some(ModDepthDrag {
+                                slot_idx,
+                                start_y: cx.mouse().cursory,
+                                start_depth: slot.depth,
+                            });
+                            mb.mod_ui.focus_slot(mb.dest, slot_idx);
+                            cx.capture();
+                            cx.focus();
+                            cx.set_active(true);
+                            cx.emit(UiEvent::ModUiChanged);
+                            cx.needs_redraw();
+                            meta.consume();
+                            return;
+                        }
+                    }
+                }
+                self.drag_active = true;
+                cx.capture();
+                cx.focus();
+                cx.set_active(true);
+                self.param_base.begin_set_parameter(cx);
+                self.drag_state = Some(DragState {
+                    start_y: cx.mouse().cursory,
+                    start_val: self.param_base.unmodulated_normalized_value(),
+                });
+                cx.needs_redraw();
                 meta.consume();
             }
-            WindowEvent::MouseDoubleClick(MouseButton::Left)
-            | WindowEvent::MouseDown(MouseButton::Right)
+            WindowEvent::MouseDoubleClick(MouseButton::Left) => {
+                self.reset_to_default(cx);
+                meta.consume();
+            }
+            WindowEvent::MouseDown(MouseButton::Right)
             | WindowEvent::MouseDoubleClick(MouseButton::Right)
             | WindowEvent::MouseTripleClick(MouseButton::Right) => {
+                if let Some(ref mb) = self.mod_binding {
+                    if cx.modifiers().shift() {
+                        if mb.mod_ui.remove_primary_slot_for_dest(mb.dest) {
+                            cx.emit(UiEvent::ModUiChanged);
+                            cx.needs_redraw();
+                            meta.consume();
+                            return;
+                        }
+                    } else if mb.mod_ui.has_slots_for_dest(mb.dest) {
+                        mb.mod_ui.cycle_inspected_slot_for_dest(mb.dest);
+                        cx.emit(UiEvent::ModUiChanged);
+                        cx.needs_redraw();
+                        meta.consume();
+                        return;
+                    }
+                }
                 self.reset_to_default(cx);
                 meta.consume();
             }
             WindowEvent::MouseUp(MouseButton::Left) => {
-                if self.drag_active {
+                if self.mod_depth_drag.is_some() {
+                    self.mod_depth_drag = None;
+                    cx.release();
+                    cx.set_active(false);
+                    cx.needs_redraw();
+                    meta.consume();
+                } else if self.drag_active {
                     self.drag_active = false;
                     self.drag_state = None;
                     cx.release();
@@ -131,6 +281,10 @@ impl View for RotaryKnob {
                 }
             }
             WindowEvent::MouseMove(_x, y) => {
+                if handle_mod_depth_move(&mut self.mod_depth_drag, &self.mod_binding, cx, *y) {
+                    meta.consume();
+                    return;
+                }
                 if self.drag_active {
                     let state = self.drag_state.get_or_insert(DragState {
                         start_y: *y,
@@ -201,6 +355,25 @@ impl View for RotaryKnob {
         let sweep_angle = 1.50 * PI;
         let end_angle = start_angle + sweep_angle;
         let val_angle = start_angle + norm * sweep_angle;
+
+        if let Some(ref mb) = self.mod_binding {
+            mb.mod_ui.register_drop_rect(mb.dest, mb.tab_tag, bounds);
+            let drag_src = mb.mod_ui.dragging_source();
+            if drag_src != ModMatrixSource::None {
+                let (sr, sg, sb) = drag_src.color_rgb();
+                let is_hover = mb.mod_ui.is_drop_target(mb.dest);
+                let mut ring = vg::Path::new();
+                ring.circle(center_x, center_y, max_r * 1.02);
+                let mut ring_paint = vg::Paint::color(vg::Color::rgba(
+                    sr,
+                    sg,
+                    sb,
+                    if is_hover { 235 } else { 68 },
+                ));
+                ring_paint.set_line_width((if is_hover { 2.1 } else { 1.0 }) * dpx);
+                canvas.stroke_path(&ring, &ring_paint);
+            }
+        }
 
         let num_ticks = 9;
         for i in 0..num_ticks {
@@ -310,6 +483,51 @@ impl View for RotaryKnob {
         ptr_paint.set_line_width(1.8 * dpx);
         ptr_paint.set_line_cap(vg::LineCap::Round);
         canvas.stroke_path(&ptr_path, &ptr_paint);
+
+        // Radial modulation rings + live animated modulation indicator
+        if let Some(ref mb) = self.mod_binding {
+            let (slots, _indices, count) = mb.mod_ui.slots_for_dest(mb.dest);
+            if count > 0 {
+                let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
+                let mod_ring_r = max_r * 1.01;
+                for slot in slots.iter().take(count) {
+                    let (sr, sg, sb) = slot.source.color_rgb();
+                    let (lo_norm, hi_norm) = if slot.bipolar {
+                        let span = slot.depth.abs();
+                        (
+                            (base_norm - span).clamp(0.0, 1.0),
+                            (base_norm + span).clamp(0.0, 1.0),
+                        )
+                    } else {
+                        let target = (base_norm + slot.depth).clamp(0.0, 1.0);
+                        (base_norm.min(target), base_norm.max(target))
+                    };
+                    if (hi_norm - lo_norm) > 0.005 {
+                        let a0 = start_angle + lo_norm * sweep_angle;
+                        let a1 = start_angle + hi_norm * sweep_angle;
+                        let mut mpath = vg::Path::new();
+                        mpath.arc(center_x, center_y, mod_ring_r, a0, a1, vg::Solidity::Hole);
+                        let mut mpaint = vg::Paint::color(vg::Color::rgba(sr, sg, sb, 225));
+                        mpaint.set_line_width(2.0 * dpx);
+                        mpaint.set_line_cap(vg::LineCap::Round);
+                        canvas.stroke_path(&mpath, &mpaint);
+                    }
+                }
+
+                let live_offset = mb.mod_ui.telemetry.dest_offset(mb.dest);
+                let live_norm = (base_norm + live_offset).clamp(0.0, 1.0);
+                let live_angle = start_angle + live_norm * sweep_angle;
+                let (dr, dg, db) = slots[0].source.color_rgb();
+                let lx = center_x + live_angle.cos() * mod_ring_r;
+                let ly = center_y + live_angle.sin() * mod_ring_r;
+                let mut dot = vg::Path::new();
+                dot.circle(lx, ly, 2.2 * dpx);
+                canvas.fill_path(&dot, &vg::Paint::color(vg::Color::rgb(255, 248, 232)));
+                let mut dot_ring = vg::Paint::color(vg::Color::rgb(dr, dg, db));
+                dot_ring.set_line_width(1.1 * dpx);
+                canvas.stroke_path(&dot, &dot_ring);
+            }
+        }
     }
 }
 
@@ -497,7 +715,7 @@ impl View for LedToggleSwitch {
     }
 }
 
-/// Clickable / draggable compact pill for discrete Enum or Int parameters.
+/// Clickable / draggable compact pill for discrete Enum or Int parameters (with optional modulation bar).
 pub struct ParamStepPill {
     param_base: ParamWidgetBase,
     num_steps: usize,
@@ -505,6 +723,8 @@ pub struct ParamStepPill {
     drag_moved: bool,
     start_y: f32,
     start_val: f32,
+    mod_depth_drag: Option<ModDepthDrag>,
+    mod_binding: Option<ModTargetBinding>,
 }
 
 impl ParamStepPill {
@@ -520,6 +740,50 @@ impl ParamStepPill {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
+        Self::build_inner(cx, params, params_to_param, num_steps, None)
+    }
+
+    pub fn new_with_mod<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        num_steps: usize,
+        dest: ModDestination,
+        mod_ui: Arc<ModUiState>,
+        tab_tag: u8,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self::build_inner(
+            cx,
+            params,
+            params_to_param,
+            num_steps,
+            Some(ModTargetBinding {
+                dest,
+                mod_ui,
+                tab_tag,
+            }),
+        )
+    }
+
+    fn build_inner<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        num_steps: usize,
+        mod_binding: Option<ModTargetBinding>,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
             num_steps: num_steps.max(2),
@@ -527,6 +791,8 @@ impl ParamStepPill {
             drag_moved: false,
             start_y: 0.0,
             start_val: 0.0,
+            mod_depth_drag: None,
+            mod_binding,
         }
         .build(
             cx,
@@ -561,6 +827,23 @@ impl View for ParamStepPill {
             WindowEvent::MouseDown(MouseButton::Left)
             | WindowEvent::MouseDoubleClick(MouseButton::Left)
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
+                if cx.modifiers().contains(Modifiers::ALT) {
+                    if let Some(ref mb) = self.mod_binding {
+                        if let Some((slot_idx, slot)) = mb.mod_ui.primary_slot_for_dest(mb.dest) {
+                            self.mod_depth_drag = Some(ModDepthDrag {
+                                slot_idx,
+                                start_y: cx.mouse().cursory,
+                                start_depth: slot.depth,
+                            });
+                            mb.mod_ui.focus_slot(mb.dest, slot_idx);
+                            cx.capture();
+                            cx.emit(UiEvent::ModUiChanged);
+                            cx.needs_redraw();
+                            meta.consume();
+                            return;
+                        }
+                    }
+                }
                 if cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL) {
                     let def = self.param_base.default_normalized_value();
                     self.param_base.begin_set_parameter(cx);
@@ -578,6 +861,27 @@ impl View for ParamStepPill {
             }
             WindowEvent::MouseDown(MouseButton::Right)
             | WindowEvent::MouseDoubleClick(MouseButton::Right) => {
+                if let Some(ref mb) = self.mod_binding {
+                    if cx.modifiers().shift() {
+                        if mb.mod_ui.remove_primary_slot_for_dest(mb.dest) {
+                            cx.emit(UiEvent::ModUiChanged);
+                            cx.needs_redraw();
+                            meta.consume();
+                            return;
+                        }
+                    } else if cx.modifiers().contains(Modifiers::ALT)
+                        || cx.modifiers().command()
+                        || cx.modifiers().contains(Modifiers::CTRL)
+                    {
+                        if mb.mod_ui.has_slots_for_dest(mb.dest) {
+                            mb.mod_ui.cycle_inspected_slot_for_dest(mb.dest);
+                            cx.emit(UiEvent::ModUiChanged);
+                            cx.needs_redraw();
+                            meta.consume();
+                            return;
+                        }
+                    }
+                }
                 let step = 1.0 / (self.num_steps - 1) as f32;
                 let cur = self.param_base.unmodulated_normalized_value();
                 let cur_idx = (cur * (self.num_steps - 1) as f32).round() as usize;
@@ -589,7 +893,12 @@ impl View for ParamStepPill {
                 meta.consume();
             }
             WindowEvent::MouseUp(MouseButton::Left) => {
-                if self.drag_active {
+                if self.mod_depth_drag.is_some() {
+                    self.mod_depth_drag = None;
+                    cx.release();
+                    cx.needs_redraw();
+                    meta.consume();
+                } else if self.drag_active {
                     if !self.drag_moved {
                         // Treat as click: cycle cleanly to next discrete step
                         let step = 1.0 / (self.num_steps - 1) as f32;
@@ -607,6 +916,10 @@ impl View for ParamStepPill {
                 }
             }
             WindowEvent::MouseMove(_x, y) => {
+                if handle_mod_depth_move(&mut self.mod_depth_drag, &self.mod_binding, cx, *y) {
+                    meta.consume();
+                    return;
+                }
                 if self.drag_active {
                     let moved = (*y - self.start_y).abs();
                     if self.drag_moved || moved >= 6.0 * cx.scale_factor() {
@@ -629,5 +942,72 @@ impl View for ParamStepPill {
             }
             _ => {}
         });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let mut path = cx.build_path();
+        cx.draw_shadows(canvas, &mut path);
+        cx.draw_backdrop_filter(canvas, &mut path);
+        cx.draw_background(canvas, &mut path);
+        cx.draw_border(canvas, &mut path);
+        cx.draw_inset_box_shadows(canvas, &mut path);
+        cx.draw_outline(canvas);
+
+        let Some(ref mb) = self.mod_binding else {
+            return;
+        };
+        let bounds = cx.bounds();
+        if bounds.w <= 2.0 || bounds.h <= 2.0 {
+            return;
+        }
+        mb.mod_ui.register_drop_rect(mb.dest, mb.tab_tag, bounds);
+        let dpx = cx.scale_factor();
+
+        let drag_src = mb.mod_ui.dragging_source();
+        if drag_src != ModMatrixSource::None {
+            let (sr, sg, sb) = drag_src.color_rgb();
+            let is_hover = mb.mod_ui.is_drop_target(mb.dest);
+            let mut hl = vg::Path::new();
+            hl.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 3.0 * dpx);
+            let mut p = vg::Paint::color(vg::Color::rgba(
+                sr,
+                sg,
+                sb,
+                if is_hover { 235 } else { 70 },
+            ));
+            p.set_line_width((if is_hover { 1.8 } else { 1.0 }) * dpx);
+            canvas.stroke_path(&hl, &p);
+        }
+
+        let (slots, _indices, count) = mb.mod_ui.slots_for_dest(mb.dest);
+        if count == 0 {
+            return;
+        }
+        let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
+        let bar_x = bounds.x + 2.5 * dpx;
+        let bar_w = (bounds.w - 5.0 * dpx).max(1.0);
+        let bar_y = bounds.y + bounds.h - 2.6 * dpx;
+        let bar_h = 2.0 * dpx;
+
+        for slot in slots.iter().take(count) {
+            let (sr, sg, sb) = slot.source.color_rgb();
+            let (lo, hi) = if slot.bipolar {
+                let span = slot.depth.abs();
+                ((base_norm - span).clamp(0.0, 1.0), (base_norm + span).clamp(0.0, 1.0))
+            } else {
+                let tgt = (base_norm + slot.depth).clamp(0.0, 1.0);
+                (base_norm.min(tgt), base_norm.max(tgt))
+            };
+            if hi - lo > 0.005 {
+                let mut seg = vg::Path::new();
+                seg.rounded_rect(bar_x + lo * bar_w, bar_y, (hi - lo) * bar_w, bar_h, 1.0 * dpx);
+                canvas.fill_path(&seg, &vg::Paint::color(vg::Color::rgba(sr, sg, sb, 225)));
+            }
+        }
+
+        let live_norm = (base_norm + mb.mod_ui.telemetry.dest_offset(mb.dest)).clamp(0.0, 1.0);
+        let mut tick = vg::Path::new();
+        tick.circle(bar_x + live_norm * bar_w, bar_y + bar_h * 0.5, 1.8 * dpx);
+        canvas.fill_path(&tick, &vg::Paint::color(vg::Color::rgb(255, 248, 232)));
     }
 }

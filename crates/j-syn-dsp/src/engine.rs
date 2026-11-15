@@ -1,3 +1,8 @@
+use std::sync::Arc;
+
+use crate::mod_matrix::{ModUiTelemetry, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS};
+use crate::modseq::{ModSeqRetrig, ModSeqState};
+use crate::oscillator::EngineMode;
 use crate::voice::{PolyMode, SynthParams, TailVoice, Voice};
 use crate::wavetable::{Wavetable, WavetableBank};
 
@@ -16,6 +21,11 @@ pub struct SynthEngine {
     mono_stack_len: usize,
     pitch_bend_norm: f32,
     pitch_bend_smoothed: f32,
+    mod_wheel: f32,
+    aftertouch: f32,
+    global_modseqs: [ModSeqState; 4],
+    global_modseq_vals: [f32; 4],
+    telemetry: Arc<ModUiTelemetry>,
     control_tick_counter: u32,
     control_tick_period: u32,
     smoothed_wt_pos: [f32; 4],
@@ -41,6 +51,11 @@ impl SynthEngine {
             mono_stack_len: 0,
             pitch_bend_norm: 0.0,
             pitch_bend_smoothed: 0.0,
+            mod_wheel: 0.0,
+            aftertouch: 0.0,
+            global_modseqs: [ModSeqState::new(); 4],
+            global_modseq_vals: [0.0; 4],
+            telemetry: Arc::new(ModUiTelemetry::new()),
             control_tick_counter: 0,
             control_tick_period: (sr / 1500.0).round().max(1.0) as u32,
             smoothed_wt_pos: [0.0; 4],
@@ -77,16 +92,36 @@ impl SynthEngine {
         for tv in &mut self.tail_voices {
             tv.reset();
         }
+        for ms in &mut self.global_modseqs {
+            ms.reset();
+        }
+        self.global_modseq_vals = [0.0; 4];
         self.mono_stack_len = 0;
         self.last_note = None;
         self.pitch_bend_norm = 0.0;
         self.pitch_bend_smoothed = 0.0;
+        self.mod_wheel = 0.0;
+        self.aftertouch = 0.0;
         self.control_tick_counter = 0;
     }
 
     #[inline]
     pub fn set_pitch_bend(&mut self, value_0_to_1: f32) {
         self.pitch_bend_norm = (value_0_to_1.clamp(0.0, 1.0) * 2.0) - 1.0;
+    }
+
+    #[inline]
+    pub fn set_mod_wheel(&mut self, value_0_to_1: f32) {
+        self.mod_wheel = value_0_to_1.clamp(0.0, 1.0);
+    }
+
+    #[inline]
+    pub fn set_aftertouch(&mut self, value_0_to_1: f32) {
+        self.aftertouch = value_0_to_1.clamp(0.0, 1.0);
+    }
+
+    pub fn telemetry(&self) -> Arc<ModUiTelemetry> {
+        Arc::clone(&self.telemetry)
     }
 
     pub fn note_on(
@@ -171,6 +206,9 @@ impl SynthEngine {
                 start_note,
                 note as f32,
                 params,
+                &self.global_modseq_vals,
+                self.mod_wheel,
+                self.aftertouch,
                 &mut self.rng_state,
             );
             self.last_note = Some(note as f32);
@@ -203,6 +241,9 @@ impl SynthEngine {
             start_note,
             note as f32,
             params,
+            &self.global_modseq_vals,
+            self.mod_wheel,
+            self.aftertouch,
             &mut self.rng_state,
         );
         self.last_note = Some(note as f32);
@@ -231,6 +272,7 @@ impl SynthEngine {
                 if v0.active {
                     v0.releasing = true;
                     v0.amp_env.release();
+                    v0.release_modulators();
                 }
             }
             return;
@@ -247,6 +289,7 @@ impl SynthEngine {
             if id_match {
                 v.releasing = true;
                 v.amp_env.release();
+                v.release_modulators();
             }
         }
     }
@@ -278,6 +321,7 @@ impl SynthEngine {
             if v.active && !v.releasing {
                 v.releasing = true;
                 v.amp_env.release();
+                v.release_modulators();
             }
         }
     }
@@ -320,7 +364,8 @@ impl SynthEngine {
         tables: [&Wavetable; 4],
     ) -> (f32, f32) {
         // 1.5 kHz control-rate modulation tick with lightweight 1-pole smoothing
-        if self.control_tick_counter == 0 {
+        let is_control_tick = self.control_tick_counter == 0;
+        if is_control_tick {
             const CR_COEFF: f32 = 0.28;
             self.pitch_bend_smoothed +=
                 (self.pitch_bend_norm - self.pitch_bend_smoothed) * CR_COEFF;
@@ -347,6 +392,52 @@ impl SynthEngine {
         self.control_tick_counter += 1;
         if self.control_tick_counter >= self.control_tick_period {
             self.control_tick_counter = 0;
+        }
+
+        if params.engine_mode == EngineMode::Hq {
+            let dt_sample = 1.0 / self.sample_rate;
+            for i in 0..4 {
+                self.global_modseq_vals[i] = self.global_modseqs[i].advance(
+                    dt_sample,
+                    params.tempo_bpm,
+                    &params.modseqs[i],
+                    &params.modseq_steps.seqs[i],
+                );
+            }
+            for v in &mut self.voices {
+                if v.active {
+                    v.update_modulation(
+                        dt_sample,
+                        params,
+                        &self.global_modseq_vals,
+                        self.mod_wheel,
+                        self.aftertouch,
+                        false,
+                    );
+                }
+            }
+        } else if is_control_tick {
+            let dt_tick = (self.control_tick_period as f32) / self.sample_rate;
+            for i in 0..4 {
+                self.global_modseq_vals[i] = self.global_modseqs[i].advance(
+                    dt_tick,
+                    params.tempo_bpm,
+                    &params.modseqs[i],
+                    &params.modseq_steps.seqs[i],
+                );
+            }
+            for v in &mut self.voices {
+                if v.active {
+                    v.update_modulation(
+                        dt_tick,
+                        params,
+                        &self.global_modseq_vals,
+                        self.mod_wheel,
+                        self.aftertouch,
+                        true,
+                    );
+                }
+            }
         }
 
         let mut cr_params = *params;
@@ -382,12 +473,63 @@ impl SynthEngine {
             }
         }
 
+        if is_control_tick {
+            self.publish_telemetry(params);
+        }
+
         // Polyphonic headroom scaling (~-9 dB) * master gain
         const HEADROOM: f32 = 0.35;
         let out_gain = HEADROOM * self.smoothed_master_gain;
         (mix_l * out_gain, mix_r * out_gain)
     }
 
+    fn publish_telemetry(&self, params: &SynthParams) {
+        if let Some(v) = self.voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {
+            let mut modseq_phases = [0.0_f32; 4];
+            for i in 0..4 {
+                modseq_phases[i] = if params.modseqs[i].retrig == ModSeqRetrig::PolyVoice {
+                    v.modseqs[i].phase
+                } else {
+                    self.global_modseqs[i].phase
+                };
+            }
+            let env_levels = [
+                v.amp_env.level(),
+                v.mod_envs[0].level(),
+                v.mod_envs[1].level(),
+                v.mod_envs[2].level(),
+            ];
+            self.telemetry.store_voice_snapshot(
+                &v.mod_offsets,
+                &v.last_sources,
+                &modseq_phases,
+                &env_levels,
+            );
+        } else {
+            let mut idle_sources = [0.0_f32; NUM_ACTIVE_SOURCES];
+            let mut modseq_phases = [0.0_f32; 4];
+            for i in 0..4 {
+                if params.modseqs[i].retrig == ModSeqRetrig::MonoGlobal {
+                    idle_sources[4 + i] = self.global_modseq_vals[i];
+                    modseq_phases[i] = self.global_modseqs[i].phase;
+                }
+            }
+            idle_sources[10] = self.mod_wheel.clamp(0.0, 1.0);
+            idle_sources[11] = self.aftertouch.clamp(0.0, 1.0);
+            let mut idle_offsets = [0.0_f32; NUM_MOD_DESTS];
+            params
+                .mod_matrix
+                .evaluate_destinations(&idle_sources, &mut idle_offsets);
+            self.telemetry.store_voice_snapshot(
+                &idle_offsets,
+                &idle_sources,
+                &modseq_phases,
+                &[0.0; 4],
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn init_voice(
         v: &mut Voice,
         channel: u8,
@@ -398,6 +540,9 @@ impl SynthEngine {
         start_note: f32,
         target_note: f32,
         params: &SynthParams,
+        global_modseq_vals: &[f32; 4],
+        mod_wheel: f32,
+        aftertouch: f32,
         rng_state: &mut u32,
     ) {
         v.active = true;
@@ -410,6 +555,16 @@ impl SynthEngine {
         v.current_midi_note = start_note;
         v.target_midi_note = target_note;
         v.amp_env.reset_and_trigger();
+        for env in &mut v.mod_envs {
+            env.reset_and_trigger();
+        }
+        for (i, ms) in v.modseqs.iter_mut().enumerate() {
+            if params.modseqs[i].retrig == ModSeqRetrig::PolyVoice {
+                ms.trigger();
+            } else {
+                ms.reset();
+            }
+        }
 
         for (i, osc) in v.oscillators.iter_mut().enumerate() {
             if params.oscs[i].retrig {
@@ -430,6 +585,14 @@ impl SynthEngine {
                 params.filters[i].drive,
             );
         }
+        v.update_modulation(
+            0.0,
+            params,
+            global_modseq_vals,
+            mod_wheel,
+            aftertouch,
+            true,
+        );
     }
 
     fn find_steal_candidate(&self) -> usize {

@@ -1,8 +1,12 @@
-use crate::envelope::AmpAdsr;
+use crate::envelope::{AdsrParams, AmpAdsr};
 use crate::filter::{FilterParams, FilterState, FilterSvfCore};
 use crate::insert::{
     FilterRouting, InsertPosition, InsertShaperState, RoutingParams, VoiceFeedbackState,
 };
+use crate::mod_matrix::{
+    ModDestination, ModMatrixState, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS,
+};
+use crate::modseq::{ModSeqParams, ModSeqRetrig, ModSeqState, ModSeqStepBank};
 use crate::noise::{NoiseParams, NoiseState};
 use crate::oscillator::{EngineMode, ModSource, OscParams, OscillatorState};
 use crate::wavetable::Wavetable;
@@ -29,6 +33,11 @@ pub struct SynthParams {
     pub noise: NoiseParams,
     pub filters: [FilterParams; 2],
     pub routing: RoutingParams,
+    pub mod_envs: [AdsrParams; 3],
+    pub modseqs: [ModSeqParams; 4],
+    pub modseq_steps: ModSeqStepBank,
+    pub mod_matrix: ModMatrixState,
+    pub tempo_bpm: f32,
 }
 
 impl Default for SynthParams {
@@ -52,6 +61,11 @@ impl Default for SynthParams {
                 FilterParams::default_filter_2(),
             ],
             routing: RoutingParams::default(),
+            mod_envs: [AdsrParams::default(); 3],
+            modseqs: [ModSeqParams::default(); 4],
+            modseq_steps: ModSeqStepBank::default(),
+            mod_matrix: ModMatrixState::default(),
+            tempo_bpm: 120.0,
         }
     }
 }
@@ -134,6 +148,95 @@ fn run_inserts_at(
 }
 
 #[inline]
+fn apply_osc_modulation(
+    osc_p: &OscParams,
+    idx: usize,
+    mod_offsets: &[f32; NUM_MOD_DESTS],
+) -> OscParams {
+    let mut out = *osc_p;
+    out.wt_pos = (out.wt_pos + mod_offsets[ModDestination::osc_wt_pos(idx).index()]).clamp(0.0, 1.0);
+    out.warp_amount =
+        (out.warp_amount + mod_offsets[ModDestination::osc_warp(idx).index()]).clamp(0.0, 1.0);
+    out.mod_depth =
+        (out.mod_depth + mod_offsets[ModDestination::osc_mod_depth(idx).index()]).clamp(0.0, 1.0);
+    out.pan = (out.pan + mod_offsets[ModDestination::osc_pan(idx).index()] * 2.0).clamp(-1.0, 1.0);
+    out.level = (out.level + mod_offsets[ModDestination::osc_level(idx).index()]).clamp(0.0, 1.0);
+    let mod_fine =
+        (out.fine_cents + mod_offsets[ModDestination::osc_fine(idx).index()] * 100.0)
+            .clamp(-200.0, 200.0);
+    let mod_semi_cents = mod_offsets[ModDestination::osc_semi(idx).index()] * 2400.0;
+    out.fine_cents = mod_fine + mod_semi_cents;
+    out.phase_offset =
+        (out.phase_offset + mod_offsets[ModDestination::osc_phase(idx).index()]).rem_euclid(1.0);
+    out.detune =
+        (out.detune + mod_offsets[ModDestination::osc_detune(idx).index()]).clamp(0.0, 1.0);
+    out.spread =
+        (out.spread + mod_offsets[ModDestination::osc_spread(idx).index()]).clamp(0.0, 1.0);
+    out
+}
+
+#[inline]
+fn apply_noise_modulation(
+    noise: &NoiseParams,
+    mod_offsets: &[f32; NUM_MOD_DESTS],
+) -> NoiseParams {
+    let mut out = *noise;
+    out.color =
+        (out.color + mod_offsets[ModDestination::NoiseColor.index()] * 2.0).clamp(-1.0, 1.0);
+    out.stereo = (out.stereo + mod_offsets[ModDestination::NoiseStereo.index()]).clamp(0.0, 1.0);
+    out.level = (out.level + mod_offsets[ModDestination::NoiseLevel.index()]).clamp(0.0, 1.0);
+    out
+}
+
+#[inline]
+fn apply_filter_modulation(
+    flt: &FilterParams,
+    idx: usize,
+    mod_offsets: &[f32; NUM_MOD_DESTS],
+) -> FilterParams {
+    let mut out = *flt;
+    let d_cut = mod_offsets[ModDestination::filter_cutoff(idx).index()];
+    if d_cut.abs() > 1e-6 {
+        out.cutoff_hz = (out.cutoff_hz * 2.0_f32.powf(d_cut * 6.0)).clamp(20.0, 20_000.0);
+    }
+    out.resonance =
+        (out.resonance + mod_offsets[ModDestination::filter_res(idx).index()]).clamp(0.0, 1.0);
+    out.drive =
+        (out.drive + mod_offsets[ModDestination::filter_drive(idx).index()]).clamp(0.0, 1.0);
+    out.aux = (out.aux + mod_offsets[ModDestination::filter_aux(idx).index()]).clamp(0.0, 1.0);
+    out
+}
+
+#[inline]
+fn apply_routing_modulation(
+    routing: &RoutingParams,
+    mod_offsets: &[f32; NUM_MOD_DESTS],
+) -> RoutingParams {
+    let mut out = *routing;
+    for i in 0..4 {
+        out.osc_filter_balance[i] = (out.osc_filter_balance[i]
+            + mod_offsets[ModDestination::osc_filter_send(i).index()] * 2.0)
+            .clamp(-1.0, 1.0);
+    }
+    out.noise_filter_balance = (out.noise_filter_balance
+        + mod_offsets[ModDestination::NoiseFilterSend.index()] * 2.0)
+        .clamp(-1.0, 1.0);
+    out.filter_mix =
+        (out.filter_mix + mod_offsets[ModDestination::FilterMix.index()] * 2.0).clamp(-1.0, 1.0);
+    out.feedback_amount =
+        (out.feedback_amount + mod_offsets[ModDestination::FeedbackAmount.index()]).clamp(0.0, 1.0);
+    for idx in 0..2 {
+        out.inserts[idx].drive =
+            (out.inserts[idx].drive + mod_offsets[ModDestination::insert_drive(idx).index()])
+                .clamp(0.0, 1.0);
+        out.inserts[idx].mix =
+            (out.inserts[idx].mix + mod_offsets[ModDestination::insert_mix(idx).index()])
+                .clamp(0.0, 1.0);
+    }
+    out
+}
+
+#[inline]
 #[allow(clippy::too_many_arguments)]
 fn process_voice_bus<F: StereoFilterStage>(
     oscillators: &mut [OscillatorState; 4],
@@ -144,6 +247,7 @@ fn process_voice_bus<F: StereoFilterStage>(
     inserts: &mut [InsertShaperState; 2],
     feedback: &mut VoiceFeedbackState,
     params: &SynthParams,
+    mod_offsets: &[f32; NUM_MOD_DESTS],
     tables: [&Wavetable; 4],
     effective_note: f32,
     sample_rate: f32,
@@ -151,6 +255,7 @@ fn process_voice_bus<F: StereoFilterStage>(
     // C3 (MIDI 60) = 440 * 2^(-9/12) Hz
     const C3_HZ: f32 = 130.812_78;
     let base_hz = 440.0 * (2.0_f32).powf((effective_note - 69.0) / 12.0);
+    let mod_routing = apply_routing_modulation(&params.routing, mod_offsets);
     let mut f1_l = 0.0_f32;
     let mut f1_r = 0.0_f32;
     let mut f2_l = 0.0_f32;
@@ -160,12 +265,13 @@ fn process_voice_bus<F: StereoFilterStage>(
 
     // Evaluate oscillators 1 -> 4 sequentially for zero-latency forward / 1-sample feedback cross-PM.
     for a in 0..4 {
-        let osc_p = &params.oscs[a];
-        if !osc_p.enabled {
+        let raw_osc_p = &params.oscs[a];
+        if !raw_osc_p.enabled {
             oscillators[a].fb_lp_state = 0.0;
             osc_out[a] = 0.0;
             continue;
         }
+        let osc_p = apply_osc_modulation(raw_osc_p, a, mod_offsets);
 
         let (mod_sig, is_fb) = match osc_p.mod_source {
             ModSource::Off => (0.0, false),
@@ -190,7 +296,7 @@ fn process_voice_bus<F: StereoFilterStage>(
         let osc_hz = if osc_p.keytrack { base_hz } else { C3_HZ };
         let (raw, l, r) = oscillators[a].process_sample(
             a,
-            osc_p,
+            &osc_p,
             tables[a],
             osc_hz,
             sample_rate,
@@ -199,14 +305,14 @@ fn process_voice_bus<F: StereoFilterStage>(
             is_fb,
         );
         osc_out[a] = raw;
-        if params.routing.osc_direct[a] {
+        if mod_routing.osc_direct[a] {
             direct_l += l;
             direct_r += r;
         } else {
             split_filter_send(
                 l,
                 r,
-                params.routing.osc_filter_balance[a],
+                mod_routing.osc_filter_balance[a],
                 &mut f1_l,
                 &mut f1_r,
                 &mut f2_l,
@@ -218,15 +324,16 @@ fn process_voice_bus<F: StereoFilterStage>(
     *prev_osc_out = *osc_out;
 
     // Noise Generator
-    let (nl, nr) = noise.process_sample(&params.noise, sample_rate);
-    if params.routing.noise_direct {
+    let mod_noise = apply_noise_modulation(&params.noise, mod_offsets);
+    let (nl, nr) = noise.process_sample(&mod_noise, sample_rate);
+    if mod_routing.noise_direct {
         direct_l += nl;
         direct_r += nr;
     } else {
         split_filter_send(
             nl,
             nr,
-            params.routing.noise_filter_balance,
+            mod_routing.noise_filter_balance,
             &mut f1_l,
             &mut f1_r,
             &mut f2_l,
@@ -235,10 +342,13 @@ fn process_voice_bus<F: StereoFilterStage>(
     }
 
     // Voice Feedback Bus (1-sample delayed post-filter output back into pre-filter sum)
-    let (fb_l, fb_r) = feedback.read_feedback(params.routing.feedback_amount, sample_rate);
+    let (fb_l, fb_r) = feedback.read_feedback(mod_routing.feedback_amount, sample_rate);
+    let mod_flt0 = apply_filter_modulation(&params.filters[0], 0, mod_offsets);
+    let mod_flt1 = apply_filter_modulation(&params.filters[1], 1, mod_offsets);
+
     f1_l += fb_l;
     f1_r += fb_r;
-    if params.routing.filter_routing == FilterRouting::Parallel && params.filters[1].enabled {
+    if mod_routing.filter_routing == FilterRouting::Parallel && mod_flt1.enabled {
         f2_l += fb_l;
         f2_r += fb_r;
     }
@@ -249,7 +359,7 @@ fn process_voice_bus<F: StereoFilterStage>(
         (f1_l, f1_r) = run_inserts_at(
             InsertPosition::PreFilter,
             inserts,
-            &params.routing,
+            &mod_routing,
             params.engine_mode,
             sample_rate,
             f1_l,
@@ -260,7 +370,7 @@ fn process_voice_bus<F: StereoFilterStage>(
         (f2_l, f2_r) = run_inserts_at(
             InsertPosition::PreFilter,
             inserts,
-            &params.routing,
+            &mod_routing,
             params.engine_mode,
             sample_rate,
             f2_l,
@@ -272,7 +382,7 @@ fn process_voice_bus<F: StereoFilterStage>(
     let (mut out1_l, mut out1_r) = filters[0].process_filter(
         f1_l,
         f1_r,
-        &params.filters[0],
+        &mod_flt0,
         effective_note,
         sample_rate,
         params.engine_mode,
@@ -281,7 +391,7 @@ fn process_voice_bus<F: StereoFilterStage>(
     (out1_l, out1_r) = run_inserts_at(
         InsertPosition::BetweenFilters,
         inserts,
-        &params.routing,
+        &mod_routing,
         params.engine_mode,
         sample_rate,
         out1_l,
@@ -289,17 +399,17 @@ fn process_voice_bus<F: StereoFilterStage>(
     );
 
     // Filter 2 + Serial / Parallel Bus Routing
-    let mix = params.routing.filter_mix.clamp(-1.0, 1.0);
+    let mix = mod_routing.filter_mix.clamp(-1.0, 1.0);
     let gain_f1 = (1.0 - mix).clamp(0.0, 1.0);
     let gain_f2 = (1.0 + mix).clamp(0.0, 1.0);
 
-    let (mut post_l, mut post_r) = match params.routing.filter_routing {
+    let (mut post_l, mut post_r) = match mod_routing.filter_routing {
         FilterRouting::Serial => {
-            if params.filters[1].enabled {
+            if mod_flt1.enabled {
                 let (out2_l, out2_r) = filters[1].process_filter(
                     out1_l + f2_l,
                     out1_r + f2_r,
-                    &params.filters[1],
+                    &mod_flt1,
                     effective_note,
                     sample_rate,
                     params.engine_mode,
@@ -322,7 +432,7 @@ fn process_voice_bus<F: StereoFilterStage>(
             let (out2_l, out2_r) = filters[1].process_filter(
                 f2_l,
                 f2_r,
-                &params.filters[1],
+                &mod_flt1,
                 effective_note,
                 sample_rate,
                 params.engine_mode,
@@ -337,7 +447,7 @@ fn process_voice_bus<F: StereoFilterStage>(
     (post_l, post_r) = run_inserts_at(
         InsertPosition::PostFilter,
         inserts,
-        &params.routing,
+        &mod_routing,
         params.engine_mode,
         sample_rate,
         post_l,
@@ -366,6 +476,11 @@ pub struct Voice {
     pub inserts: [InsertShaperState; 2],
     pub feedback: VoiceFeedbackState,
     pub amp_env: AmpAdsr,
+    pub mod_envs: [AmpAdsr; 3],
+    pub modseqs: [ModSeqState; 4],
+    pub mod_offsets: [f32; NUM_MOD_DESTS],
+    pub target_mod_offsets: [f32; NUM_MOD_DESTS],
+    pub last_sources: [f32; NUM_ACTIVE_SOURCES],
     pub osc_out: [f32; 4],
     pub prev_osc_out: [f32; 4],
 }
@@ -399,6 +514,11 @@ impl Voice {
             inserts: [InsertShaperState::new(), InsertShaperState::new()],
             feedback: VoiceFeedbackState::new(),
             amp_env: AmpAdsr::new(),
+            mod_envs: [AmpAdsr::new(); 3],
+            modseqs: [ModSeqState::new(); 4],
+            mod_offsets: [0.0; NUM_MOD_DESTS],
+            target_mod_offsets: [0.0; NUM_MOD_DESTS],
+            last_sources: [0.0; NUM_ACTIVE_SOURCES],
             osc_out: [0.0; 4],
             prev_osc_out: [0.0; 4],
         }
@@ -410,6 +530,15 @@ impl Voice {
         self.voice_id = None;
         self.velocity = 0.0;
         self.amp_env.reset();
+        for env in &mut self.mod_envs {
+            env.reset();
+        }
+        for ms in &mut self.modseqs {
+            ms.reset();
+        }
+        self.mod_offsets = [0.0; NUM_MOD_DESTS];
+        self.target_mod_offsets = [0.0; NUM_MOD_DESTS];
+        self.last_sources = [0.0; NUM_ACTIVE_SOURCES];
         self.osc_out = [0.0; 4];
         self.prev_osc_out = [0.0; 4];
         self.noise.reset();
@@ -421,6 +550,80 @@ impl Voice {
         }
         for osc in &mut self.oscillators {
             osc.reset();
+        }
+    }
+
+    #[inline]
+    pub fn release_modulators(&mut self) {
+        for env in &mut self.mod_envs {
+            env.release();
+        }
+    }
+
+    /// Evaluates modulation sources and updates destination offsets for this voice.
+    #[inline]
+    pub fn update_modulation(
+        &mut self,
+        dt_seconds: f32,
+        params: &SynthParams,
+        global_modseq_vals: &[f32; 4],
+        mod_wheel: f32,
+        aftertouch: f32,
+        snap: bool,
+    ) {
+        if !self.active {
+            return;
+        }
+        let mut sources = [0.0_f32; NUM_ACTIVE_SOURCES];
+        sources[0] = self.amp_env.level();
+        let sr_equiv = if dt_seconds > 1e-6 {
+            1.0 / dt_seconds
+        } else {
+            48_000.0
+        };
+        for i in 0..3 {
+            let env_p = &params.mod_envs[i];
+            if dt_seconds > 0.0 {
+                sources[1 + i] = self.mod_envs[i].process(
+                    sr_equiv,
+                    env_p.attack_s,
+                    env_p.decay_s,
+                    env_p.sustain,
+                    env_p.release_s,
+                );
+            } else {
+                sources[1 + i] = self.mod_envs[i].level();
+            }
+        }
+        for i in 0..4 {
+            let ms_p = &params.modseqs[i];
+            sources[4 + i] = if ms_p.retrig == ModSeqRetrig::PolyVoice {
+                self.modseqs[i].advance(
+                    dt_seconds,
+                    params.tempo_bpm,
+                    ms_p,
+                    &params.modseq_steps.seqs[i],
+                )
+            } else {
+                global_modseq_vals[i]
+            };
+        }
+        sources[8] = self.velocity.clamp(0.0, 1.0);
+        sources[9] = ((self.current_midi_note - 12.0) / 96.0).clamp(0.0, 1.0);
+        sources[10] = mod_wheel.clamp(0.0, 1.0);
+        sources[11] = aftertouch.clamp(0.0, 1.0);
+
+        self.last_sources = sources;
+        params
+            .mod_matrix
+            .evaluate_destinations(&self.last_sources, &mut self.target_mod_offsets);
+
+        if snap {
+            self.mod_offsets = self.target_mod_offsets;
+        } else {
+            for i in 0..NUM_MOD_DESTS {
+                self.mod_offsets[i] += (self.target_mod_offsets[i] - self.mod_offsets[i]) * 0.25;
+            }
         }
     }
 
@@ -437,12 +640,15 @@ impl Voice {
             return (0.0, 0.0);
         }
 
-        // Portamento / Glide
+        // Portamento / Glide (with GlideMs modulation support)
+        let eff_glide_ms =
+            (params.glide_ms + self.mod_offsets[ModDestination::GlideMs.index()] * 500.0)
+                .clamp(0.0, 500.0);
         if (self.current_midi_note - self.target_midi_note).abs() > 1e-4 {
-            if params.glide_ms <= 0.1 {
+            if eff_glide_ms <= 0.1 {
                 self.current_midi_note = self.target_midi_note;
             } else {
-                let glide_samples = (params.glide_ms * 0.001 * sample_rate).max(1.0);
+                let glide_samples = (eff_glide_ms * 0.001 * sample_rate).max(1.0);
                 let coeff = 1.0 - (-4.6 / glide_samples).exp();
                 self.current_midi_note += (self.target_midi_note - self.current_midi_note) * coeff;
             }
@@ -472,6 +678,7 @@ impl Voice {
             &mut self.inserts,
             &mut self.feedback,
             params,
+            &self.mod_offsets,
             tables,
             effective_note,
             sample_rate,
@@ -496,6 +703,7 @@ pub struct TailVoice {
     pub filter_cores: [FilterSvfCore; 2],
     pub inserts: [InsertShaperState; 2],
     pub feedback: VoiceFeedbackState,
+    pub mod_offsets: [f32; NUM_MOD_DESTS],
     pub osc_out: [f32; 4],
     pub prev_osc_out: [f32; 4],
 }
@@ -525,6 +733,7 @@ impl TailVoice {
             filter_cores: [FilterSvfCore::new(20_000.0), FilterSvfCore::new(2_000.0)],
             inserts: [InsertShaperState::new(), InsertShaperState::new()],
             feedback: VoiceFeedbackState::new(),
+            mod_offsets: [0.0; NUM_MOD_DESTS],
             osc_out: [0.0; 4],
             prev_osc_out: [0.0; 4],
         }
@@ -534,6 +743,7 @@ impl TailVoice {
         self.active = false;
         self.fade_remaining = 0;
         self.amp_at_steal = 0.0;
+        self.mod_offsets = [0.0; NUM_MOD_DESTS];
         self.osc_out = [0.0; 4];
         self.prev_osc_out = [0.0; 4];
         self.noise.reset();
@@ -560,6 +770,7 @@ impl TailVoice {
         self.filter_cores = [voice.filters[0].core, voice.filters[1].core];
         self.inserts = voice.inserts;
         self.feedback = voice.feedback;
+        self.mod_offsets = voice.mod_offsets;
         self.osc_out = voice.osc_out;
         self.prev_osc_out = voice.prev_osc_out;
     }
@@ -593,6 +804,7 @@ impl TailVoice {
             &mut self.inserts,
             &mut self.feedback,
             params,
+            &self.mod_offsets,
             tables,
             effective_note,
             sample_rate,
