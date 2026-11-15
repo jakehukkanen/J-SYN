@@ -38,6 +38,7 @@ mod noise_panel;
 mod osc_panel;
 mod routing_tab;
 mod scope;
+mod settings_view;
 mod widgets;
 
 use controls::{
@@ -69,6 +70,7 @@ pub(crate) enum MainViewMode {
     Main,
     Fx,
     Matrix,
+    Settings,
 }
 
 impl Data for MainViewMode {
@@ -108,12 +110,7 @@ impl Data for TooltipState {
 
 fn format_dir_display(dir: Option<&str>) -> String {
     match dir.filter(|s| !s.trim().is_empty()) {
-        Some(s) => std::path::Path::new(s)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .filter(|n| !n.is_empty())
-            .map(|n| format!(".../{n}"))
-            .unwrap_or_else(|| s.to_string()),
+        Some(s) => s.to_string(),
         None => "(Not Set)".to_string(),
     }
 }
@@ -132,6 +129,9 @@ pub(crate) enum UiEvent {
     StepPreset(isize),
     PickPresetsDir,
     PickWavetablesDir,
+    ClearPresetsDir,
+    ClearWavetablesDir,
+    RescanDirectories,
     SyncExternalState,
     ShowTooltip(TooltipState),
     HideTooltip,
@@ -168,6 +168,7 @@ impl Model for UiData {
                     MainViewMode::Main => 0,
                     MainViewMode::Fx => 1,
                     MainViewMode::Matrix => 2,
+                    MainViewMode::Settings => 3,
                 });
                 self.tooltip.visible = false;
                 self.mod_ui.clear_drag();
@@ -348,6 +349,30 @@ impl Model for UiData {
                 });
                 meta.consume();
             }
+            UiEvent::ClearPresetsDir => {
+                let mut cfg = crate::presets::JSynConfig::load();
+                cfg.presets_dir = None;
+                let _ = cfg.save();
+                self.presets_dir_display = "(Not Set)".to_string();
+                self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiEvent::ClearWavetablesDir => {
+                let mut cfg = crate::presets::JSynConfig::load();
+                cfg.wavetables_dir = None;
+                let _ = cfg.save();
+                self.wavetables_dir_display = "(Not Set)".to_string();
+                self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiEvent::RescanDirectories => {
+                let cfg = crate::presets::JSynConfig::load();
+                self.presets_dir_display = format_dir_display(cfg.presets_dir.as_deref());
+                self.wavetables_dir_display = format_dir_display(cfg.wavetables_dir.as_deref());
+                self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
+                self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
+                meta.consume();
+            }
             UiEvent::SyncExternalState => {
                 if let Some(name) = self.mod_ui.take_pending_preset_name() {
                     self.current_preset_name = name;
@@ -435,6 +460,79 @@ pub(crate) fn default_state() -> Arc<ViziaState> {
     ViziaState::new_with_default_scale_factor(|| (BASE_WIDTH, BASE_HEIGHT), DEFAULT_SCALE)
 }
 
+struct GearIcon;
+
+impl GearIcon {
+    fn new<'a>(cx: &'a mut Context) -> Handle<'a, Self> {
+        Self.build(cx, |_| {})
+    }
+}
+
+impl View for GearIcon {
+    fn element(&self) -> Option<&'static str> {
+        Some("gear-icon")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        use nih_plug_vizia::vizia::vg;
+
+        let bounds = cx.bounds();
+        if bounds.w <= 2.0 || bounds.h <= 2.0 {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let active = UiData::view_mode.get(cx) == MainViewMode::Settings;
+        let color = if active {
+            vg::Color::rgb(245, 179, 73)
+        } else {
+            vg::Color::rgb(196, 184, 172)
+        };
+
+        let cx_p = bounds.x + bounds.w * 0.5;
+        let cy_p = bounds.y + bounds.h * 0.5;
+        let r_outer = bounds.w.min(bounds.h) * 0.38;
+        let r_inner = r_outer * 0.72;
+        let r_hole = r_outer * 0.34;
+        let teeth = 8usize;
+
+        let mut gear = vg::Path::new();
+        for i in 0..teeth {
+            let base = (i as f32 / teeth as f32) * std::f32::consts::TAU;
+            let step = std::f32::consts::TAU / (teeth as f32 * 4.0);
+            let a0 = base - step * 1.1;
+            let a1 = base - step * 0.55;
+            let a2 = base + step * 0.55;
+            let a3 = base + step * 1.1;
+            let a4 = base + step * 2.0;
+
+            let p0 = (cx_p + r_inner * a0.cos(), cy_p + r_inner * a0.sin());
+            let p1 = (cx_p + r_outer * a1.cos(), cy_p + r_outer * a1.sin());
+            let p2 = (cx_p + r_outer * a2.cos(), cy_p + r_outer * a2.sin());
+            let p3 = (cx_p + r_inner * a3.cos(), cy_p + r_inner * a3.sin());
+            let p4 = (cx_p + r_inner * a4.cos(), cy_p + r_inner * a4.sin());
+            if i == 0 {
+                gear.move_to(p0.0, p0.1);
+            } else {
+                gear.line_to(p0.0, p0.1);
+            }
+            gear.line_to(p1.0, p1.1);
+            gear.line_to(p2.0, p2.1);
+            gear.line_to(p3.0, p3.1);
+            gear.line_to(p4.0, p4.1);
+        }
+        gear.close();
+
+        let mut stroke = vg::Paint::color(color);
+        stroke.set_line_width(1.35 * dpx);
+        stroke.set_line_join(vg::LineJoin::Round);
+        canvas.stroke_path(&gear, &stroke);
+
+        let mut hole = vg::Path::new();
+        hole.circle(cx_p, cy_p, r_hole);
+        canvas.stroke_path(&hole, &stroke);
+    }
+}
+
 fn build_header_bar(
     cx: &mut Context,
     params: Arc<JSynPluginParams>,
@@ -446,7 +544,6 @@ fn build_header_bar(
         HStack::new(cx, move |cx| {
             Element::new(cx).class("brand-pill");
             bold_label(cx, "J-SYN", "header-title");
-            bold_label(cx, "WAVETABLE", "header-subtitle");
         })
         .col_between(Pixels(6.0))
         .child_top(Stretch(1.0))
@@ -482,6 +579,21 @@ fn build_header_bar(
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Matrix))
             .width(Pixels(56.0))
+            .height(Pixels(22.0));
+
+            Button::new(
+                cx,
+                |cx| cx.emit(UiEvent::SelectViewMode(MainViewMode::Settings)),
+                |cx| {
+                    GearIcon::new(cx)
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0))
+                        .hoverable(false)
+                },
+            )
+            .class("view-switch-btn")
+            .checked(UiData::view_mode.map(|m| *m == MainViewMode::Settings))
+            .width(Pixels(32.0))
             .height(Pixels(22.0));
         })
         .class("view-switch-group")
@@ -543,7 +655,7 @@ fn build_header_bar(
                     });
                 },
             )
-            .width(Pixels(112.0))
+            .width(Pixels(146.0))
             .height(Pixels(22.0));
 
             Button::new(
@@ -666,35 +778,6 @@ fn build_header_bar(
                 false,
                 AMBER_RGB,
             );
-
-            VStack::new(cx, |cx| {
-                LedToggleSwitch::new(
-                    cx,
-                    UiData::params,
-                    |p| &p.dc_blocker,
-                    "DC",
-                    "DC",
-                    (82, 200, 128),
-                )
-                .width(Pixels(38.0))
-                .height(Pixels(16.0));
-
-                LedToggleSwitch::new(
-                    cx,
-                    UiData::params,
-                    |p| &p.master_limiter,
-                    "LIM",
-                    "LIM",
-                    CORAL_RGB,
-                )
-                .width(Pixels(38.0))
-                .height(Pixels(16.0));
-            })
-            .row_between(Pixels(2.0))
-            .width(Pixels(38.0))
-            .height(Pixels(34.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
 
             scope::MasterMeter::new(cx, mod_ui_hdr.telemetry.clone())
                 .width(Pixels(20.0))
@@ -905,7 +988,7 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(1.35))
+                        .width(Stretch(1.55))
                         .height(Stretch(1.0));
 
                         VStack::new(cx, {
@@ -944,77 +1027,7 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(0.90))
-                        .height(Stretch(1.0));
-
-                        VStack::new(cx, |cx| {
-                            build_module_header(cx, "DIRECTORIES", 18.0);
-                            VStack::new(cx, |cx| {
-                                HStack::new(cx, |cx| {
-                                    Button::new(
-                                        cx,
-                                        |cx| cx.emit(UiEvent::PickPresetsDir),
-                                        |cx| {
-                                            bold_label(cx, "PRESETS", "preset-btn-label")
-                                                .child_space(Stretch(1.0))
-                                                .hoverable(false)
-                                        },
-                                    )
-                                    .class("preset-btn")
-                                    .width(Pixels(62.0))
-                                    .height(Pixels(22.0));
-
-                                    bold_label(cx, UiData::presets_dir_display, "param-readout")
-                                        .width(Stretch(1.0))
-                                        .height(Pixels(22.0))
-                                        .child_left(Pixels(6.0))
-                                        .child_top(Stretch(1.0))
-                                        .child_bottom(Stretch(1.0));
-                                })
-                                .col_between(Pixels(6.0))
-                                .width(Stretch(1.0))
-                                .height(Pixels(22.0));
-
-                                HStack::new(cx, |cx| {
-                                    Button::new(
-                                        cx,
-                                        |cx| cx.emit(UiEvent::PickWavetablesDir),
-                                        |cx| {
-                                            bold_label(cx, "WAVES", "preset-btn-label")
-                                                .child_space(Stretch(1.0))
-                                                .hoverable(false)
-                                        },
-                                    )
-                                    .class("preset-btn")
-                                    .width(Pixels(62.0))
-                                    .height(Pixels(22.0));
-
-                                    bold_label(
-                                        cx,
-                                        UiData::wavetables_dir_display,
-                                        "param-readout",
-                                    )
-                                    .width(Stretch(1.0))
-                                    .height(Pixels(22.0))
-                                    .child_left(Pixels(6.0))
-                                    .child_top(Stretch(1.0))
-                                    .child_bottom(Stretch(1.0));
-                                })
-                                .col_between(Pixels(6.0))
-                                .width(Stretch(1.0))
-                                .height(Pixels(22.0));
-                            })
-                            .row_between(Pixels(6.0))
-                            .child_left(Pixels(6.0))
-                            .child_right(Pixels(6.0))
-                            .child_top(Stretch(1.0))
-                            .child_bottom(Stretch(1.0))
-                            .width(Stretch(1.0))
-                            .height(Stretch(1.0));
-                        })
-                        .class("hardware-module")
-                        .class("drawer-module")
-                        .width(Stretch(0.85))
+                        .width(Stretch(0.95))
                         .height(Stretch(1.0));
                     })
                     .col_between(Pixels(6.0))
@@ -1140,6 +1153,9 @@ pub(crate) fn create(
                             }
                             MainViewMode::Matrix => {
                                 build_matrix_view(cx, mod_ui_m.clone());
+                            }
+                            MainViewMode::Settings => {
+                                settings_view::build_settings_view(cx);
                             }
                         }
                     });
