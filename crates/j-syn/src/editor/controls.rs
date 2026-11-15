@@ -360,31 +360,54 @@ pub(super) fn build_wavetable_dropdown(
                             let params = p_ref.clone();
                             let gui_context = gui_ctx.clone();
                             let dialog_flag = dialog_flag_ref.clone();
+                            let start_dir = crate::presets::JSynConfig::load().wavetables_dir;
 
                             std::thread::spawn(move || {
-                                if let Some(path) = rfd::FileDialog::new()
-                                    .add_filter("WAV Audio", &["wav", "WAV"])
-                                    .pick_file()
-                                {
-                                    if let Ok(wt) = j_syn_dsp::Wavetable::load_from_wav(&path) {
-                                        bank.swap_custom(osc_idx, Arc::new(wt));
-                                        if let Ok(mut guard) = params.wavetable_paths.lock() {
-                                            guard[osc_idx] =
-                                                path.to_string_lossy().into_owned();
-                                        }
-                                        let setter = ParamSetter::new(gui_context.as_ref());
-                                        setter.begin_set_parameter(
-                                            &params.oscs[osc_idx].wt_select,
-                                        );
-                                        setter.set_parameter(
-                                            &params.oscs[osc_idx].wt_select,
-                                            WavetableChoice::Custom,
-                                        );
-                                        setter
-                                            .end_set_parameter(&params.oscs[osc_idx].wt_select);
-                                    }
+                                let mut dlg = rfd::FileDialog::new()
+                                    .add_filter("WAV Audio", &["wav", "WAV"]);
+                                if let Some(dir) = start_dir.filter(|s| !s.trim().is_empty()) {
+                                    dlg = dlg.set_directory(dir);
+                                }
+                                if let Some(path) = dlg.pick_file() {
+                                    let _ = crate::presets::load_wavetable_file_for_osc(
+                                        osc_idx,
+                                        &path,
+                                        &params,
+                                        &gui_context,
+                                        &bank,
+                                    );
                                 }
                                 dialog_flag.store(false, Ordering::Release);
+                            });
+                        }
+                    });
+
+                    let bank_dir = bank.clone();
+                    let p_dir = params.clone();
+                    let g_dir = gui_context.clone();
+                    Binding::new(cx, UiData::wavetables_dir_rev, move |cx, _| {
+                        let cfg = crate::presets::JSynConfig::load();
+                        let entries = crate::presets::scan_wavetables(cfg.wavetables_dir.as_deref());
+                        for entry in entries {
+                            let bank_e = bank_dir.clone();
+                            let p_e = p_dir.clone();
+                            let g_e = g_dir.clone();
+                            let path_e = entry.path.clone();
+                            bold_label(cx, &entry.name, "dropdown-item").on_press(move |cx| {
+                                cx.emit(PopupEvent::Close);
+                                let bank = bank_e.clone();
+                                let params = p_e.clone();
+                                let gui_context = g_e.clone();
+                                let path = path_e.clone();
+                                std::thread::spawn(move || {
+                                    let _ = crate::presets::load_wavetable_file_for_osc(
+                                        osc_idx,
+                                        &path,
+                                        &params,
+                                        &gui_context,
+                                        &bank,
+                                    );
+                                });
                             });
                         }
                     });

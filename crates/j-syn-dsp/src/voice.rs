@@ -43,6 +43,8 @@ pub struct SynthParams {
     pub macros: [f32; 8],
     pub fx_slots: [FxSlotParams; NUM_FX_SLOTS],
     pub tempo_bpm: f32,
+    pub dc_blocker: bool,
+    pub master_limiter: bool,
 }
 
 impl Default for SynthParams {
@@ -73,6 +75,8 @@ impl Default for SynthParams {
             macros: [0.0; 8],
             fx_slots: [FxSlotParams::default(); NUM_FX_SLOTS],
             tempo_bpm: 120.0,
+            dc_blocker: true,
+            master_limiter: false,
         }
     }
 }

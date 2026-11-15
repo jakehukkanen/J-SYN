@@ -294,3 +294,121 @@ impl View for WavetableScope {
         canvas.stroke_path(&border, &border_paint);
     }
 }
+
+/// Stereo Peak/RMS master output meter with clickable clip indicator.
+pub(super) struct MasterMeter {
+    telemetry: Arc<j_syn_dsp::mod_matrix::ModUiTelemetry>,
+}
+
+impl MasterMeter {
+    pub(super) fn new<'a>(
+        cx: &'a mut Context,
+        telemetry: Arc<j_syn_dsp::mod_matrix::ModUiTelemetry>,
+    ) -> Handle<'a, Self> {
+        Self { telemetry }.build(cx, |_| {})
+    }
+
+    #[inline]
+    fn level_to_norm(lin: f32) -> f32 {
+        if lin <= 1e-6 {
+            return 0.0;
+        }
+        let db = 20.0 * lin.log10();
+        ((db + 48.0) / 48.0).clamp(0.0, 1.0)
+    }
+}
+
+impl View for MasterMeter {
+    fn element(&self) -> Option<&'static str> {
+        Some("master-meter")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| {
+            if let WindowEvent::MouseDown(MouseButton::Left) = window_event {
+                self.telemetry.reset_master_clip();
+                cx.needs_redraw();
+                meta.consume();
+            }
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let bounds = cx.bounds();
+        if bounds.w <= 2.0 || bounds.h <= 2.0 {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let (peak_l, peak_r, rms_l, rms_r, clip_l, clip_r) = self.telemetry.master_meters();
+
+        let mut bg = vg::Path::new();
+        bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 3.0 * dpx);
+        canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(20, 17, 15)));
+
+        let mut border = vg::Path::new();
+        border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 3.0 * dpx);
+        let mut bp = vg::Paint::color(vg::Color::rgb(68, 58, 50));
+        bp.set_line_width(1.0 * dpx);
+        canvas.stroke_path(&border, &bp);
+
+        let pad = 2.5 * dpx;
+        let gap = 2.0 * dpx;
+        let clip_h = 3.5 * dpx;
+        let bar_w = ((bounds.w - 2.0 * pad - gap) * 0.5).max(2.0);
+        let bar_top = bounds.y + pad + clip_h + 1.5 * dpx;
+        let bar_h = (bounds.h - (bar_top - bounds.y) - pad).max(4.0);
+
+        let channels = [
+            (bounds.x + pad, peak_l, rms_l, clip_l),
+            (bounds.x + pad + bar_w + gap, peak_r, rms_r, clip_r),
+        ];
+
+        for (x, pk, rms, clip) in channels {
+            // Clip LED
+            let mut led = vg::Path::new();
+            led.rounded_rect(x, bounds.y + pad, bar_w, clip_h, 1.0 * dpx);
+            let led_col = if clip {
+                vg::Color::rgb(245, 75, 65)
+            } else {
+                vg::Color::rgb(46, 38, 34)
+            };
+            canvas.fill_path(&led, &vg::Paint::color(led_col));
+
+            // Track background
+            let mut track = vg::Path::new();
+            track.rounded_rect(x, bar_top, bar_w, bar_h, 1.0 * dpx);
+            canvas.fill_path(&track, &vg::Paint::color(vg::Color::rgb(32, 27, 24)));
+
+            // RMS fill
+            let rms_n = Self::level_to_norm(rms);
+            if rms_n > 0.005 {
+                let fh = rms_n * bar_h;
+                let mut fill = vg::Path::new();
+                fill.rounded_rect(x, bar_top + bar_h - fh, bar_w, fh, 1.0 * dpx);
+                let paint = vg::Paint::linear_gradient(
+                    x,
+                    bar_top + bar_h,
+                    x,
+                    bar_top,
+                    vg::Color::rgb(82, 200, 128),
+                    vg::Color::rgb(245, 179, 73),
+                );
+                canvas.fill_path(&fill, &paint);
+            }
+
+            // Peak cap line
+            let pk_n = Self::level_to_norm(pk);
+            if pk_n > 0.005 {
+                let py = (bar_top + bar_h - pk_n * bar_h).clamp(bar_top, bar_top + bar_h - 1.5 * dpx);
+                let mut cap = vg::Path::new();
+                cap.rect(x, py, bar_w, 1.5 * dpx);
+                let cap_col = if pk > 0.95 {
+                    vg::Color::rgb(245, 82, 68)
+                } else {
+                    vg::Color::rgb(255, 224, 150)
+                };
+                canvas.fill_path(&cap, &vg::Paint::color(cap_col));
+            }
+        }
+    }
+}

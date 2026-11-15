@@ -10,6 +10,103 @@ use crate::wavetable::{Wavetable, WavetableBank};
 pub const MAX_VOICES: usize = 64;
 pub const MAX_TAIL_VOICES: usize = 8;
 
+/// Sample-rate-invariant 1st-order high-pass DC blocker tuned to ~2.5 Hz in `f64` precision.
+#[derive(Debug, Clone, Copy)]
+struct DcBlocker {
+    r: f64,
+    x_prev_l: f64,
+    y_prev_l: f64,
+    x_prev_r: f64,
+    y_prev_r: f64,
+}
+
+impl DcBlocker {
+    fn new(sample_rate: f32) -> Self {
+        let mut s = Self {
+            r: 0.999,
+            x_prev_l: 0.0,
+            y_prev_l: 0.0,
+            x_prev_r: 0.0,
+            y_prev_r: 0.0,
+        };
+        s.set_sample_rate(sample_rate);
+        s
+    }
+
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        let fs = (sample_rate as f64).max(1000.0);
+        self.r = (1.0 - (2.0 * std::f64::consts::PI * 2.5) / fs).clamp(0.9, 0.99999);
+    }
+
+    fn reset(&mut self) {
+        self.x_prev_l = 0.0;
+        self.y_prev_l = 0.0;
+        self.x_prev_r = 0.0;
+        self.y_prev_r = 0.0;
+    }
+
+    #[inline]
+    fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
+        let xl = if l.is_finite() { l as f64 } else { 0.0 };
+        let xr = if r.is_finite() { r as f64 } else { 0.0 };
+        let yl = xl - self.x_prev_l + self.r * self.y_prev_l;
+        let yr = xr - self.x_prev_r + self.r * self.y_prev_r;
+        self.x_prev_l = xl;
+        self.y_prev_l = yl;
+        self.x_prev_r = xr;
+        self.y_prev_r = yr;
+        (yl as f32, yr as f32)
+    }
+}
+
+/// Transparent zero-latency brickwall safety limiter catching peaks above -0.1 dBFS.
+#[derive(Debug, Clone, Copy)]
+struct SafetyLimiter {
+    env: f32,
+    release_coeff: f32,
+}
+
+impl SafetyLimiter {
+    const CEILING: f32 = 0.988_553_1; // 10^(-0.1 / 20) = -0.1 dBFS
+
+    fn new(sample_rate: f32) -> Self {
+        let mut s = Self {
+            env: 0.0,
+            release_coeff: 0.999,
+        };
+        s.set_sample_rate(sample_rate);
+        s
+    }
+
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        let fs = sample_rate.max(1000.0);
+        // ~60 ms smooth release
+        self.release_coeff = (-1.0 / (0.060 * fs)).exp();
+    }
+
+    fn reset(&mut self) {
+        self.env = 0.0;
+    }
+
+    #[inline]
+    fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
+        let peak = l.abs().max(r.abs());
+        if peak > self.env {
+            self.env = peak;
+        } else {
+            self.env = peak + (self.env - peak) * self.release_coeff;
+        }
+        let gain = if self.env > Self::CEILING {
+            Self::CEILING / self.env
+        } else {
+            1.0
+        };
+        let out_l = (l * gain).clamp(-Self::CEILING, Self::CEILING);
+        let out_r = (r * gain).clamp(-Self::CEILING, Self::CEILING);
+        (out_l, out_r)
+    }
+}
+
 /// 64-voice polyphonic + Mono Legato synthesizer engine with 1.5 kHz control-rate tick
 /// and click-free 3 ms tail-voice stealing. Zero heap allocations during processing.
 pub struct SynthEngine {
@@ -39,6 +136,14 @@ pub struct SynthEngine {
     rng_state: u32,
     fx_rack: FxRackState,
     idle_mod_offsets: [f32; NUM_MOD_DESTS],
+    dc_blocker: DcBlocker,
+    safety_limiter: SafetyLimiter,
+    meter_peak_l: f32,
+    meter_peak_r: f32,
+    meter_rms_sq_l: f32,
+    meter_rms_sq_r: f32,
+    meter_clip_l: bool,
+    meter_clip_r: bool,
 }
 
 impl SynthEngine {
@@ -71,6 +176,14 @@ impl SynthEngine {
             rng_state: 0x9E37_79B9,
             fx_rack: FxRackState::new(sr),
             idle_mod_offsets: [0.0; NUM_MOD_DESTS],
+            dc_blocker: DcBlocker::new(sr),
+            safety_limiter: SafetyLimiter::new(sr),
+            meter_peak_l: 0.0,
+            meter_peak_r: 0.0,
+            meter_rms_sq_l: 0.0,
+            meter_rms_sq_r: 0.0,
+            meter_clip_l: false,
+            meter_clip_r: false,
         };
         engine.set_sample_rate(sr);
         engine
@@ -81,6 +194,8 @@ impl SynthEngine {
         self.sample_rate = sr;
         self.control_tick_period = (sr / 1500.0).round().max(1.0) as u32;
         self.fx_rack.set_sample_rate(sr);
+        self.dc_blocker.set_sample_rate(sr);
+        self.safety_limiter.set_sample_rate(sr);
         for v in &mut self.voices {
             v.inserts[0].set_sample_rate(sr);
             v.inserts[1].set_sample_rate(sr);
@@ -93,6 +208,14 @@ impl SynthEngine {
 
     pub fn reset(&mut self) {
         self.fx_rack.reset();
+        self.dc_blocker.reset();
+        self.safety_limiter.reset();
+        self.meter_peak_l = 0.0;
+        self.meter_peak_r = 0.0;
+        self.meter_rms_sq_l = 0.0;
+        self.meter_rms_sq_r = 0.0;
+        self.meter_clip_l = false;
+        self.meter_clip_r = false;
         for v in &mut self.voices {
             v.reset();
         }
@@ -525,7 +648,51 @@ impl SynthEngine {
             params.tempo_bpm,
             Some(&self.telemetry),
         );
-        (fx_l * self.smoothed_master_gain, fx_r * self.smoothed_master_gain)
+        let (mut out_l, mut out_r) = (
+            fx_l * self.smoothed_master_gain,
+            fx_r * self.smoothed_master_gain,
+        );
+        if params.dc_blocker {
+            (out_l, out_r) = self.dc_blocker.process(out_l, out_r);
+        } else {
+            self.dc_blocker.reset();
+        }
+        if params.master_limiter {
+            (out_l, out_r) = self.safety_limiter.process(out_l, out_r);
+        } else {
+            self.safety_limiter.reset();
+        }
+
+        // Update stereo peak/RMS meters (zero-allocation)
+        let abs_l = if out_l.is_finite() { out_l.abs() } else { 0.0 };
+        let abs_r = if out_r.is_finite() { out_r.abs() } else { 0.0 };
+        self.meter_peak_l = self.meter_peak_l.max(abs_l);
+        self.meter_peak_r = self.meter_peak_r.max(abs_r);
+        const RMS_ALPHA: f32 = 0.0025;
+        self.meter_rms_sq_l += (abs_l * abs_l - self.meter_rms_sq_l) * RMS_ALPHA;
+        self.meter_rms_sq_r += (abs_r * abs_r - self.meter_rms_sq_r) * RMS_ALPHA;
+        if abs_l > 1.0 {
+            self.meter_clip_l = true;
+        }
+        if abs_r > 1.0 {
+            self.meter_clip_r = true;
+        }
+        if is_control_tick {
+            self.telemetry.store_master_meters(
+                self.meter_peak_l,
+                self.meter_peak_r,
+                self.meter_rms_sq_l.max(0.0).sqrt(),
+                self.meter_rms_sq_r.max(0.0).sqrt(),
+                self.meter_clip_l,
+                self.meter_clip_r,
+            );
+            self.meter_peak_l *= 0.92;
+            self.meter_peak_r *= 0.92;
+            self.meter_clip_l = false;
+            self.meter_clip_r = false;
+        }
+
+        (out_l, out_r)
     }
 
     #[inline]

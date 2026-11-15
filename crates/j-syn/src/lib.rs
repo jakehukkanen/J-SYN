@@ -18,6 +18,7 @@ use nih_plug_vizia::ViziaState;
 use serde::{de::DeserializeOwned, Serialize};
 
 mod editor;
+mod presets;
 
 /// Lock-free `ArcSwap<T>` wrapper persisted by `nih-plug` via JSON (`#[persist = "..."]`).
 pub struct PersistedArcSwap<T>(pub Arc<ArcSwap<T>>);
@@ -966,6 +967,12 @@ pub struct JSynPluginParams {
     #[id = "master_vol"]
     pub master_volume_db: FloatParam,
 
+    #[id = "dc_blocker"]
+    pub dc_blocker: BoolParam,
+
+    #[id = "master_limiter"]
+    pub master_limiter: BoolParam,
+
     #[id = "hq_mode"]
     pub hq_mode: BoolParam,
 
@@ -1155,6 +1162,9 @@ impl Default for JSynPluginParams {
             )
             .with_unit(" dB")
             .with_value_to_string(formatters::v2s_f32_rounded(1)),
+
+            dc_blocker: BoolParam::new("DC Blocker", true),
+            master_limiter: BoolParam::new("Safety Limiter", false),
 
             hq_mode: BoolParam::new("HQ Mode", false),
             mono_legato: BoolParam::new("Mono Legato", false),
@@ -1361,6 +1371,8 @@ impl Plugin for JSynPlugin {
                 ],
             }),
             tempo_bpm,
+            dc_blocker: self.params.dc_blocker.value(),
+            master_limiter: self.params.master_limiter.value(),
         };
 
         let choices = [
@@ -1594,5 +1606,35 @@ mod tests {
             !css.contains(":focus-within"),
             "Vizia's CSS parser does not support :focus-within"
         );
+    }
+
+    #[test]
+    fn patch_json_roundtrip_captures_all_fields() {
+        let params = Arc::new(JSynPluginParams::default());
+        {
+            let mut guard = params.macro_names.lock().unwrap();
+            guard[0] = "WOBBLE".to_string();
+        }
+        let mut mat = params.mod_matrix.snapshot();
+        mat.slots[0] = j_syn_dsp::ModSlot {
+            source: j_syn_dsp::ModMatrixSource::Macro1,
+            destination: j_syn_dsp::ModDestination::Filter1Cutoff,
+            depth: 0.65,
+            bipolar: true,
+            enabled: true,
+            aux_source: j_syn_dsp::ModMatrixSource::ModWheel,
+            curve: 0.35,
+        };
+        params.mod_matrix.store_value(mat);
+
+        let patch = crate::presets::JSynPatch::capture("Test Patch", &params);
+        let json = serde_json::to_string(&patch).unwrap();
+        let decoded: crate::presets::JSynPatch = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.name, "Test Patch");
+        assert_eq!(decoded.macro_names[0], "WOBBLE");
+        assert_eq!(decoded.mod_matrix.slots[0].aux_source, j_syn_dsp::ModMatrixSource::ModWheel);
+        assert!((decoded.mod_matrix.slots[0].curve - 0.35).abs() < 1e-6);
+        assert!(decoded.params.contains_key("dc_blocker"));
+        assert!(decoded.params.contains_key("master_limiter"));
     }
 }

@@ -726,6 +726,10 @@ pub struct ModSlot {
     pub depth: f32,
     pub bipolar: bool,
     pub enabled: bool,
+    #[serde(default)]
+    pub aux_source: ModMatrixSource,
+    #[serde(default)]
+    pub curve: f32,
 }
 
 /// Pre-allocated fixed-size 32-slot modulation matrix (`Copy`, lock-free swap & persistence).
@@ -772,6 +776,8 @@ impl ModMatrixState {
                 depth: default_depth.clamp(-1.0, 1.0),
                 bipolar: false,
                 enabled: true,
+                aux_source: ModMatrixSource::None,
+                curve: 0.0,
             };
             return Some(free_idx);
         }
@@ -781,6 +787,12 @@ impl ModMatrixState {
     pub fn clear_slot(&mut self, slot_idx: usize) {
         if slot_idx < NUM_MOD_SLOTS {
             self.slots[slot_idx] = ModSlot::default();
+        }
+    }
+
+    pub fn swap_slots(&mut self, a: usize, b: usize) {
+        if a < NUM_MOD_SLOTS && b < NUM_MOD_SLOTS && a != b {
+            self.slots.swap(a, b);
         }
     }
 
@@ -798,12 +810,20 @@ impl ModMatrixState {
                 continue;
             }
             if let Some(src_idx) = slot.source.active_index() {
-                let raw = source_values[src_idx].clamp(0.0, 1.0);
-                let sig = if slot.bipolar {
+                let mut raw = source_values[src_idx].clamp(0.0, 1.0);
+                let curve = slot.curve.clamp(-1.0, 1.0);
+                if curve.abs() > 1e-4 {
+                    let exp = (curve * 2.5).exp();
+                    raw = raw.powf(exp);
+                }
+                let mut sig = if slot.bipolar {
                     raw * 2.0 - 1.0
                 } else {
                     raw
                 };
+                if let Some(aux_idx) = slot.aux_source.active_index() {
+                    sig *= source_values[aux_idx].clamp(0.0, 1.0);
+                }
                 let dest_idx = slot.destination.index();
                 if dest_idx < NUM_MOD_DESTS {
                     out_deltas[dest_idx] += sig * slot.depth.clamp(-1.0, 1.0);
@@ -886,6 +906,12 @@ pub struct ModUiTelemetry {
     /// Post-modulation `[cutoff_hz, resonance, drive, aux]` for `FILTER 1` and `FILTER 2`.
     pub filter_live: [[AtomicU32; 4]; 2],
     pub fx_scopes: [FxScopeRing; 8],
+    pub master_peak_l: AtomicU32,
+    pub master_peak_r: AtomicU32,
+    pub master_rms_l: AtomicU32,
+    pub master_rms_r: AtomicU32,
+    pub master_clip_l: AtomicU32,
+    pub master_clip_r: AtomicU32,
 }
 
 impl Default for ModUiTelemetry {
@@ -910,7 +936,53 @@ impl ModUiTelemetry {
                 ]
             }),
             fx_scopes: std::array::from_fn(|_| FxScopeRing::new()),
+            master_peak_l: AtomicU32::new(0.0_f32.to_bits()),
+            master_peak_r: AtomicU32::new(0.0_f32.to_bits()),
+            master_rms_l: AtomicU32::new(0.0_f32.to_bits()),
+            master_rms_r: AtomicU32::new(0.0_f32.to_bits()),
+            master_clip_l: AtomicU32::new(0),
+            master_clip_r: AtomicU32::new(0),
         }
+    }
+
+    #[inline]
+    pub fn store_master_meters(
+        &self,
+        peak_l: f32,
+        peak_r: f32,
+        rms_l: f32,
+        rms_r: f32,
+        clip_l: bool,
+        clip_r: bool,
+    ) {
+        self.master_peak_l.store(peak_l.to_bits(), Ordering::Relaxed);
+        self.master_peak_r.store(peak_r.to_bits(), Ordering::Relaxed);
+        self.master_rms_l.store(rms_l.to_bits(), Ordering::Relaxed);
+        self.master_rms_r.store(rms_r.to_bits(), Ordering::Relaxed);
+        if clip_l {
+            self.master_clip_l.store(1, Ordering::Relaxed);
+        }
+        if clip_r {
+            self.master_clip_r.store(1, Ordering::Relaxed);
+        }
+    }
+
+    #[inline]
+    pub fn master_meters(&self) -> (f32, f32, f32, f32, bool, bool) {
+        (
+            f32::from_bits(self.master_peak_l.load(Ordering::Relaxed)),
+            f32::from_bits(self.master_peak_r.load(Ordering::Relaxed)),
+            f32::from_bits(self.master_rms_l.load(Ordering::Relaxed)),
+            f32::from_bits(self.master_rms_r.load(Ordering::Relaxed)),
+            self.master_clip_l.load(Ordering::Relaxed) != 0,
+            self.master_clip_r.load(Ordering::Relaxed) != 0,
+        )
+    }
+
+    #[inline]
+    pub fn reset_master_clip(&self) {
+        self.master_clip_l.store(0, Ordering::Relaxed);
+        self.master_clip_r.store(0, Ordering::Relaxed);
     }
 
     #[inline]

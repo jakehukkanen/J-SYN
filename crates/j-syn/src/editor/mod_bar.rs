@@ -45,6 +45,9 @@ pub(crate) struct ModUiState {
     active_stamp: AtomicU8,
     mseg_snap: AtomicBool,
     last_enabled_mask: AtomicU64,
+    external_sync_rev: AtomicU64,
+    last_external_sync_rev: AtomicU64,
+    pending_preset_name: Mutex<Option<String>>,
     drop_rects: Mutex<[(f32, f32, f32, f32, u8); NUM_MOD_DESTS]>,
 }
 
@@ -64,8 +67,33 @@ impl ModUiState {
             active_stamp: AtomicU8::new(ModSeqStepShape::RampDown as u8),
             mseg_snap: AtomicBool::new(false),
             last_enabled_mask: AtomicU64::new(initial_mask),
+            external_sync_rev: AtomicU64::new(0),
+            last_external_sync_rev: AtomicU64::new(0),
+            pending_preset_name: Mutex::new(None),
             drop_rects: Mutex::new([(0.0, 0.0, 0.0, 0.0, UNSET_U8); NUM_MOD_DESTS]),
         }
+    }
+
+    pub fn notify_external_sync(&self, preset_name: Option<String>) {
+        if let Some(name) = preset_name {
+            if let Ok(mut guard) = self.pending_preset_name.lock() {
+                *guard = Some(name);
+            }
+        }
+        self.external_sync_rev.fetch_add(1, Ordering::Release);
+    }
+
+    pub fn poll_external_sync_changed(&self) -> bool {
+        let cur = self.external_sync_rev.load(Ordering::Acquire);
+        let prev = self.last_external_sync_rev.swap(cur, Ordering::Relaxed);
+        cur != prev
+    }
+
+    pub fn take_pending_preset_name(&self) -> Option<String> {
+        self.pending_preset_name
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
     }
 
     #[inline]
@@ -471,18 +499,6 @@ impl ModUiState {
         }
     }
 
-    pub fn step_slot_depth_at(&self, slot_idx: usize, delta: f32) {
-        if slot_idx >= NUM_MOD_SLOTS {
-            return;
-        }
-        let mut mat = self.params.mod_matrix.snapshot();
-        if mat.slots[slot_idx].enabled {
-            mat.slots[slot_idx].depth = (mat.slots[slot_idx].depth + delta).clamp(-1.0, 1.0);
-            self.params.mod_matrix.store_value(mat);
-            self.focus_slot(mat.slots[slot_idx].destination, slot_idx);
-        }
-    }
-
     pub fn remove_slot_at(&self, slot_idx: usize) {
         if slot_idx >= NUM_MOD_SLOTS {
             return;
@@ -511,6 +527,138 @@ impl ModUiState {
         self.params.mod_matrix.store_value(mat);
         self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
         self.inspected_dest.store(UNSET_U8, Ordering::Relaxed);
+    }
+
+    pub fn source_display_name(&self, src: ModMatrixSource) -> String {
+        let macro_idx = match src {
+            ModMatrixSource::Macro1 => Some(0),
+            ModMatrixSource::Macro2 => Some(1),
+            ModMatrixSource::Macro3 => Some(2),
+            ModMatrixSource::Macro4 => Some(3),
+            ModMatrixSource::Macro5 => Some(4),
+            ModMatrixSource::Macro6 => Some(5),
+            ModMatrixSource::Macro7 => Some(6),
+            ModMatrixSource::Macro8 => Some(7),
+            _ => None,
+        };
+        if let Some(i) = macro_idx {
+            if let Ok(guard) = self.params.macro_names.lock() {
+                let trimmed = guard[i].trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+        src.full_label().to_string()
+    }
+
+    pub fn aux_short_label(&self, src: ModMatrixSource) -> String {
+        if src == ModMatrixSource::None {
+            return "NONE".to_string();
+        }
+        let macro_idx = match src {
+            ModMatrixSource::Macro1 => Some(0),
+            ModMatrixSource::Macro2 => Some(1),
+            ModMatrixSource::Macro3 => Some(2),
+            ModMatrixSource::Macro4 => Some(3),
+            ModMatrixSource::Macro5 => Some(4),
+            ModMatrixSource::Macro6 => Some(5),
+            ModMatrixSource::Macro7 => Some(6),
+            ModMatrixSource::Macro8 => Some(7),
+            _ => None,
+        };
+        if let Some(i) = macro_idx {
+            if let Ok(guard) = self.params.macro_names.lock() {
+                let trimmed = guard[i].trim();
+                if !trimmed.is_empty() {
+                    return trimmed.chars().take(7).collect();
+                }
+            }
+        }
+        src.short_label().to_string()
+    }
+
+    pub fn set_slot_depth_at(&self, slot_idx: usize, depth: f32) {
+        if slot_idx >= NUM_MOD_SLOTS {
+            return;
+        }
+        let mut mat = self.params.mod_matrix.snapshot();
+        if mat.slots[slot_idx].enabled {
+            mat.slots[slot_idx].depth = depth.clamp(-1.0, 1.0);
+            self.params.mod_matrix.store_value(mat);
+        }
+    }
+
+    pub fn set_slot_curve_at(&self, slot_idx: usize, curve: f32) {
+        if slot_idx >= NUM_MOD_SLOTS {
+            return;
+        }
+        let mut mat = self.params.mod_matrix.snapshot();
+        if mat.slots[slot_idx].enabled {
+            mat.slots[slot_idx].curve = curve.clamp(-1.0, 1.0);
+            self.params.mod_matrix.store_value(mat);
+        }
+    }
+
+    pub fn cycle_slot_aux_at(&self, slot_idx: usize, dir: isize) {
+        if slot_idx >= NUM_MOD_SLOTS {
+            return;
+        }
+        const AUX_CHOICES: [ModMatrixSource; 21] = [
+            ModMatrixSource::None,
+            ModMatrixSource::ModWheel,
+            ModMatrixSource::Aftertouch,
+            ModMatrixSource::Velocity,
+            ModMatrixSource::Keytrack,
+            ModMatrixSource::Macro1,
+            ModMatrixSource::Macro2,
+            ModMatrixSource::Macro3,
+            ModMatrixSource::Macro4,
+            ModMatrixSource::Macro5,
+            ModMatrixSource::Macro6,
+            ModMatrixSource::Macro7,
+            ModMatrixSource::Macro8,
+            ModMatrixSource::Env1,
+            ModMatrixSource::Env2,
+            ModMatrixSource::Env3,
+            ModMatrixSource::Env4,
+            ModMatrixSource::ModSeq1,
+            ModMatrixSource::ModSeq2,
+            ModMatrixSource::ModSeq3,
+            ModMatrixSource::ModSeq4,
+        ];
+        let mut mat = self.params.mod_matrix.snapshot();
+        if mat.slots[slot_idx].enabled {
+            let cur = mat.slots[slot_idx].aux_source;
+            let pos = AUX_CHOICES.iter().position(|&s| s == cur).unwrap_or(0) as isize;
+            let len = AUX_CHOICES.len() as isize;
+            let next = ((pos + dir) % len + len) % len;
+            mat.slots[slot_idx].aux_source = AUX_CHOICES[next as usize];
+            self.params.mod_matrix.store_value(mat);
+        }
+    }
+
+    pub fn move_active_slot(&self, slot_idx: usize, dir: isize) {
+        if slot_idx >= NUM_MOD_SLOTS {
+            return;
+        }
+        let mut mat = self.params.mod_matrix.snapshot();
+        let active: Vec<usize> = mat
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| (s.enabled && s.source != ModMatrixSource::None).then_some(i))
+            .collect();
+        let Some(pos) = active.iter().position(|&i| i == slot_idx) else {
+            return;
+        };
+        let target_pos = pos as isize + dir;
+        if target_pos < 0 || target_pos >= active.len() as isize {
+            return;
+        }
+        let other_idx = active[target_pos as usize];
+        mat.swap_slots(slot_idx, other_idx);
+        self.params.mod_matrix.store_value(mat);
     }
 }
 
@@ -707,6 +855,9 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             if timer_ui.poll_enabled_mask_changed() {
                 cx.emit(UiEvent::ModUiChanged);
             }
+            if timer_ui.poll_external_sync_changed() {
+                cx.emit(UiEvent::SyncExternalState);
+            }
             cx.needs_redraw();
         }
     });
@@ -732,9 +883,10 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
         Binding::new(cx, UiData::mod_ui_rev, move |cx, _| {
             let drag_src = ui_insp.dragging_source();
             if drag_src != ModMatrixSource::None {
+                let src_lbl = ui_insp.aux_short_label(drag_src);
                 let text = match ui_insp.hover_destination() {
-                    Some(dest) => format!("DROP {} > {}", drag_src.short_label(), dest.name()),
-                    None => format!("DRAG {} -> KNOB", drag_src.short_label()),
+                    Some(dest) => format!("DROP {src_lbl} > {}", dest.name()),
+                    None => format!("DRAG {src_lbl} -> KNOB"),
                 };
                 HStack::new(cx, move |cx| {
                     bold_label(cx, &text, "mod-insp-drag")
@@ -756,7 +908,7 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 let dest = slot.destination;
                 let summary = format!(
                     "{}>{} {:+.0}%",
-                    slot.source.short_label(),
+                    ui_insp.aux_short_label(slot.source),
                     dest.name(),
                     slot.depth * 100.0
                 );
@@ -864,6 +1016,124 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     .bottom(Stretch(1.0));
 }
 
+#[derive(Clone, Copy)]
+enum MatrixField {
+    Depth,
+    Curve,
+}
+
+struct MatrixDragBox {
+    slot_idx: usize,
+    field: MatrixField,
+    mod_ui: Arc<ModUiState>,
+    dragging: bool,
+    start_y: f32,
+    start_val: f32,
+}
+
+impl MatrixDragBox {
+    fn new<'a>(
+        cx: &'a mut Context,
+        slot_idx: usize,
+        field: MatrixField,
+        mod_ui: Arc<ModUiState>,
+    ) -> Handle<'a, Self> {
+        let ui_lbl = mod_ui.clone();
+        Self {
+            slot_idx,
+            field,
+            mod_ui,
+            dragging: false,
+            start_y: 0.0,
+            start_val: 0.0,
+        }
+        .build(cx, move |cx| {
+            let text_lens = UiData::mod_ui_rev.map(move |_| {
+                let slot = ui_lbl.params.mod_matrix.snapshot().slots[slot_idx];
+                match field {
+                    MatrixField::Depth => format!("{:+.0}%", slot.depth * 100.0),
+                    MatrixField::Curve => {
+                        if slot.curve.abs() < 0.01 {
+                            "LIN".to_string()
+                        } else {
+                            format!("{:+.0}%", slot.curve * 100.0)
+                        }
+                    }
+                }
+            });
+            bold_label(cx, text_lens, "matrix-depth-val")
+                .child_space(Stretch(1.0))
+                .hoverable(false);
+        })
+        .class("matrix-depth-box")
+    }
+
+    fn current_val(&self) -> f32 {
+        let slot = self.mod_ui.params.mod_matrix.snapshot().slots[self.slot_idx];
+        match self.field {
+            MatrixField::Depth => slot.depth,
+            MatrixField::Curve => slot.curve,
+        }
+    }
+
+    fn apply_val(&self, val: f32) {
+        match self.field {
+            MatrixField::Depth => self.mod_ui.set_slot_depth_at(self.slot_idx, val),
+            MatrixField::Curve => self.mod_ui.set_slot_curve_at(self.slot_idx, val),
+        }
+    }
+}
+
+impl View for MatrixDragBox {
+    fn element(&self) -> Option<&'static str> {
+        Some("matrix-drag-box")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseDown(MouseButton::Left) => {
+                self.dragging = true;
+                self.start_y = cx.mouse().cursory;
+                self.start_val = self.current_val();
+                cx.capture();
+                meta.consume();
+            }
+            WindowEvent::MouseDoubleClick(MouseButton::Left) => {
+                let default_v = match self.field {
+                    MatrixField::Depth => 0.25,
+                    MatrixField::Curve => 0.0,
+                };
+                self.apply_val(default_v);
+                cx.emit(UiEvent::ModUiChanged);
+                meta.consume();
+            }
+            WindowEvent::MouseMove(_, y) if self.dragging => {
+                let sens = if cx.modifiers().contains(Modifiers::SHIFT) {
+                    420.0
+                } else {
+                    150.0
+                };
+                let delta = (self.start_y - *y) / sens;
+                self.apply_val((self.start_val + delta).clamp(-1.0, 1.0));
+                cx.emit(UiEvent::ModUiChanged);
+                meta.consume();
+            }
+            WindowEvent::MouseUp(MouseButton::Left) if self.dragging => {
+                self.dragging = false;
+                cx.release();
+                meta.consume();
+            }
+            WindowEvent::MouseScroll(_, y) => {
+                let step = if *y > 0.0 { 0.02 } else { -0.02 };
+                self.apply_val((self.current_val() + step).clamp(-1.0, 1.0));
+                cx.emit(UiEvent::ModUiChanged);
+                meta.consume();
+            }
+            _ => {}
+        });
+    }
+}
+
 fn build_matrix_row(
     cx: &mut Context,
     row_num: usize,
@@ -873,22 +1143,22 @@ fn build_matrix_row(
 ) {
     let (r, g, b) = slot.source.color_rgb();
     let num_text = format!("{:02}", row_num + 1);
-    let src_text = slot.source.full_label().to_string();
+    let src_text = mod_ui.source_display_name(slot.source);
     let dst_text = slot.destination.name().to_string();
-    let depth_text = format!("{:+.0}%", slot.depth * 100.0);
     let pol_text = if slot.bipolar { "BIP" } else { "UNI" };
+    let aux_text = mod_ui.aux_short_label(slot.aux_source);
 
-    let ui_dec5 = mod_ui.clone();
-    let ui_dec1 = mod_ui.clone();
-    let ui_inc1 = mod_ui.clone();
-    let ui_inc5 = mod_ui.clone();
-    let ui_focus = mod_ui.clone();
+    let ui_depth = mod_ui.clone();
+    let ui_curve = mod_ui.clone();
     let ui_pol = mod_ui.clone();
+    let ui_aux = mod_ui.clone();
+    let ui_up = mod_ui.clone();
+    let ui_dn = mod_ui.clone();
     let ui_del = mod_ui.clone();
 
     HStack::new(cx, move |cx| {
         bold_label(cx, &num_text, "matrix-cell-idx")
-            .width(Pixels(28.0))
+            .width(Pixels(26.0))
             .height(Stretch(1.0))
             .child_space(Stretch(1.0));
 
@@ -906,11 +1176,11 @@ fn build_matrix_row(
                 .child_bottom(Stretch(1.0));
         })
         .col_between(Pixels(6.0))
-        .width(Pixels(136.0))
+        .width(Pixels(130.0))
         .height(Stretch(1.0));
 
         bold_label(cx, "->", "matrix-cell-arrow")
-            .width(Pixels(24.0))
+            .width(Pixels(20.0))
             .height(Stretch(1.0))
             .child_space(Stretch(1.0));
 
@@ -920,76 +1190,17 @@ fn build_matrix_row(
             .child_top(Stretch(1.0))
             .child_bottom(Stretch(1.0));
 
-        HStack::new(cx, move |cx| {
-            Button::new(
-                cx,
-                move |cx| {
-                    ui_dec5.step_slot_depth_at(slot_idx, -0.05);
-                    cx.emit(UiEvent::ModUiChanged);
-                },
-                |cx| bold_label(cx, "-5", "matrix-btn-text").child_space(Stretch(1.0)).hoverable(false),
-            )
-            .class("matrix-btn")
-            .width(Pixels(24.0))
-            .height(Pixels(20.0));
+        MatrixDragBox::new(cx, slot_idx, MatrixField::Depth, ui_depth)
+            .width(Pixels(64.0))
+            .height(Pixels(20.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
 
-            Button::new(
-                cx,
-                move |cx| {
-                    ui_dec1.step_slot_depth_at(slot_idx, -0.01);
-                    cx.emit(UiEvent::ModUiChanged);
-                },
-                |cx| bold_label(cx, "-1", "matrix-btn-text").child_space(Stretch(1.0)).hoverable(false),
-            )
-            .class("matrix-btn")
-            .width(Pixels(22.0))
-            .height(Pixels(20.0));
-
-            Button::new(
-                cx,
-                move |cx| {
-                    ui_focus.focus_slot(slot.destination, slot_idx);
-                    cx.emit(UiEvent::ModUiChanged);
-                },
-                move |cx| {
-                    bold_label(cx, &depth_text, "matrix-depth-val")
-                        .child_space(Stretch(1.0))
-                        .hoverable(false)
-                },
-            )
-            .class("matrix-depth-box")
-            .width(Pixels(54.0))
-            .height(Pixels(20.0));
-
-            Button::new(
-                cx,
-                move |cx| {
-                    ui_inc1.step_slot_depth_at(slot_idx, 0.01);
-                    cx.emit(UiEvent::ModUiChanged);
-                },
-                |cx| bold_label(cx, "+1", "matrix-btn-text").child_space(Stretch(1.0)).hoverable(false),
-            )
-            .class("matrix-btn")
-            .width(Pixels(22.0))
-            .height(Pixels(20.0));
-
-            Button::new(
-                cx,
-                move |cx| {
-                    ui_inc5.step_slot_depth_at(slot_idx, 0.05);
-                    cx.emit(UiEvent::ModUiChanged);
-                },
-                |cx| bold_label(cx, "+5", "matrix-btn-text").child_space(Stretch(1.0)).hoverable(false),
-            )
-            .class("matrix-btn")
-            .width(Pixels(24.0))
-            .height(Pixels(20.0));
-        })
-        .col_between(Pixels(3.0))
-        .width(Pixels(160.0))
-        .height(Stretch(1.0))
-        .child_top(Stretch(1.0))
-        .child_bottom(Stretch(1.0));
+        MatrixDragBox::new(cx, slot_idx, MatrixField::Curve, ui_curve)
+            .width(Pixels(56.0))
+            .height(Pixels(20.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
 
         Button::new(
             cx,
@@ -1005,7 +1216,65 @@ fn build_matrix_row(
         )
         .class("matrix-btn")
         .checked(slot.bipolar)
-        .width(Pixels(58.0))
+        .width(Pixels(46.0))
+        .height(Pixels(20.0))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0));
+
+        Button::new(
+            cx,
+            move |cx| {
+                ui_aux.cycle_slot_aux_at(slot_idx, 1);
+                cx.emit(UiEvent::ModUiChanged);
+            },
+            move |cx| {
+                bold_label(cx, &aux_text, "matrix-btn-text")
+                    .child_space(Stretch(1.0))
+                    .hoverable(false)
+            },
+        )
+        .class("matrix-btn")
+        .checked(slot.aux_source != ModMatrixSource::None)
+        .width(Pixels(68.0))
+        .height(Pixels(20.0))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0));
+
+        HStack::new(cx, move |cx| {
+            Button::new(
+                cx,
+                move |cx| {
+                    ui_up.move_active_slot(slot_idx, -1);
+                    cx.emit(UiEvent::ModUiChanged);
+                },
+                |cx| {
+                    bold_label(cx, "▲", "matrix-btn-text")
+                        .child_space(Stretch(1.0))
+                        .hoverable(false)
+                },
+            )
+            .class("matrix-btn")
+            .width(Pixels(20.0))
+            .height(Pixels(20.0));
+
+            Button::new(
+                cx,
+                move |cx| {
+                    ui_dn.move_active_slot(slot_idx, 1);
+                    cx.emit(UiEvent::ModUiChanged);
+                },
+                |cx| {
+                    bold_label(cx, "▼", "matrix-btn-text")
+                        .child_space(Stretch(1.0))
+                        .hoverable(false)
+                },
+            )
+            .class("matrix-btn")
+            .width(Pixels(20.0))
+            .height(Pixels(20.0));
+        })
+        .col_between(Pixels(2.0))
+        .width(Pixels(42.0))
         .height(Pixels(20.0))
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
@@ -1023,13 +1292,13 @@ fn build_matrix_row(
             },
         )
         .class("matrix-del-btn")
-        .width(Pixels(30.0))
+        .width(Pixels(26.0))
         .height(Pixels(20.0))
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
     })
     .class("matrix-row")
-    .col_between(Pixels(8.0))
+    .col_between(Pixels(6.0))
     .width(Stretch(1.0))
     .height(Pixels(26.0))
     .child_left(Pixels(6.0))
@@ -1087,16 +1356,16 @@ pub(crate) fn build_matrix_view(cx: &mut Context, mod_ui: Arc<ModUiState>) {
         // Table column header
         HStack::new(cx, |cx| {
             bold_label(cx, "#", "matrix-col-title")
-                .width(Pixels(28.0))
+                .width(Pixels(26.0))
                 .height(Stretch(1.0))
                 .child_space(Stretch(1.0));
             bold_label(cx, "SOURCE", "matrix-col-title")
-                .width(Pixels(136.0))
+                .width(Pixels(130.0))
                 .height(Stretch(1.0))
                 .child_top(Stretch(1.0))
                 .child_bottom(Stretch(1.0));
             bold_label(cx, " ", "matrix-col-title")
-                .width(Pixels(24.0))
+                .width(Pixels(20.0))
                 .height(Stretch(1.0));
             bold_label(cx, "DESTINATION", "matrix-col-title")
                 .width(Stretch(1.0))
@@ -1104,20 +1373,32 @@ pub(crate) fn build_matrix_view(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 .child_top(Stretch(1.0))
                 .child_bottom(Stretch(1.0));
             bold_label(cx, "DEPTH", "matrix-col-title")
-                .width(Pixels(160.0))
+                .width(Pixels(64.0))
                 .height(Stretch(1.0))
                 .child_space(Stretch(1.0));
-            bold_label(cx, "MODE", "matrix-col-title")
-                .width(Pixels(58.0))
+            bold_label(cx, "CURVE", "matrix-col-title")
+                .width(Pixels(56.0))
+                .height(Stretch(1.0))
+                .child_space(Stretch(1.0));
+            bold_label(cx, "POL", "matrix-col-title")
+                .width(Pixels(46.0))
+                .height(Stretch(1.0))
+                .child_space(Stretch(1.0));
+            bold_label(cx, "AUX", "matrix-col-title")
+                .width(Pixels(68.0))
+                .height(Stretch(1.0))
+                .child_space(Stretch(1.0));
+            bold_label(cx, "ORD", "matrix-col-title")
+                .width(Pixels(42.0))
                 .height(Stretch(1.0))
                 .child_space(Stretch(1.0));
             bold_label(cx, "DEL", "matrix-col-title")
-                .width(Pixels(30.0))
+                .width(Pixels(26.0))
                 .height(Stretch(1.0))
                 .child_space(Stretch(1.0));
         })
         .class("matrix-col-header")
-        .col_between(Pixels(8.0))
+        .col_between(Pixels(6.0))
         .width(Stretch(1.0))
         .height(Pixels(20.0))
         .child_left(Pixels(6.0))

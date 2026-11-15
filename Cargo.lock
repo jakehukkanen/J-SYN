@@ -2144,6 +2144,7 @@ dependencies = [
  "objc",
  "rfd",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

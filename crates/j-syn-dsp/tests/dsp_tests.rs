@@ -1058,6 +1058,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
             depth: 0.01,
             bipolar: false,
             enabled: true,
+            ..ModSlot::default()
         };
     }
     let mut eng_lo = SynthEngine::new(sample_rate);
@@ -1097,6 +1098,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
         depth: 0.4,
         bipolar: true,
         enabled: true,
+        ..ModSlot::default()
     };
     bp_params.mod_matrix.slots[1] = ModSlot {
         source: ModMatrixSource::Env2,
@@ -1104,6 +1106,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
         depth: 0.5,
         bipolar: false,
         enabled: true,
+        ..ModSlot::default()
     };
     bp_params.mod_matrix.slots[2] = ModSlot {
         source: ModMatrixSource::Velocity,
@@ -1111,6 +1114,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
         depth: 0.5,
         bipolar: false,
         enabled: true,
+        ..ModSlot::default()
     };
     bp_params.mod_matrix.slots[3] = ModSlot {
         source: ModMatrixSource::Keytrack,
@@ -1118,6 +1122,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
         depth: 0.25,
         bipolar: false,
         enabled: true,
+        ..ModSlot::default()
     };
     bp_params.mod_envs[0].attack_s = 0.001;
     bp_params.mod_envs[0].sustain = 1.0;
@@ -1158,6 +1163,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
         depth: 0.75,
         bipolar: false,
         enabled: true,
+        ..ModSlot::default()
     };
     let mut eng_ms = SynthEngine::new(sample_rate);
     eng_ms.note_on(0, 60, 0.9, None, &seq_params);
@@ -1280,6 +1286,7 @@ fn test_modseq_stamps_and_mseg_curve() {
         depth: 0.5,
         bipolar: false,
         enabled: true,
+        ..ModSlot::default()
     };
 
     let mut engine = SynthEngine::new(48_000.0);
@@ -1472,6 +1479,7 @@ fn mod_matrix_modseq_rate_modulation_free_and_sync() {
         depth: 0.25,
         bipolar: false,
         enabled: true,
+        ..ModSlot::default()
     };
 
     let run_phase = |params: &SynthParams, mod_wheel: f32, samples: usize| -> f32 {
@@ -1507,6 +1515,7 @@ fn mod_matrix_modseq_rate_modulation_free_and_sync() {
         depth: 0.20, // -> 0.35 (1/4)
         bipolar: false,
         enabled: true,
+        ..ModSlot::default()
     };
 
     let sync_poly_base = run_phase(&sync_poly, 0.0, 4800);
@@ -1602,6 +1611,7 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
             depth: 0.7,
             bipolar: false,
             enabled: true,
+            ..ModSlot::default()
         };
         let mut e = SynthEngine::new(sample_rate);
         e.set_mod_wheel(mod_wheel);
@@ -1729,6 +1739,7 @@ fn fx_filter_all_modes_and_macro_mod_sources() {
         depth: 0.75,
         bipolar: false,
         enabled: true,
+        ..ModSlot::default()
     };
 
     let run_rms_and_fc = |params: &SynthParams| -> (f32, f32) {
@@ -1749,4 +1760,61 @@ fn fx_filter_all_modes_and_macro_mod_sources() {
         rms_high > rms_low * 1.15 && fc_high > fc_low * 10.0,
         "Expected Macro1 -> Filter1Cutoff to brighten output and raise live cutoff telemetry: low=({rms_low}, {fc_low} Hz), high=({rms_high}, {fc_high} Hz)"
     );
+}
+
+#[test]
+fn mod_matrix_aux_source_curve_and_master_safety_stages() {
+    use j_syn_dsp::mod_matrix::{
+        ModDestination, ModMatrixSource, ModSlot, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS,
+    };
+
+    // Aux modulator + curve shaping + swap_slots
+    let mut matrix = j_syn_dsp::ModMatrixState::default();
+    matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::ModWheel,
+        destination: ModDestination::Filter1Cutoff,
+        depth: 1.0,
+        bipolar: false,
+        enabled: true,
+        aux_source: ModMatrixSource::Macro1,
+        curve: 0.5,
+    };
+    let mut sources = [0.0_f32; NUM_ACTIVE_SOURCES];
+    sources[ModMatrixSource::ModWheel.active_index().unwrap()] = 0.5;
+    let mut deltas = [0.0_f32; NUM_MOD_DESTS];
+    matrix.evaluate_destinations(&sources, &mut deltas);
+    assert!(
+        deltas[ModDestination::Filter1Cutoff.index()].abs() < 1e-6,
+        "Aux source at 0 should scale modulation to 0"
+    );
+    sources[ModMatrixSource::Macro1.active_index().unwrap()] = 1.0;
+    matrix.evaluate_destinations(&sources, &mut deltas);
+    let curved = deltas[ModDestination::Filter1Cutoff.index()];
+    assert!(
+        curved > 0.0 && curved < 0.5,
+        "Positive curve should attenuate mid-range value below linear 0.5, got {curved}"
+    );
+    matrix.swap_slots(0, 1);
+    assert!(matrix.slots[1].enabled && !matrix.slots[0].enabled);
+
+    // Master limiter clamps peaks to <= -0.1 dBFS (~0.9886) and DC blocker removes DC offset
+    let bank = WavetableBank::new();
+    let mut params = SynthParams::default();
+    params.master_gain = 16.0;
+    params.dc_blocker = true;
+    params.master_limiter = true;
+    params.oscs[0].level = 1.0;
+    let mut eng = SynthEngine::new(48_000.0);
+    eng.note_on(0, 48, 1.0, None, &params);
+    let mut max_abs = 0.0_f32;
+    for _ in 0..4096 {
+        let (l, r) = eng.process_sample(&params, &bank);
+        max_abs = max_abs.max(l.abs()).max(r.abs());
+    }
+    assert!(
+        max_abs <= 0.989,
+        "Master safety limiter must keep output <= -0.1 dBFS, got {max_abs}"
+    );
+    let (pk_l, pk_r, rms_l, rms_r, _, _) = eng.telemetry().master_meters();
+    assert!(pk_l > 0.0 && pk_r > 0.0 && rms_l > 0.0 && rms_r > 0.0);
 }

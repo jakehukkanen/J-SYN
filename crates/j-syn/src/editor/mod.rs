@@ -41,8 +41,9 @@ mod scope;
 mod widgets;
 
 use controls::{
-    bold_label, build_bool_dropdown, build_flex_knob_cell_mod_dim, build_header_knob_cell,
-    build_header_knob_cell_mod, build_knob_cell, build_mini_pill_cell, build_module_header,
+    bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_flex_knob_cell_mod_dim,
+    build_header_knob_cell, build_header_knob_cell_mod, build_knob_cell, build_mini_pill_cell,
+    build_module_header,
     build_tab_button, build_ui_scale_dropdown,
 };
 use filter_panel::build_filter_panel;
@@ -105,6 +106,18 @@ impl Data for TooltipState {
     }
 }
 
+fn format_dir_display(dir: Option<&str>) -> String {
+    match dir.filter(|s| !s.trim().is_empty()) {
+        Some(s) => std::path::Path::new(s)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|n| !n.is_empty())
+            .map(|n| format!(".../{n}"))
+            .unwrap_or_else(|| s.to_string()),
+        None => "(Not Set)".to_string(),
+    }
+}
+
 pub(crate) enum UiEvent {
     SelectViewMode(MainViewMode),
     SelectTab(BottomTab),
@@ -112,6 +125,14 @@ pub(crate) enum UiEvent {
     ModUiChanged,
     SetUiScale(u32),
     SetMacroName(usize, String),
+    InitPatch,
+    SavePatch,
+    LoadPatchDialog,
+    LoadPresetPath(std::path::PathBuf, String),
+    StepPreset(isize),
+    PickPresetsDir,
+    PickWavetablesDir,
+    SyncExternalState,
     ShowTooltip(TooltipState),
     HideTooltip,
 }
@@ -120,12 +141,21 @@ pub(crate) enum UiEvent {
 pub(crate) struct UiData {
     pub params: Arc<JSynPluginParams>,
     pub mod_ui: Arc<ModUiState>,
+    #[lens(ignore)]
+    pub gui_context: Arc<dyn GuiContext>,
+    #[lens(ignore)]
+    pub bank: Arc<WavetableBank>,
     pub view_mode: MainViewMode,
     pub active_tab: BottomTab,
     pub modseq_subtab: ModSeqSubTab,
     pub mod_ui_rev: u64,
     pub ui_scale_pct: u32,
     pub macro_names: [String; 8],
+    pub current_preset_name: String,
+    pub presets_dir_rev: u64,
+    pub wavetables_dir_rev: u64,
+    pub presets_dir_display: String,
+    pub wavetables_dir_display: String,
     pub tooltip: TooltipState,
 }
 
@@ -174,7 +204,163 @@ impl Model for UiData {
                     if let Ok(mut guard) = self.params.macro_names.lock() {
                         guard[*idx] = trimmed;
                     }
+                    self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
                 }
+                meta.consume();
+            }
+            UiEvent::InitPatch => {
+                self.macro_names = crate::presets::init_patch(
+                    &self.params,
+                    &self.gui_context,
+                    &self.bank,
+                );
+                self.current_preset_name = "INIT".to_string();
+                self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiEvent::SavePatch => {
+                let params = self.params.clone();
+                let mod_ui = self.mod_ui.clone();
+                let default_name = if self.current_preset_name == "INIT" {
+                    "New Patch.json".to_string()
+                } else {
+                    format!("{}.json", self.current_preset_name)
+                };
+                let start_dir = crate::presets::JSynConfig::load().presets_dir;
+                std::thread::spawn(move || {
+                    let mut dlg = rfd::FileDialog::new()
+                        .add_filter("J-SYN Patch", &["json"])
+                        .set_file_name(&default_name);
+                    if let Some(dir) = start_dir.filter(|s| !s.trim().is_empty()) {
+                        dlg = dlg.set_directory(dir);
+                    }
+                    if let Some(path) = dlg.save_file() {
+                        let stem = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("Patch")
+                            .to_string();
+                        let patch = crate::presets::JSynPatch::capture(&stem, &params);
+                        if patch.save_to_file(&path).is_ok() {
+                            mod_ui.notify_external_sync(Some(stem));
+                        }
+                    }
+                });
+                meta.consume();
+            }
+            UiEvent::LoadPatchDialog => {
+                let params = self.params.clone();
+                let gui_context = self.gui_context.clone();
+                let bank = self.bank.clone();
+                let mod_ui = self.mod_ui.clone();
+                let start_dir = crate::presets::JSynConfig::load().presets_dir;
+                std::thread::spawn(move || {
+                    let mut dlg = rfd::FileDialog::new().add_filter("J-SYN Patch", &["json"]);
+                    if let Some(dir) = start_dir.filter(|s| !s.trim().is_empty()) {
+                        dlg = dlg.set_directory(dir);
+                    }
+                    if let Some(path) = dlg.pick_file() {
+                        if let Ok(patch) = crate::presets::JSynPatch::load_from_file(&path) {
+                            let name = if patch.name.trim().is_empty() {
+                                path.file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or("Patch")
+                                    .to_string()
+                            } else {
+                                patch.name.clone()
+                            };
+                            let _ = patch.apply(&params, &gui_context, &bank);
+                            mod_ui.notify_external_sync(Some(name));
+                        }
+                    }
+                });
+                meta.consume();
+            }
+            UiEvent::LoadPresetPath(path, name) => {
+                if let Ok(patch) = crate::presets::JSynPatch::load_from_file(path) {
+                    self.macro_names = patch.apply(&self.params, &self.gui_context, &self.bank);
+                    self.current_preset_name = name.clone();
+                    self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
+                }
+                meta.consume();
+            }
+            UiEvent::StepPreset(dir) => {
+                let cfg = crate::presets::JSynConfig::load();
+                let entries = crate::presets::scan_presets(cfg.presets_dir.as_deref());
+                if !entries.is_empty() {
+                    let cur_pos = entries
+                        .iter()
+                        .position(|e| e.name == self.current_preset_name);
+                    let next_idx = match cur_pos {
+                        Some(idx) => {
+                            let len = entries.len() as isize;
+                            (((idx as isize + *dir) % len) + len) as usize % entries.len()
+                        }
+                        None => {
+                            if *dir >= 0 {
+                                0
+                            } else {
+                                entries.len() - 1
+                            }
+                        }
+                    };
+                    let target = &entries[next_idx];
+                    if let Ok(patch) = crate::presets::JSynPatch::load_from_file(&target.path) {
+                        self.macro_names =
+                            patch.apply(&self.params, &self.gui_context, &self.bank);
+                        self.current_preset_name = target.name.clone();
+                        self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
+                    }
+                }
+                meta.consume();
+            }
+            UiEvent::PickPresetsDir => {
+                let mod_ui = self.mod_ui.clone();
+                let start_dir = crate::presets::JSynConfig::load().presets_dir;
+                std::thread::spawn(move || {
+                    let mut dlg = rfd::FileDialog::new();
+                    if let Some(dir) = start_dir.filter(|s| !s.trim().is_empty()) {
+                        dlg = dlg.set_directory(dir);
+                    }
+                    if let Some(folder) = dlg.pick_folder() {
+                        let mut cfg = crate::presets::JSynConfig::load();
+                        cfg.presets_dir = Some(folder.to_string_lossy().into_owned());
+                        let _ = cfg.save();
+                        mod_ui.notify_external_sync(None);
+                    }
+                });
+                meta.consume();
+            }
+            UiEvent::PickWavetablesDir => {
+                let mod_ui = self.mod_ui.clone();
+                let start_dir = crate::presets::JSynConfig::load().wavetables_dir;
+                std::thread::spawn(move || {
+                    let mut dlg = rfd::FileDialog::new();
+                    if let Some(dir) = start_dir.filter(|s| !s.trim().is_empty()) {
+                        dlg = dlg.set_directory(dir);
+                    }
+                    if let Some(folder) = dlg.pick_folder() {
+                        let mut cfg = crate::presets::JSynConfig::load();
+                        cfg.wavetables_dir = Some(folder.to_string_lossy().into_owned());
+                        let _ = cfg.save();
+                        mod_ui.notify_external_sync(None);
+                    }
+                });
+                meta.consume();
+            }
+            UiEvent::SyncExternalState => {
+                if let Some(name) = self.mod_ui.take_pending_preset_name() {
+                    self.current_preset_name = name;
+                }
+                if let Ok(guard) = self.params.macro_names.lock() {
+                    self.macro_names = guard.clone();
+                }
+                let cfg = crate::presets::JSynConfig::load();
+                self.presets_dir_display = format_dir_display(cfg.presets_dir.as_deref());
+                self.wavetables_dir_display = format_dir_display(cfg.wavetables_dir.as_deref());
+                self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
+                self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
+                self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
                 meta.consume();
             }
             UiEvent::ShowTooltip(state) => {
@@ -260,9 +446,9 @@ fn build_header_bar(
         HStack::new(cx, move |cx| {
             Element::new(cx).class("brand-pill");
             bold_label(cx, "J-SYN", "header-title");
-            bold_label(cx, "16-VOICE WAVETABLE", "header-subtitle");
+            bold_label(cx, "WAVETABLE", "header-subtitle");
         })
-        .col_between(Pixels(8.0))
+        .col_between(Pixels(6.0))
         .child_top(Stretch(1.0))
         .child_bottom(Stretch(1.0))
         .width(Auto);
@@ -275,7 +461,7 @@ fn build_header_bar(
             )
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Main))
-            .width(Pixels(54.0))
+            .width(Pixels(48.0))
             .height(Pixels(22.0));
 
             Button::new(
@@ -285,7 +471,7 @@ fn build_header_bar(
             )
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Fx))
-            .width(Pixels(44.0))
+            .width(Pixels(38.0))
             .height(Pixels(22.0));
 
             Button::new(
@@ -295,13 +481,126 @@ fn build_header_bar(
             )
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Matrix))
-            .width(Pixels(62.0))
+            .width(Pixels(56.0))
             .height(Pixels(22.0));
         })
         .class("view-switch-group")
         .col_between(Pixels(3.0))
         .width(Auto)
         .height(Pixels(24.0))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0));
+
+        // Preset management bar: < [Preset v] > INIT SAVE LOAD
+        HStack::new(cx, |cx| {
+            Button::new(
+                cx,
+                |cx| cx.emit(UiEvent::StepPreset(-1)),
+                |cx| {
+                    bold_label(cx, "<", "preset-btn-label")
+                        .child_space(Stretch(1.0))
+                        .hoverable(false)
+                },
+            )
+            .class("preset-btn")
+            .width(Pixels(18.0))
+            .height(Pixels(22.0));
+
+            Dropdown::new(
+                cx,
+                move |cx| {
+                    HStack::new(cx, move |cx| {
+                        build_dropdown_trigger_labels(cx, UiData::current_preset_name);
+                    })
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0))
+                    .child_top(Pixels(0.0))
+                    .child_bottom(Pixels(0.0))
+                    .overflow(Overflow::Hidden)
+                },
+                move |cx| {
+                    Binding::new(cx, UiData::presets_dir_rev, move |cx, _| {
+                        let cfg = crate::presets::JSynConfig::load();
+                        let entries =
+                            crate::presets::scan_presets(cfg.presets_dir.as_deref());
+                        if entries.is_empty() {
+                            bold_label(cx, "Set Presets Dir...", "dropdown-action-item").on_press(
+                                |cx| {
+                                    cx.emit(PopupEvent::Close);
+                                    cx.emit(UiEvent::PickPresetsDir);
+                                },
+                            );
+                        } else {
+                            for entry in entries {
+                                let p = entry.path.clone();
+                                let n = entry.name.clone();
+                                bold_label(cx, &entry.name, "dropdown-item").on_press(move |cx| {
+                                    cx.emit(UiEvent::LoadPresetPath(p.clone(), n.clone()));
+                                    cx.emit(PopupEvent::Close);
+                                });
+                            }
+                        }
+                    });
+                },
+            )
+            .width(Pixels(112.0))
+            .height(Pixels(22.0));
+
+            Button::new(
+                cx,
+                |cx| cx.emit(UiEvent::StepPreset(1)),
+                |cx| {
+                    bold_label(cx, ">", "preset-btn-label")
+                        .child_space(Stretch(1.0))
+                        .hoverable(false)
+                },
+            )
+            .class("preset-btn")
+            .width(Pixels(18.0))
+            .height(Pixels(22.0));
+
+            Button::new(
+                cx,
+                |cx| cx.emit(UiEvent::InitPatch),
+                |cx| {
+                    bold_label(cx, "INIT", "preset-btn-label")
+                        .child_space(Stretch(1.0))
+                        .hoverable(false)
+                },
+            )
+            .class("preset-btn")
+            .width(Pixels(32.0))
+            .height(Pixels(22.0));
+
+            Button::new(
+                cx,
+                |cx| cx.emit(UiEvent::SavePatch),
+                |cx| {
+                    bold_label(cx, "SAVE", "preset-btn-label")
+                        .child_space(Stretch(1.0))
+                        .hoverable(false)
+                },
+            )
+            .class("preset-btn")
+            .width(Pixels(36.0))
+            .height(Pixels(22.0));
+
+            Button::new(
+                cx,
+                |cx| cx.emit(UiEvent::LoadPatchDialog),
+                |cx| {
+                    bold_label(cx, "LOAD", "preset-btn-label")
+                        .child_space(Stretch(1.0))
+                        .hoverable(false)
+                },
+            )
+            .class("preset-btn")
+            .width(Pixels(36.0))
+            .height(Pixels(22.0));
+        })
+        .col_between(Pixels(3.0))
+        .width(Auto)
+        .height(Pixels(22.0))
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
 
@@ -319,7 +618,7 @@ fn build_header_bar(
                 "Dirty",
                 "Clean",
             )
-            .width(Pixels(92.0))
+            .width(Pixels(78.0))
             .height(Pixels(24.0))
             .top(Stretch(1.0))
             .bottom(Stretch(1.0));
@@ -332,7 +631,7 @@ fn build_header_bar(
                 "Poly 64",
                 "Mono Legato",
             )
-            .width(Pixels(106.0))
+            .width(Pixels(96.0))
             .height(Pixels(24.0))
             .top(Stretch(1.0))
             .bottom(Stretch(1.0));
@@ -341,9 +640,9 @@ fn build_header_bar(
                 cx,
                 UiData::params,
                 |p| &p.pitch_bend_range,
-                "PB RANGE",
+                "PB RNG",
                 24,
-                54.0,
+                48.0,
             );
 
             build_ui_scale_dropdown(cx);
@@ -367,8 +666,43 @@ fn build_header_bar(
                 false,
                 AMBER_RGB,
             );
+
+            VStack::new(cx, |cx| {
+                LedToggleSwitch::new(
+                    cx,
+                    UiData::params,
+                    |p| &p.dc_blocker,
+                    "DC",
+                    "DC",
+                    (82, 200, 128),
+                )
+                .width(Pixels(38.0))
+                .height(Pixels(16.0));
+
+                LedToggleSwitch::new(
+                    cx,
+                    UiData::params,
+                    |p| &p.master_limiter,
+                    "LIM",
+                    "LIM",
+                    CORAL_RGB,
+                )
+                .width(Pixels(38.0))
+                .height(Pixels(16.0));
+            })
+            .row_between(Pixels(2.0))
+            .width(Pixels(38.0))
+            .height(Pixels(34.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+
+            scope::MasterMeter::new(cx, mod_ui_hdr.telemetry.clone())
+                .width(Pixels(20.0))
+                .height(Pixels(34.0))
+                .top(Stretch(1.0))
+                .bottom(Stretch(1.0));
         })
-        .col_between(Pixels(10.0))
+        .col_between(Pixels(6.0))
         .child_top(Stretch(1.0))
         .child_bottom(Stretch(1.0))
         .width(Auto)
@@ -571,7 +905,7 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(1.55))
+                        .width(Stretch(1.35))
                         .height(Stretch(1.0));
 
                         VStack::new(cx, {
@@ -610,7 +944,77 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(0.95))
+                        .width(Stretch(0.90))
+                        .height(Stretch(1.0));
+
+                        VStack::new(cx, |cx| {
+                            build_module_header(cx, "DIRECTORIES", 18.0);
+                            VStack::new(cx, |cx| {
+                                HStack::new(cx, |cx| {
+                                    Button::new(
+                                        cx,
+                                        |cx| cx.emit(UiEvent::PickPresetsDir),
+                                        |cx| {
+                                            bold_label(cx, "PRESETS", "preset-btn-label")
+                                                .child_space(Stretch(1.0))
+                                                .hoverable(false)
+                                        },
+                                    )
+                                    .class("preset-btn")
+                                    .width(Pixels(62.0))
+                                    .height(Pixels(22.0));
+
+                                    bold_label(cx, UiData::presets_dir_display, "param-readout")
+                                        .width(Stretch(1.0))
+                                        .height(Pixels(22.0))
+                                        .child_left(Pixels(6.0))
+                                        .child_top(Stretch(1.0))
+                                        .child_bottom(Stretch(1.0));
+                                })
+                                .col_between(Pixels(6.0))
+                                .width(Stretch(1.0))
+                                .height(Pixels(22.0));
+
+                                HStack::new(cx, |cx| {
+                                    Button::new(
+                                        cx,
+                                        |cx| cx.emit(UiEvent::PickWavetablesDir),
+                                        |cx| {
+                                            bold_label(cx, "WAVES", "preset-btn-label")
+                                                .child_space(Stretch(1.0))
+                                                .hoverable(false)
+                                        },
+                                    )
+                                    .class("preset-btn")
+                                    .width(Pixels(62.0))
+                                    .height(Pixels(22.0));
+
+                                    bold_label(
+                                        cx,
+                                        UiData::wavetables_dir_display,
+                                        "param-readout",
+                                    )
+                                    .width(Stretch(1.0))
+                                    .height(Pixels(22.0))
+                                    .child_left(Pixels(6.0))
+                                    .child_top(Stretch(1.0))
+                                    .child_bottom(Stretch(1.0));
+                                })
+                                .col_between(Pixels(6.0))
+                                .width(Stretch(1.0))
+                                .height(Pixels(22.0));
+                            })
+                            .row_between(Pixels(6.0))
+                            .child_left(Pixels(6.0))
+                            .child_right(Pixels(6.0))
+                            .child_top(Stretch(1.0))
+                            .child_bottom(Stretch(1.0))
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0));
+                        })
+                        .class("hardware-module")
+                        .class("drawer-module")
+                        .width(Stretch(0.85))
                         .height(Stretch(1.0));
                     })
                     .col_between(Pixels(6.0))
@@ -654,15 +1058,23 @@ pub(crate) fn create(
             .lock()
             .map(|g| g.clone())
             .unwrap_or_else(|_| std::array::from_fn(|i| format!("MACRO {}", i + 1)));
+        let initial_cfg = crate::presets::JSynConfig::load();
         UiData {
             params: params.clone(),
             mod_ui: mod_ui.clone(),
+            gui_context: gui_context.clone(),
+            bank: bank.clone(),
             view_mode: MainViewMode::Main,
             active_tab: BottomTab::VoiceEnv,
             modseq_subtab: ModSeqSubTab::MSeq(0),
             mod_ui_rev: 0,
             ui_scale_pct: initial_scale_pct,
             macro_names: initial_macro_names,
+            current_preset_name: "INIT".to_string(),
+            presets_dir_rev: 0,
+            wavetables_dir_rev: 0,
+            presets_dir_display: format_dir_display(initial_cfg.presets_dir.as_deref()),
+            wavetables_dir_display: format_dir_display(initial_cfg.wavetables_dir.as_deref()),
             tooltip: TooltipState::default(),
         }
         .build(cx);
