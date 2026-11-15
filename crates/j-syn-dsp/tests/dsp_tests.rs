@@ -79,8 +79,9 @@ fn polyphonic_16_voices_and_click_free_stealing() {
     let mut engine = SynthEngine::new(44100.0);
     let params = SynthParams::default();
 
-    // Trigger 20 notes on 16-voice engine
-    for n in 48..68 {
+    // Trigger 72 notes on 64-voice engine
+    for i in 0..72u8 {
+        let n = 36 + (i % 60);
         engine.note_on(0, n, 0.8, None, &params);
         for _ in 0..32 {
             let (l, r) = engine.process_sample(&params, &bank);
@@ -1532,12 +1533,11 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
         FxSlotParams, FxType, ModDestination, ModMatrixSource, ModSlot, FX_SCOPE_LEN, NUM_FX_SLOTS,
     };
 
-    assert_eq!(FxSlotParams::init_patch_slot(0).fx_type, FxType::Ott);
-    assert_eq!(FxSlotParams::init_patch_slot(1).fx_type, FxType::Distortion);
-    assert_eq!(FxSlotParams::init_patch_slot(2).fx_type, FxType::Delay);
-    assert_eq!(FxSlotParams::init_patch_slot(3).fx_type, FxType::JSatClipper);
-    assert_eq!(FxSlotParams::init_patch_slot(4).fx_type, FxType::Reverb);
-    assert_eq!(FxSlotParams::init_patch_slot(5).fx_type, FxType::Off);
+    for slot_idx in 0..NUM_FX_SLOTS {
+        let init_slot = FxSlotParams::init_patch_slot(slot_idx);
+        assert_eq!(init_slot.fx_type, FxType::Off);
+        assert!(!init_slot.enabled);
+    }
     assert_eq!(ModDestination::fx_param(3, 1), ModDestination::Fx4P2);
     assert!(ModDestination::Fx4P2.is_fx_slot(3));
     assert!(!ModDestination::Fx4P2.is_fx_slot(2));
@@ -1545,15 +1545,24 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
     let bank = WavetableBank::new();
     let sample_rate = 48_000.0;
 
-    // 1. Full 8-slot init chain runs cleanly & records live telemetry scopes
+    // 1. Full 8-slot chain runs cleanly & records live telemetry scopes
     let mut init_params = SynthParams::default();
-    init_params.fx_slots = std::array::from_fn(FxSlotParams::init_patch_slot);
-    init_params.fx_slots[5] = FxSlotParams {
-        fx_type: FxType::Chorus,
-        enabled: true,
-        stack: 1,
-        params: FxSlotParams::default_params_for_type(FxType::Chorus),
-    };
+    let test_types = [
+        FxType::Ott,
+        FxType::Distortion,
+        FxType::Delay,
+        FxType::JSatClipper,
+        FxType::Reverb,
+        FxType::Chorus,
+    ];
+    for (idx, &fx_type) in test_types.iter().enumerate() {
+        init_params.fx_slots[idx] = FxSlotParams {
+            fx_type,
+            enabled: true,
+            stack: 1,
+            params: FxSlotParams::default_params_for_type(fx_type),
+        };
+    }
 
     let mut eng = SynthEngine::new(sample_rate);
     eng.note_on(0, 57, 1.0, None, &init_params);

@@ -7,13 +7,13 @@ use crate::oscillator::EngineMode;
 use crate::voice::{PolyMode, SynthParams, TailVoice, Voice};
 use crate::wavetable::{Wavetable, WavetableBank};
 
-pub const MAX_VOICES: usize = 16;
+pub const MAX_VOICES: usize = 64;
 pub const MAX_TAIL_VOICES: usize = 8;
 
-/// 16-voice polyphonic + Mono Legato synthesizer engine with 1.5 kHz control-rate tick
+/// 64-voice polyphonic + Mono Legato synthesizer engine with 1.5 kHz control-rate tick
 /// and click-free 3 ms tail-voice stealing. Zero heap allocations during processing.
 pub struct SynthEngine {
-    pub voices: [Voice; MAX_VOICES],
+    pub voices: Box<[Voice]>,
     pub tail_voices: [TailVoice; MAX_TAIL_VOICES],
     sample_rate: f32,
     voice_age_counter: u64,
@@ -45,7 +45,7 @@ impl SynthEngine {
     pub fn new(sample_rate: f32) -> Self {
         let sr = sample_rate.max(1000.0);
         let mut engine = Self {
-            voices: std::array::from_fn(|_| Voice::new()),
+            voices: (0..MAX_VOICES).map(|_| Voice::new()).collect::<Vec<_>>().into_boxed_slice(),
             tail_voices: std::array::from_fn(|_| TailVoice::new()),
             sample_rate: sr,
             voice_age_counter: 0,
@@ -550,7 +550,7 @@ impl SynthEngine {
 
     #[inline]
     fn current_global_fx_mod_offsets<'a>(
-        voices: &'a [Voice; MAX_VOICES],
+        voices: &'a [Voice],
         idle_mod_offsets: &'a [f32; NUM_MOD_DESTS],
     ) -> &'a [f32; NUM_MOD_DESTS] {
         if let Some(v) = voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {

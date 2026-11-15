@@ -23,7 +23,7 @@ use j_syn_dsp::mod_matrix::{ModDestination, ModUiTelemetry};
 use j_syn_dsp::WavetableBank;
 use nih_plug::prelude::{Editor, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
-use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
+use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
 
 use crate::JSynPluginParams;
 
@@ -315,10 +315,10 @@ fn build_header_bar(
                 params_hdr.clone(),
                 gui_ctx_hdr.clone(),
                 |p| &p.hq_mode,
-                "Vintage 2007",
-                "HQ",
+                "Dirty",
+                "Clean",
             )
-            .width(Pixels(112.0))
+            .width(Pixels(92.0))
             .height(Pixels(24.0))
             .top(Stretch(1.0))
             .bottom(Stretch(1.0));
@@ -328,7 +328,7 @@ fn build_header_bar(
                 params_hdr.clone(),
                 gui_ctx_hdr.clone(),
                 |p| &p.mono_legato,
-                "Poly 16",
+                "Poly 64",
                 "Mono Legato",
             )
             .width(Pixels(106.0))
@@ -640,8 +640,9 @@ pub(crate) fn create(
     telemetry: Arc<ModUiTelemetry>,
 ) -> Option<Box<dyn Editor>> {
     create_vizia_editor(editor_state, ViziaTheming::Builtin, move |cx, gui_context| {
-        assets::register_noto_sans_bold(cx);
-        cx.set_default_font(&[assets::NOTO_SANS]);
+        cx.add_font_mem(include_bytes!("../../assets/fonts/PlusJakartaSans-Regular.ttf"));
+        cx.add_font_mem(include_bytes!("../../assets/fonts/PlusJakartaSans-Bold.ttf"));
+        cx.set_default_font(&["Plus Jakarta Sans"]);
 
         let _ = cx.add_stylesheet(include_style!("src/theme.css"));
 

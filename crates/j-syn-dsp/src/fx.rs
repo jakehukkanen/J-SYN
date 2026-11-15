@@ -127,24 +127,13 @@ impl FxSlotParams {
         }
     }
 
-    /// Default live plugin Init Patch FX chain:
-    /// `FX 1 = OTT`, `FX 2 = Distortion`, `FX 3 = Delay`, `FX 4 = J-SAT Clipper`,
-    /// `FX 5 = Reverb`, `FX 6–8 = Off` (all `STACK = 1`).
-    pub const fn init_patch_slot(slot_idx: usize) -> Self {
-        let fx_type = match slot_idx {
-            0 => FxType::Ott,
-            1 => FxType::Distortion,
-            2 => FxType::Delay,
-            3 => FxType::JSatClipper,
-            4 => FxType::Reverb,
-            _ => FxType::Off,
-        };
-        let enabled = !matches!(fx_type, FxType::Off);
+    /// Default live plugin Init Patch FX chain: all 8 FX slots start `Off` (`STACK = 1`).
+    pub const fn init_patch_slot(_slot_idx: usize) -> Self {
         Self {
-            fx_type,
-            enabled,
+            fx_type: FxType::Off,
+            enabled: false,
             stack: 1,
-            params: Self::default_params_for_type(fx_type),
+            params: Self::default_params_for_type(FxType::Off),
         }
     }
 }

@@ -429,7 +429,7 @@ impl FilterPluginParams {
     fn new(idx: usize) -> Self {
         let default_cutoff = if idx == 0 { 20_000.0 } else { 2_000.0 };
         Self {
-            enabled: BoolParam::new("Filter Enabled", idx == 0),
+            enabled: BoolParam::new("Filter Enabled", false),
             mode: EnumParam::new("Filter Mode", FilterModeParam::Lp),
             slope: EnumParam::new("Filter Slope", FilterSlopeParam::Db12),
             cutoff: FloatParam::new(

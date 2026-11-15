@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::WavetableBank;
 use nih_plug::prelude::{Enum, GuiContext, Param, ParamSetter};
-use nih_plug_vizia::assets;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
@@ -26,7 +25,7 @@ where
 {
     Label::new(cx, text)
         .class(class_name)
-        .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+        .font_family(vec![FamilyOwned::Name(String::from("Plus Jakarta Sans"))])
         .font_weight(FontWeightKeyword::Bold)
 }
 
