@@ -883,6 +883,8 @@ pub struct ModUiTelemetry {
     pub source_levels: [AtomicU32; NUM_ACTIVE_SOURCES],
     pub modseq_phases: [AtomicU32; 4],
     pub env_levels: [AtomicU32; 4],
+    /// Post-modulation `[cutoff_hz, resonance, drive, aux]` for `FILTER 1` and `FILTER 2`.
+    pub filter_live: [[AtomicU32; 4]; 2],
     pub fx_scopes: [FxScopeRing; 8],
 }
 
@@ -899,7 +901,46 @@ impl ModUiTelemetry {
             source_levels: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             modseq_phases: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             env_levels: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
+            filter_live: std::array::from_fn(|_| {
+                [
+                    AtomicU32::new(0.0_f32.to_bits()),
+                    AtomicU32::new(0.0_f32.to_bits()),
+                    AtomicU32::new(0.0_f32.to_bits()),
+                    AtomicU32::new(0.0_f32.to_bits()),
+                ]
+            }),
             fx_scopes: std::array::from_fn(|_| FxScopeRing::new()),
+        }
+    }
+
+    #[inline]
+    pub fn store_filter_live(
+        &self,
+        idx: usize,
+        cutoff_hz: f32,
+        resonance: f32,
+        drive: f32,
+        aux: f32,
+    ) {
+        if idx < 2 {
+            self.filter_live[idx][0].store(cutoff_hz.to_bits(), Ordering::Relaxed);
+            self.filter_live[idx][1].store(resonance.to_bits(), Ordering::Relaxed);
+            self.filter_live[idx][2].store(drive.to_bits(), Ordering::Relaxed);
+            self.filter_live[idx][3].store(aux.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    #[inline]
+    pub fn filter_live(&self, idx: usize) -> [f32; 4] {
+        if idx < 2 {
+            [
+                f32::from_bits(self.filter_live[idx][0].load(Ordering::Relaxed)),
+                f32::from_bits(self.filter_live[idx][1].load(Ordering::Relaxed)),
+                f32::from_bits(self.filter_live[idx][2].load(Ordering::Relaxed)),
+                f32::from_bits(self.filter_live[idx][3].load(Ordering::Relaxed)),
+            ]
+        } else {
+            [0.0; 4]
         }
     }
 

@@ -86,6 +86,7 @@ fn format_freq_hz(hz: f32) -> String {
 pub struct FilterResponseScope {
     filter_idx: usize,
     params: Arc<JSynPluginParams>,
+    mod_ui: Arc<ModUiState>,
     accent: (u8, u8, u8),
 }
 
@@ -131,11 +132,13 @@ impl FilterResponseScope {
         cx: &mut Context,
         filter_idx: usize,
         params: Arc<JSynPluginParams>,
+        mod_ui: Arc<ModUiState>,
         accent: (u8, u8, u8),
     ) -> Handle<'_, Self> {
         Self {
             filter_idx,
             params,
+            mod_ui,
             accent,
         }
         .build(cx, move |cx| {
@@ -169,7 +172,16 @@ impl View for FilterResponseScope {
 
         let dpx = cx.scale_factor();
         let radius = 4.0 * dpx;
-        let dsp_params = self.params.filters[self.filter_idx].to_dsp();
+        let base_params = self.params.filters[self.filter_idx].to_dsp();
+        let [live_fc, live_res, live_drive, live_aux] =
+            self.mod_ui.telemetry.filter_live(self.filter_idx);
+        let mut dsp_params = base_params;
+        if live_fc >= 20.0 {
+            dsp_params.cutoff_hz = live_fc.clamp(20.0, 20_000.0);
+            dsp_params.resonance = live_res.clamp(0.0, 1.0);
+            dsp_params.drive = live_drive.clamp(0.0, 1.0);
+            dsp_params.aux = live_aux.clamp(0.0, 1.0);
+        }
         let enabled = dsp_params.enabled;
 
         let mut bg = vg::Path::new();
@@ -293,6 +305,27 @@ impl View for FilterResponseScope {
         let mut curve_paint = vg::Paint::color(stroke_color);
         curve_paint.set_line_width(1.7 * dpx);
         canvas.stroke_path(&curve, &curve_paint);
+
+        // Ghost base cutoff marker when modulated
+        if (dsp_params.cutoff_hz - base_params.cutoff_hz).abs() / base_params.cutoff_hz.max(20.0)
+            > 0.005
+        {
+            let base_x = inner_x + freq_to_norm(base_params.cutoff_hz) * inner_w;
+            let base_db =
+                j_syn_dsp::evaluate_filter_response_db(&base_params, base_params.cutoff_hz);
+            let base_raw_y = db_to_raw_y(base_db, inner_y, inner_h);
+            if base_raw_y < inner_bottom - 1.0 * dpx {
+                let mut ghost = vg::Path::new();
+                ghost.circle(base_x, base_raw_y, 2.4 * dpx);
+                let mut ghost_paint = vg::Paint::color(if enabled {
+                    vg::Color::rgba(r, g, b, 110)
+                } else {
+                    vg::Color::rgba(92, 84, 76, 55)
+                });
+                ghost_paint.set_line_width(1.1 * dpx);
+                canvas.stroke_path(&ghost, &ghost_paint);
+            }
+        }
 
         // Cutoff marker dot on curve
         let fc_x = inner_x + freq_to_norm(dsp_params.cutoff_hz) * inner_w;
@@ -462,7 +495,7 @@ pub(super) fn build_filter_panel(
         .height(Pixels(20.0))
         .width(Stretch(1.0));
 
-        FilterResponseScope::new(cx, filter_idx, params.clone(), accent)
+        FilterResponseScope::new(cx, filter_idx, params.clone(), mod_ui.clone(), accent)
             .width(Stretch(1.0))
             .height(Pixels(92.0));
 

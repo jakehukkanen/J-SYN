@@ -194,7 +194,7 @@ fn apply_noise_modulation(
 }
 
 #[inline]
-fn apply_filter_modulation(
+pub fn apply_filter_modulation(
     flt: &FilterParams,
     idx: usize,
     mod_offsets: &[f32; NUM_MOD_DESTS],

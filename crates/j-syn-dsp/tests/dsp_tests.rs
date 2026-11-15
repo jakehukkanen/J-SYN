@@ -1722,7 +1722,7 @@ fn fx_filter_all_modes_and_macro_mod_sources() {
         enabled: true,
     };
 
-    let run_rms = |params: &SynthParams| -> f32 {
+    let run_rms_and_fc = |params: &SynthParams| -> (f32, f32) {
         let mut eng = SynthEngine::new(48_000.0);
         eng.note_on(0, 60, 1.0, None, params);
         let mut sum_sq = 0.0_f32;
@@ -1730,14 +1730,14 @@ fn fx_filter_all_modes_and_macro_mod_sources() {
             let (l, r) = eng.process_sample(params, &bank);
             sum_sq += 0.5 * (l * l + r * r);
         }
-        (sum_sq / 2048.0).sqrt()
+        ((sum_sq / 2048.0).sqrt(), eng.telemetry().filter_live(0)[0])
     };
 
-    let rms_low = run_rms(&mp);
+    let (rms_low, fc_low) = run_rms_and_fc(&mp);
     mp.macros[0] = 1.0;
-    let rms_high = run_rms(&mp);
+    let (rms_high, fc_high) = run_rms_and_fc(&mp);
     assert!(
-        rms_high > rms_low * 1.15,
-        "Expected Macro1 -> Filter1Cutoff to brighten output: low={rms_low}, high={rms_high}"
+        rms_high > rms_low * 1.15 && fc_high > fc_low * 10.0,
+        "Expected Macro1 -> Filter1Cutoff to brighten output and raise live cutoff telemetry: low=({rms_low}, {fc_low} Hz), high=({rms_high}, {fc_high} Hz)"
     );
 }
