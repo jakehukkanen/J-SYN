@@ -11,7 +11,9 @@ use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::RawParamEvent;
 
-use super::controls::{bold_label, build_enum_dropdown, build_inline_pill_cell};
+use super::controls::{
+    bold_label, build_dropdown_trigger_labels, build_inline_pill_cell, ScrollDropdown,
+};
 use super::mod_bar::{ModUiState, FX_VIEW_TAG};
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
 use super::{UiData, UiEvent};
@@ -873,18 +875,87 @@ fn build_fx_knob_row(
     .height(Auto);
 }
 
+fn set_fx_slot_type_with_defaults(
+    params: &JSynPluginParams,
+    gui_context: &Arc<dyn GuiContext>,
+    slot_idx: usize,
+    val: FxTypeParam,
+) {
+    let setter = ParamSetter::new(gui_context.as_ref());
+    let slot = &params.fx_slots[slot_idx];
+    let prev = slot.fx_type.value();
+    setter.begin_set_parameter(&slot.fx_type);
+    setter.set_parameter(&slot.fx_type, val);
+    setter.end_set_parameter(&slot.fx_type);
+    if prev != val {
+        let defs = j_syn_dsp::FxSlotParams::default_params_for_type(val.into());
+        for (p, def_v) in slot.params_array().into_iter().zip(defs.into_iter()) {
+            setter.begin_set_parameter(p);
+            setter.set_parameter(p, def_v);
+            setter.end_set_parameter(p);
+        }
+    }
+}
+
 fn build_fx_type_dropdown(
     cx: &mut Context,
     slot_idx: usize,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
 ) {
-    build_enum_dropdown(
+    use nih_plug::prelude::Param;
+    use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
+
+    let p_scroll = params.clone();
+    let g_scroll = gui_context.clone();
+    ScrollDropdown::new(
         cx,
-        params,
-        gui_context,
-        move |p| &p.fx_slots[slot_idx].fx_type,
-        FX_TYPE_ITEMS,
+        move |_cx, delta| {
+            let cur = p_scroll.fx_slots[slot_idx].fx_type.value();
+            let pos = FX_TYPE_ITEMS
+                .iter()
+                .position(|&(_, v)| v == cur)
+                .unwrap_or(0);
+            let next = (pos as isize + delta).clamp(0, FX_TYPE_ITEMS.len() as isize - 1) as usize;
+            if next != pos {
+                set_fx_slot_type_with_defaults(&p_scroll, &g_scroll, slot_idx, FX_TYPE_ITEMS[next].1);
+            }
+        },
+        move |cx| {
+            Dropdown::new(
+                cx,
+                move |cx| {
+                    let text_lens = ParamWidgetBase::make_lens(
+                        UiData::params,
+                        move |p| &p.fx_slots[slot_idx].fx_type,
+                        |param| {
+                            param.normalized_value_to_string(
+                                param.modulated_normalized_value(),
+                                true,
+                            )
+                        },
+                    );
+                    HStack::new(cx, move |cx| {
+                        build_dropdown_trigger_labels(cx, text_lens);
+                    })
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0))
+                    .child_top(Pixels(0.0))
+                    .child_bottom(Pixels(0.0))
+                    .overflow(Overflow::Hidden)
+                },
+                move |cx| {
+                    for &(label, val) in FX_TYPE_ITEMS {
+                        let p_ref = params.clone();
+                        let gui_ctx = gui_context.clone();
+                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                            set_fx_slot_type_with_defaults(&p_ref, &gui_ctx, slot_idx, val);
+                            cx.emit(PopupEvent::Close);
+                        });
+                    }
+                },
+            )
+        },
     )
     .width(Stretch(1.0))
     .height(Pixels(19.0));

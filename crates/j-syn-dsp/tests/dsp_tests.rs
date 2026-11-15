@@ -1545,7 +1545,17 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
     for slot_idx in 0..NUM_FX_SLOTS {
         let init_slot = FxSlotParams::init_patch_slot(slot_idx);
         assert_eq!(init_slot.fx_type, FxType::Off);
-        assert!(!init_slot.enabled);
+        assert!(init_slot.enabled);
+    }
+    for fx_ty in [
+        FxType::Distortion,
+        FxType::Chorus,
+        FxType::Delay,
+        FxType::Reverb,
+        FxType::JSatClipper,
+        FxType::Filter,
+    ] {
+        assert_eq!(FxSlotParams::default_params_for_type(fx_ty)[3], 1.0);
     }
     assert_eq!(ModDestination::fx_param(3, 1), ModDestination::Fx4P2);
     assert!(ModDestination::Fx4P2.is_fx_slot(3));

@@ -55,7 +55,7 @@ pub(super) struct ScrollDropdown {
 }
 
 impl ScrollDropdown {
-    fn new<'a, F, B>(cx: &'a mut Context, on_step: F, build_inner: B) -> Handle<'a, Self>
+    pub(super) fn new<'a, F, B>(cx: &'a mut Context, on_step: F, build_inner: B) -> Handle<'a, Self>
     where
         F: Fn(&mut EventContext, isize) + Send + Sync + 'static,
         B: FnOnce(&mut Context) -> Handle<'_, Dropdown>,

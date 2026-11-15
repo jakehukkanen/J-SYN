@@ -109,17 +109,17 @@ impl FxSlotParams {
     /// Default normalized `[P1, P2, P3, P4]` knob positions when switching to `fx_type`.
     pub const fn default_params_for_type(fx_type: FxType) -> [f32; 4] {
         match fx_type {
-            FxType::Off => [0.5, 0.5, 0.5, 0.5],
+            FxType::Off => [0.5, 0.5, 0.5, 1.0],
             // OTT: Depth 45%, Time 1.00x (0.50), In Gain 0 dB (0.50), Out Gain 0 dB (0.50)
             FxType::Ott => [0.45, 0.50, 0.50, 0.50],
-            // Distortion: Mode=Tube (0.0), Drive 30%, Tone Neutral (0.50), Mix 45%
-            FxType::Distortion => [0.00, 0.30, 0.50, 0.45],
-            // Chorus: Rate ~0.5 Hz (0.35), Depth 50%, Width 75%, Mix 45%
-            FxType::Chorus => [0.35, 0.50, 0.75, 0.45],
-            // Delay: Time=1/8D (0.43 -> index 3), Feedback 38%, Damp 35%, Mix 24%
-            FxType::Delay => [0.43, 0.38, 0.35, 0.24],
-            // Reverb: Size 55%, Decay 60%, Damp 45%, Mix 22%
-            FxType::Reverb => [0.55, 0.60, 0.45, 0.22],
+            // Distortion: Mode=Tube (0.0), Drive 30%, Tone Neutral (0.50), Mix 100%
+            FxType::Distortion => [0.00, 0.30, 0.50, 1.00],
+            // Chorus: Rate ~0.5 Hz (0.35), Depth 50%, Width 75%, Mix 100%
+            FxType::Chorus => [0.35, 0.50, 0.75, 1.00],
+            // Delay: Time=1/8D (0.43 -> index 3), Feedback 38%, Damp 35%, Mix 100%
+            FxType::Delay => [0.43, 0.38, 0.35, 1.00],
+            // Reverb: Size 55%, Decay 60%, Damp 45%, Mix 100%
+            FxType::Reverb => [0.55, 0.60, 0.45, 1.00],
             // J-SAT Clipper: Drive +3.6 dB (0.15), Ceil -0.9 dB (0.95), Knee 40%, Mix 100%
             FxType::JSatClipper => [0.15, 0.95, 0.40, 1.00],
             // Filter: Cutoff ~2.5 kHz (0.65), Res 25%, Type LP 12 (0.0), Mix 100%
@@ -127,11 +127,12 @@ impl FxSlotParams {
         }
     }
 
-    /// Default live plugin Init Patch FX chain: all 8 FX slots start `Off` (`STACK = 1`).
+    /// Default live plugin Init Patch FX chain: all 8 FX slots start `ON` (`enabled = true`)
+    /// with `FxType::Off` (`STACK = 1`) and `P4 = 1.0` (`100%` Mix).
     pub const fn init_patch_slot(_slot_idx: usize) -> Self {
         Self {
             fx_type: FxType::Off,
-            enabled: false,
+            enabled: true,
             stack: 1,
             params: Self::default_params_for_type(FxType::Off),
         }
