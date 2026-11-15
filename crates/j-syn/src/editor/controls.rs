@@ -369,13 +369,30 @@ pub(super) fn build_wavetable_dropdown(
             }
         },
         move |cx| {
+            let p_trigger = params.clone();
             Dropdown::new(
                 cx,
                 move |cx| {
+                    let p_label = p_trigger.clone();
                     let text_lens = ParamWidgetBase::make_lens(
                         UiData::params,
                         move |p| &p.oscs[osc_idx].wt_select,
-                        |param| {
+                        move |param| {
+                            if param.value() == WavetableChoice::Custom {
+                                if let Ok(guard) = p_label.wavetable_paths.lock() {
+                                    let path_str = guard[osc_idx].trim();
+                                    if !path_str.is_empty() {
+                                        if let Some(stem) = std::path::Path::new(path_str)
+                                            .file_stem()
+                                            .and_then(|s| s.to_str())
+                                        {
+                                            if !stem.is_empty() {
+                                                return stem.to_string();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             param.normalized_value_to_string(
                                 param.modulated_normalized_value(),
                                 true,

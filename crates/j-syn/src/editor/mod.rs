@@ -515,7 +515,7 @@ impl View for GearIcon {
 
         let cx_p = bounds.x + bounds.w * 0.5;
         let cy_p = bounds.y + bounds.h * 0.5;
-        let r_outer = bounds.w.min(bounds.h) * 0.43;
+        let r_outer = bounds.w.min(bounds.h) * 0.49;
         let r_inner = r_outer * 0.68;
         let r_hole = r_outer * 0.31;
         let teeth = 6usize;
@@ -609,7 +609,7 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Settings))
             .width(Pixels(34.0))
-            .height(Pixels(22.0));
+            .height(Pixels(24.0));
         })
         .class("view-switch-group")
         .col_between(Pixels(3.0))
