@@ -57,8 +57,8 @@ label {
 .main-chassis {
   child-left: 10px;
   child-right: 10px;
-  child-top: 8px;
-  child-bottom: 10px;
+  child-top: 6px;
+  child-bottom: 6px;
   background-color: #2d2722;
 }
 
@@ -67,7 +67,7 @@ label {
   border-width: 1px;
   border-color: #4f443b;
   border-radius: 6px;
-  child-space: 8px;
+  child-space: 6px;
 }
 
 .hardware-module {
@@ -77,9 +77,9 @@ label {
   border-radius: 5px;
   child-left: 8px;
   child-right: 8px;
-  child-top: 6px;
-  child-bottom: 6px;
-  row-between: 4px;
+  child-top: 5px;
+  child-bottom: 5px;
+  row-between: 3px;
 }
 
 .module-header {
@@ -231,7 +231,7 @@ led-toggle:checked .switch-label {
 }
 
 .mini-label {
-  font-size: 8;
+  font-size: 9;
   font-weight: bold;
   color: #bfa994;
 }

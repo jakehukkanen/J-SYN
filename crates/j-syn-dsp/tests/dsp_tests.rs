@@ -408,3 +408,42 @@ fn bend_warp_is_symmetric_around_center() {
         }
     }
 }
+
+#[test]
+fn mod_order_pm_then_warp_differs_from_warp_then_pm() {
+    use j_syn_dsp::{ModOrder, ModSource, ModType};
+    let bank = WavetableBank::new();
+
+    let mut base_params = SynthParams::default();
+    base_params.oscs[0].enabled = true;
+    base_params.oscs[0].level = 0.0;
+    base_params.oscs[1].enabled = true;
+    base_params.oscs[1].level = 1.0;
+    base_params.oscs[1].mod_source = ModSource::Osc1;
+    base_params.oscs[1].mod_type = ModType::Pm;
+    base_params.oscs[1].mod_depth = 0.65;
+    base_params.oscs[1].warp_mode = WarpMode::BendPlus;
+    base_params.oscs[1].warp_amount = 0.75;
+
+    let mut params_a = base_params;
+    params_a.oscs[1].mod_order = ModOrder::PmThenWarp;
+    let mut params_b = base_params;
+    params_b.oscs[1].mod_order = ModOrder::WarpThenPm;
+
+    let mut eng_a = SynthEngine::new(48_000.0);
+    let mut eng_b = SynthEngine::new(48_000.0);
+    eng_a.note_on(0, 60, 1.0, None, &params_a);
+    eng_b.note_on(0, 60, 1.0, None, &params_b);
+
+    let mut diff_energy = 0.0_f32;
+    for _ in 0..512 {
+        let (la, ra) = eng_a.process_sample(&params_a, &bank);
+        let (lb, rb) = eng_b.process_sample(&params_b, &bank);
+        assert!(la.is_finite() && ra.is_finite() && lb.is_finite() && rb.is_finite());
+        diff_energy += (la - lb).powi(2);
+    }
+    assert!(
+        diff_energy > 0.1,
+        "Expected PM -> Warp and Warp -> PM to produce distinct waveforms, diff={diff_energy}"
+    );
+}

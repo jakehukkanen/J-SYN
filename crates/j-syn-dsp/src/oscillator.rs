@@ -14,6 +14,21 @@ pub fn xorshift32_next(state: &mut u32) -> f32 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModOrder {
+    PmThenWarp = 0,
+    WarpThenPm = 1,
+}
+
+impl ModOrder {
+    pub fn from_index(idx: usize) -> Self {
+        match idx {
+            1 => Self::WarpThenPm,
+            _ => Self::PmThenWarp,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WarpMode {
     None = 0,
     BendMinus = 1,
@@ -90,6 +105,7 @@ pub struct OscParams {
     pub mod_source: ModSource,
     pub mod_type: ModType,
     pub mod_depth: f32,
+    pub mod_order: ModOrder,
     pub unison: usize,
     pub detune: f32,
     pub spread: f32,
@@ -112,6 +128,7 @@ impl Default for OscParams {
             mod_source: ModSource::Off,
             mod_type: ModType::Pm,
             mod_depth: 0.0,
+            mod_order: ModOrder::PmThenWarp,
             unison: 1,
             detune: 0.2,
             spread: 0.5,
@@ -259,15 +276,17 @@ impl OscillatorState {
             };
 
             let inc = (base_inc * detune_ratio).clamp(0.0, 0.49);
-            let p_raw = (self.phases[u] + phase_offset + pm_offset).rem_euclid(1.0);
+            let p_raw = (self.phases[u] + phase_offset).rem_euclid(1.0);
 
-            let sample = sample_with_warp(
+            let sample = sample_with_warp_and_pm(
                 wavetable,
                 params.wt_pos,
                 p_raw,
                 inc,
                 params.warp_mode,
                 params.warp_amount,
+                pm_offset,
+                params.mod_order,
                 engine_mode,
             );
 
@@ -345,29 +364,43 @@ pub fn warp_phase_bend(phase: f32, warp_mode: WarpMode, warp_amount: f32) -> f32
     (0.5 + 0.5 * u_w).clamp(0.0, 1.0)
 }
 
-/// Applies Phase Warp (`None`, `Bend-`, `Bend+`, `Spectrum`).
+/// Applies Phase Warp (`None`, `Bend-`, `Bend+`, `Spectrum`) and PM
+/// in either `PM -> Warp` or `Warp -> PM` order.
 #[inline]
-fn sample_with_warp(
+#[allow(clippy::too_many_arguments)]
+pub fn sample_with_warp_and_pm(
     wavetable: &Wavetable,
     wt_pos: f32,
     phase: f32,
     phase_inc: f32,
     warp_mode: WarpMode,
     warp_amount: f32,
+    pm_offset: f32,
+    mod_order: ModOrder,
     engine_mode: EngineMode,
 ) -> f32 {
     let amt = warp_amount.clamp(0.0, 1.0);
     if amt <= 1e-5 || warp_mode == WarpMode::None {
-        return sample_wavetable_mode(wavetable, wt_pos, phase, phase_inc, engine_mode);
+        let p = (phase + pm_offset).rem_euclid(1.0);
+        return sample_wavetable_mode(wavetable, wt_pos, p, phase_inc, engine_mode);
     }
 
-    match warp_mode {
-        WarpMode::None => sample_wavetable_mode(wavetable, wt_pos, phase, phase_inc, engine_mode),
-        WarpMode::BendMinus | WarpMode::BendPlus => {
-            let warped = warp_phase_bend(phase, warp_mode, amt);
+    match (mod_order, warp_mode) {
+        (_, WarpMode::None) => {
+            let p = (phase + pm_offset).rem_euclid(1.0);
+            sample_wavetable_mode(wavetable, wt_pos, p, phase_inc, engine_mode)
+        }
+        (ModOrder::PmThenWarp, WarpMode::BendMinus | WarpMode::BendPlus) => {
+            let p_pm = (phase + pm_offset).rem_euclid(1.0);
+            let warped = warp_phase_bend(p_pm, warp_mode, amt);
             sample_wavetable_mode(wavetable, wt_pos, warped, phase_inc, engine_mode)
         }
-        WarpMode::Spectrum => {
+        (ModOrder::WarpThenPm, WarpMode::BendMinus | WarpMode::BendPlus) => {
+            let warped = warp_phase_bend(phase, warp_mode, amt);
+            let p_pm = (warped + pm_offset).rem_euclid(1.0);
+            sample_wavetable_mode(wavetable, wt_pos, p_pm, phase_inc, engine_mode)
+        }
+        (_, WarpMode::Spectrum) => {
             // Harmonic multiplication warp preserving fundamental pitch:
             // Crossfade between adjacent integer cycle multipliers n0 and n1
             // so phase=0/1 wraps stay 100% click-free.
@@ -375,12 +408,20 @@ fn sample_with_warp(
             let n0 = k.floor();
             let n1 = n0 + 1.0;
             let frac = k - n0;
-            let p0 = (phase * n0).fract();
+            let (p0, p1) = match mod_order {
+                ModOrder::PmThenWarp => {
+                    let p_pm = (phase + pm_offset).rem_euclid(1.0);
+                    ((p_pm * n0).fract(), (p_pm * n1).fract())
+                }
+                ModOrder::WarpThenPm => (
+                    (phase * n0 + pm_offset).rem_euclid(1.0),
+                    (phase * n1 + pm_offset).rem_euclid(1.0),
+                ),
+            };
             let s0 = sample_wavetable_mode(wavetable, wt_pos, p0, phase_inc * n0, engine_mode);
             if frac <= 1e-5 {
                 s0
             } else {
-                let p1 = (phase * n1).fract();
                 let s1 =
                     sample_wavetable_mode(wavetable, wt_pos, p1, phase_inc * n1, engine_mode);
                 s0 + (s1 - s0) * frac

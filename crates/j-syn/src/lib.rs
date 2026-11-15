@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use j_syn_dsp::{
-    EngineMode, FactoryWavetable, ModSource, ModType, OscParams, PolyMode, SynthEngine,
+    EngineMode, FactoryWavetable, ModOrder, ModSource, ModType, OscParams, PolyMode, SynthEngine,
     SynthParams, WarpMode, Wavetable, WavetableBank,
 };
 use nih_plug::prelude::*;
@@ -41,6 +41,23 @@ impl WavetableChoice {
 }
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModOrderParam {
+    #[name = "PM>W"]
+    PmThenWarp,
+    #[name = "W>PM"]
+    WarpThenPm,
+}
+
+impl From<ModOrderParam> for ModOrder {
+    fn from(val: ModOrderParam) -> Self {
+        match val {
+            ModOrderParam::PmThenWarp => ModOrder::PmThenWarp,
+            ModOrderParam::WarpThenPm => ModOrder::WarpThenPm,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WarpModeParam {
     #[name = "None"]
     None,
@@ -50,6 +67,17 @@ pub enum WarpModeParam {
     BendPlus,
     #[name = "Spectrum"]
     Spectrum,
+}
+
+impl From<WarpModeParam> for WarpMode {
+    fn from(val: WarpModeParam) -> Self {
+        match val {
+            WarpModeParam::None => WarpMode::None,
+            WarpModeParam::BendMinus => WarpMode::BendMinus,
+            WarpModeParam::BendPlus => WarpMode::BendPlus,
+            WarpModeParam::Spectrum => WarpMode::Spectrum,
+        }
+    }
 }
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +142,9 @@ pub struct OscPluginParams {
 
     #[id = "mod_depth"]
     pub mod_depth: FloatParam,
+
+    #[id = "mod_order"]
+    pub mod_order: EnumParam<ModOrderParam>,
 
     #[id = "unison"]
     pub unison: IntParam,
@@ -189,6 +220,7 @@ impl OscPluginParams {
             .with_unit(" %")
             .with_value_to_string(formatters::v2s_f32_percentage(0))
             .with_string_to_value(formatters::s2v_f32_percentage()),
+            mod_order: EnumParam::new("Mod Order", ModOrderParam::PmThenWarp),
             unison: IntParam::new("Unison", 1, IntRange::Linear { min: 1, max: 8 }),
             detune: FloatParam::new("Detune", 0.2, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_unit(" %")
@@ -244,6 +276,7 @@ impl OscPluginParams {
                 ModTypeParam::Rm => ModType::Rm,
             },
             mod_depth: self.mod_depth.value(),
+            mod_order: self.mod_order.value().into(),
             unison: self.unison.value().clamp(1, 8) as usize,
             detune: self.detune.value(),
             spread: self.spread.value(),

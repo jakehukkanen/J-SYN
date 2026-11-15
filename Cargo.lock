@@ -2141,6 +2141,7 @@ dependencies = [
  "j-syn-dsp",
  "nih_plug",
  "nih_plug_vizia",
+ "objc",
  "rfd",
 ]
 
