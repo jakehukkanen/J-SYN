@@ -380,3 +380,31 @@ fn cross_mod_immediate_and_bidirectional() {
         );
     }
 }
+
+#[test]
+fn bend_warp_is_symmetric_around_center() {
+    use j_syn_dsp::warp_phase_bend;
+    for mode in [WarpMode::BendPlus, WarpMode::BendMinus] {
+        let center = warp_phase_bend(0.5, mode, 0.75);
+        assert!(
+            (center - 0.5).abs() < 1e-6,
+            "Center phase 0.5 should remain 0.5 for {mode:?}, got {center}"
+        );
+
+        for &d in &[0.05_f32, 0.15, 0.25, 0.4] {
+            let left = warp_phase_bend(0.5 - d, mode, 0.75);
+            let right = warp_phase_bend(0.5 + d, mode, 0.75);
+            assert!(
+                ((left + right) - 1.0).abs() < 1e-5,
+                "Expected symmetric warp around 0.5 for {mode:?}: left={left}, right={right}"
+            );
+            if mode == WarpMode::BendPlus {
+                // Pinches toward 0.5 (closer to 0.5 than unwarped 0.5 - d)
+                assert!(left > 0.5 - d && right < 0.5 + d);
+            } else {
+                // Expands toward 0.0 and 1.0 (farther from 0.5 than unwarped 0.5 - d)
+                assert!(left < 0.5 - d && right > 0.5 + d);
+            }
+        }
+    }
+}

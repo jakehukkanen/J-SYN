@@ -8,7 +8,10 @@ pub mod wavetable;
 
 pub use engine::{SynthEngine, MAX_TAIL_VOICES, MAX_VOICES};
 pub use envelope::{AdsrStage, AmpAdsr};
-pub use oscillator::{EngineMode, ModSource, ModType, OscParams, OscillatorState, WarpMode, MAX_UNISON};
+pub use oscillator::{
+    warp_phase_bend, EngineMode, ModSource, ModType, OscParams, OscillatorState, WarpMode,
+    MAX_UNISON,
+};
 pub use voice::{PolyMode, SynthParams, TailVoice, Voice};
 pub use wavetable::{
     FactoryWavetable, Wavetable, WavetableBank, FRAME_LEN, MAX_FRAMES, NUM_FACTORY_WAVETABLES,

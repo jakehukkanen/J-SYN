@@ -328,6 +328,23 @@ fn sample_wavetable_mode(
     }
 }
 
+/// Applies symmetric center-pinch (`Bend+`) or end-stretch (`Bend-`) phase warping around `0.5`.
+#[inline]
+pub fn warp_phase_bend(phase: f32, warp_mode: WarpMode, warp_amount: f32) -> f32 {
+    let amt = warp_amount.clamp(0.0, 1.0);
+    if amt <= 1e-5 {
+        return phase;
+    }
+    let u = (phase - 0.5) * 2.0;
+    let exp = match warp_mode {
+        WarpMode::BendPlus => 1.0 + amt * 2.5,
+        WarpMode::BendMinus => 1.0 / (1.0 + amt * 2.5),
+        _ => return phase,
+    };
+    let u_w = u.signum() * u.abs().powf(exp);
+    (0.5 + 0.5 * u_w).clamp(0.0, 1.0)
+}
+
 /// Applies Phase Warp (`None`, `Bend-`, `Bend+`, `Spectrum`).
 #[inline]
 fn sample_with_warp(
@@ -346,16 +363,8 @@ fn sample_with_warp(
 
     match warp_mode {
         WarpMode::None => sample_wavetable_mode(wavetable, wt_pos, phase, phase_inc, engine_mode),
-        WarpMode::BendMinus => {
-            // Asymmetric phase compression toward start of cycle
-            let exp = 1.0 + amt * 3.0;
-            let warped = phase.powf(exp);
-            sample_wavetable_mode(wavetable, wt_pos, warped, phase_inc, engine_mode)
-        }
-        WarpMode::BendPlus => {
-            // Asymmetric phase expansion toward end of cycle
-            let exp = 1.0 + amt * 3.0;
-            let warped = 1.0 - (1.0 - phase).powf(exp);
+        WarpMode::BendMinus | WarpMode::BendPlus => {
+            let warped = warp_phase_bend(phase, warp_mode, amt);
             sample_wavetable_mode(wavetable, wt_pos, warped, phase_inc, engine_mode)
         }
         WarpMode::Spectrum => {

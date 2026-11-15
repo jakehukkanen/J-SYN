@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use j_syn_dsp::WavetableBank;
-use nih_plug::prelude::{Editor, GuiContext, Param, ParamSetter};
+use nih_plug::prelude::{Editor, Enum, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
@@ -13,11 +13,14 @@ use nih_plug_vizia::widgets::util::ModifiersExt;
 use nih_plug_vizia::widgets::RawParamEvent;
 use nih_plug_vizia::{assets, create_vizia_editor, ViziaState, ViziaTheming};
 
-use crate::{JSynPluginParams, OscPluginParams};
+use crate::{
+    JSynPluginParams, ModSourceParam, ModTypeParam, OscPluginParams, WarpModeParam,
+    WavetableChoice,
+};
 
-const BASE_WIDTH: u32 = 1040;
-const BASE_HEIGHT: u32 = 720;
-const DEFAULT_SCALE: f64 = 1.1;
+const BASE_WIDTH: u32 = 1160;
+const BASE_HEIGHT: u32 = 820;
+const DEFAULT_SCALE: f64 = 1.0;
 
 const KNOB_DRAG_PIXELS: f32 = 150.0;
 const KNOB_FINE_MULTIPLIER: f32 = 0.12;
@@ -25,7 +28,7 @@ const KNOB_FINE_MULTIPLIER: f32 = 0.12;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BottomTab {
     VoiceEnv,
-    PerformerMod,
+    ModSeq,
     Routing,
     FxRack,
 }
@@ -686,11 +689,84 @@ impl View for ParamStepPill {
     }
 }
 
-/// Live wavetable waveform preview canvas per oscillator.
+/// Live single-cycle wavetable preview canvas per oscillator,
+/// applying `Phase`, `Warp`, and simulated `PM` / `RM` from `Mod Source`.
 pub struct WavetableScope {
     osc_idx: usize,
     bank: Arc<WavetableBank>,
     params: Arc<JSynPluginParams>,
+}
+
+#[inline]
+fn osc_preview_signature(osc: &OscPluginParams) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    let mut mix = |v: u64| {
+        h ^= v;
+        h = h.wrapping_mul(0x100000001b3);
+    };
+    mix(osc.wt_pos.modulated_normalized_value().to_bits() as u64);
+    mix(osc.enabled.value() as u64);
+    mix(osc.wt_select.value() as u64);
+    mix(osc.phase.value().to_bits() as u64);
+    mix(osc.warp_mode.value() as u64);
+    mix(osc.warp_amount.value().to_bits() as u64);
+    mix(osc.mod_source.value() as u64);
+    mix(osc.mod_type.value() as u64);
+    mix(osc.mod_depth.value().to_bits() as u64);
+    mix(osc.octave.value() as u32 as u64);
+    mix(osc.semi.value() as u32 as u64);
+    h
+}
+
+#[inline]
+fn mod_source_index(src: ModSourceParam) -> Option<usize> {
+    match src {
+        ModSourceParam::Off => None,
+        ModSourceParam::Osc1 => Some(0),
+        ModSourceParam::Osc2 => Some(1),
+        ModSourceParam::Osc3 => Some(2),
+        ModSourceParam::Osc4 => Some(3),
+    }
+}
+
+#[inline]
+fn sample_warped_single_cycle(
+    wt: &j_syn_dsp::Wavetable,
+    wt_pos: f32,
+    phase: f32,
+    warp_mode: WarpModeParam,
+    warp_amount: f32,
+) -> f32 {
+    let p = phase.rem_euclid(1.0);
+    let amt = warp_amount.clamp(0.0, 1.0);
+    if amt <= 1e-5 || warp_mode == WarpModeParam::None {
+        return wt.sample_2007(wt_pos, p);
+    }
+
+    match warp_mode {
+        WarpModeParam::None => wt.sample_2007(wt_pos, p),
+        WarpModeParam::BendMinus => {
+            let warped = j_syn_dsp::warp_phase_bend(p, j_syn_dsp::WarpMode::BendMinus, amt);
+            wt.sample_2007(wt_pos, warped)
+        }
+        WarpModeParam::BendPlus => {
+            let warped = j_syn_dsp::warp_phase_bend(p, j_syn_dsp::WarpMode::BendPlus, amt);
+            wt.sample_2007(wt_pos, warped)
+        }
+        WarpModeParam::Spectrum => {
+            let k = 1.0 + amt * 7.0;
+            let n0 = k.floor();
+            let n1 = n0 + 1.0;
+            let frac = k - n0;
+            let s0 = wt.sample_2007(wt_pos, (p * n0).fract());
+            if frac <= 1e-5 {
+                s0
+            } else {
+                let s1 = wt.sample_2007(wt_pos, (p * n1).fract());
+                s0 + (s1 - s0) * frac
+            }
+        }
+    }
 }
 
 impl WavetableScope {
@@ -708,11 +784,9 @@ impl WavetableScope {
         .build(cx, move |cx| {
             let scope_lens = UiData::params.map(move |p| {
                 let osc = &p.oscs[osc_idx];
-                (
-                    osc.wt_pos.modulated_normalized_value().to_bits(),
-                    osc.enabled.value(),
-                    osc.wt_select.value() as u8,
-                )
+                let mod_sig = mod_source_index(osc.mod_source.value())
+                    .map(|m_idx| osc_preview_signature(&p.oscs[m_idx]));
+                (osc_preview_signature(osc), mod_sig)
             });
             Binding::new(cx, scope_lens, |cx, _| {
                 cx.needs_redraw();
@@ -757,7 +831,8 @@ impl View for WavetableScope {
         zero_paint.set_line_width(1.0 * dpx);
         canvas.stroke_path(&zero_line, &zero_paint);
 
-        let choice = self.params.oscs[self.osc_idx].wt_select.value();
+        let osc = &self.params.oscs[self.osc_idx];
+        let choice = osc.wt_select.value();
         let custom_guard;
         let wt: &j_syn_dsp::Wavetable = match choice.factory_preset() {
             Some(preset) => self.bank.factory_table(preset),
@@ -766,12 +841,71 @@ impl View for WavetableScope {
                 &custom_guard
             }
         };
-        let wt_pos = self.params.oscs[self.osc_idx].wt_pos.value();
-        let enabled = self.params.oscs[self.osc_idx].enabled.value();
+        let wt_pos = osc.wt_pos.value();
+        let enabled = osc.enabled.value();
+        let phase_offset = (osc.phase.value() / 360.0).rem_euclid(1.0).fract();
+        let warp_mode = osc.warp_mode.value();
+        let warp_amount = osc.warp_amount.value();
+        let mod_type = osc.mod_type.value();
+        let mod_depth = osc.mod_depth.value().clamp(0.0, 1.0);
+
+        let mod_idx_opt = mod_source_index(osc.mod_source.value());
+        let mod_custom_guard;
+        let mod_info = if let Some(m_idx) = mod_idx_opt.filter(|_| mod_depth > 1e-4) {
+            let m_osc = &self.params.oscs[m_idx];
+            let m_wt: &j_syn_dsp::Wavetable = match m_osc.wt_select.value().factory_preset() {
+                Some(preset) => self.bank.factory_table(preset),
+                None => {
+                    mod_custom_guard = self.bank.osc_tables[m_idx].load();
+                    &mod_custom_guard
+                }
+            };
+            let car_semi = osc.octave.value() * 12 + osc.semi.value();
+            let mod_semi = m_osc.octave.value() * 12 + m_osc.semi.value();
+            let ratio = 2.0_f32.powf((mod_semi - car_semi) as f32 / 12.0).clamp(0.25, 8.0);
+            Some((
+                m_wt,
+                m_osc.wt_pos.value(),
+                (m_osc.phase.value() / 360.0).rem_euclid(1.0).fract(),
+                m_osc.warp_mode.value(),
+                m_osc.warp_amount.value(),
+                ratio,
+            ))
+        } else {
+            None
+        };
 
         const PREVIEW_PTS: usize = 128;
         let mut pts = [0.0_f32; PREVIEW_PTS];
-        wt.fill_preview(wt_pos, &mut pts);
+        for (i, pt) in pts.iter_mut().enumerate() {
+            let base_p = i as f32 / (PREVIEW_PTS - 1) as f32;
+            let car_p = (base_p + phase_offset).rem_euclid(1.0);
+            *pt = if let Some((m_wt, m_wt_pos, m_phase_off, m_warp_mode, m_warp_amt, ratio)) =
+                mod_info
+            {
+                let mod_p = (base_p * ratio + m_phase_off).rem_euclid(1.0);
+                let mod_sig = sample_warped_single_cycle(
+                    m_wt,
+                    m_wt_pos,
+                    mod_p,
+                    m_warp_mode,
+                    m_warp_amt,
+                );
+                match mod_type {
+                    ModTypeParam::Pm => {
+                        let pm_p = (car_p + mod_sig * mod_depth).rem_euclid(1.0);
+                        sample_warped_single_cycle(wt, wt_pos, pm_p, warp_mode, warp_amount)
+                    }
+                    ModTypeParam::Rm => {
+                        let car_sig =
+                            sample_warped_single_cycle(wt, wt_pos, car_p, warp_mode, warp_amount);
+                        car_sig * ((1.0 - mod_depth) + mod_depth * mod_sig)
+                    }
+                }
+            } else {
+                sample_warped_single_cycle(wt, wt_pos, car_p, warp_mode, warp_amount)
+            };
+        }
 
         let pad_x = 4.0 * dpx;
         let pad_y = 4.0 * dpx;
@@ -805,86 +939,319 @@ impl View for WavetableScope {
     }
 }
 
-/// Non-blocking `.wav` file loader button that spawns `rfd` on a background thread
-/// and swaps the parsed `Arc<Wavetable>` via `ArcSwap`.
-pub struct LoadWavButton {
+fn build_enum_dropdown<'a, E, P, FMap>(
+    cx: &'a mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    params_to_param: FMap,
+    items: &'static [(&'static str, E)],
+) -> Handle<'a, Dropdown>
+where
+    E: Enum + Copy + PartialEq + Send + Sync + 'static,
+    P: Param<Plain = E> + 'static,
+    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
+{
+    Dropdown::new(
+        cx,
+        move |cx| {
+            HStack::new(
+                cx,
+                ParamWidgetBase::build_view(
+                    UiData::params,
+                    params_to_param,
+                    move |cx, param_data| {
+                        let text_lens = param_data.make_lens(|param| {
+                            param.normalized_value_to_string(
+                                param.modulated_normalized_value(),
+                                true,
+                            )
+                        });
+                        Label::new(cx, text_lens)
+                            .class("compact-pill-text")
+                            .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                            .font_weight(FontWeightKeyword::Bold)
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0))
+                            .child_top(Stretch(1.0))
+                            .child_bottom(Stretch(1.0))
+                            .hoverable(false);
+                        Label::new(cx, "▾")
+                            .class("compact-pill-text")
+                            .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                            .font_weight(FontWeightKeyword::Bold)
+                            .width(Pixels(10.0))
+                            .height(Stretch(1.0))
+                            .child_space(Stretch(1.0))
+                            .hoverable(false);
+                    },
+                ),
+            )
+            .height(Stretch(1.0))
+        },
+        move |cx| {
+            for &(label, val) in items {
+                let p_ref = params.clone();
+                let gui_ctx = gui_context.clone();
+                Label::new(cx, label)
+                    .class("dropdown-item")
+                    .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                    .font_weight(FontWeightKeyword::Bold)
+                    .on_press(move |cx| {
+                        let setter = ParamSetter::new(gui_ctx.as_ref());
+                        let param = params_to_param(&p_ref);
+                        setter.begin_set_parameter(param);
+                        setter.set_parameter(param, val);
+                        setter.end_set_parameter(param);
+                        cx.emit(PopupEvent::Close);
+                    });
+            }
+        },
+    )
+}
+
+fn build_bool_dropdown<'a, P, FMap>(
+    cx: &'a mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    params_to_param: FMap,
+    false_label: &'static str,
+    true_label: &'static str,
+) -> Handle<'a, Dropdown>
+where
+    P: Param<Plain = bool> + 'static,
+    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
+{
+    Dropdown::new(
+        cx,
+        move |cx| {
+            HStack::new(
+                cx,
+                ParamWidgetBase::build_view(
+                    UiData::params,
+                    params_to_param,
+                    move |cx, param_data| {
+                        let text_lens = param_data.make_lens(move |param| {
+                            if param.modulated_normalized_value() >= 0.5 {
+                                true_label.to_string()
+                            } else {
+                                false_label.to_string()
+                            }
+                        });
+                        Label::new(cx, text_lens)
+                            .class("compact-pill-text")
+                            .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                            .font_weight(FontWeightKeyword::Bold)
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0))
+                            .child_top(Stretch(1.0))
+                            .child_bottom(Stretch(1.0))
+                            .hoverable(false);
+                        Label::new(cx, "▾")
+                            .class("compact-pill-text")
+                            .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                            .font_weight(FontWeightKeyword::Bold)
+                            .width(Pixels(10.0))
+                            .height(Stretch(1.0))
+                            .child_space(Stretch(1.0))
+                            .hoverable(false);
+                    },
+                ),
+            )
+            .height(Stretch(1.0))
+        },
+        move |cx| {
+            for &(label, val) in &[(false_label, false), (true_label, true)] {
+                let p_ref = params.clone();
+                let gui_ctx = gui_context.clone();
+                Label::new(cx, label)
+                    .class("dropdown-item")
+                    .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                    .font_weight(FontWeightKeyword::Bold)
+                    .on_press(move |cx| {
+                        let setter = ParamSetter::new(gui_ctx.as_ref());
+                        let param = params_to_param(&p_ref);
+                        setter.begin_set_parameter(param);
+                        setter.set_parameter(param, val);
+                        setter.end_set_parameter(param);
+                        cx.emit(PopupEvent::Close);
+                    });
+            }
+        },
+    )
+}
+
+fn build_wavetable_dropdown(
+    cx: &mut Context,
     osc_idx: usize,
     bank: Arc<WavetableBank>,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
-    dialog_open: Arc<AtomicBool>,
+) -> Handle<'_, Dropdown> {
+    const WT_ITEMS: &[(&str, WavetableChoice)] = &[
+        ("Basic Shapes", WavetableChoice::BasicShapes),
+        ("Digital Formant", WavetableChoice::DigitalFormant),
+        ("Harmonic Sync", WavetableChoice::HarmonicSync),
+        ("Aggressive PWM", WavetableChoice::AggressivePwm),
+        ("Custom .WAV", WavetableChoice::Custom),
+    ];
+    let dialog_open = Arc::new(AtomicBool::new(false));
+
+    Dropdown::new(
+        cx,
+        move |cx| {
+            HStack::new(
+                cx,
+                ParamWidgetBase::build_view(
+                    UiData::params,
+                    move |p| &p.oscs[osc_idx].wt_select,
+                    move |cx, param_data| {
+                        let text_lens = param_data.make_lens(|param| {
+                            param.normalized_value_to_string(
+                                param.modulated_normalized_value(),
+                                true,
+                            )
+                        });
+                        Label::new(cx, text_lens)
+                            .class("compact-pill-text")
+                            .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                            .font_weight(FontWeightKeyword::Bold)
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0))
+                            .child_top(Stretch(1.0))
+                            .child_bottom(Stretch(1.0))
+                            .hoverable(false);
+                        Label::new(cx, "▾")
+                            .class("compact-pill-text")
+                            .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                            .font_weight(FontWeightKeyword::Bold)
+                            .width(Pixels(10.0))
+                            .height(Stretch(1.0))
+                            .child_space(Stretch(1.0))
+                            .hoverable(false);
+                    },
+                ),
+            )
+            .height(Stretch(1.0))
+        },
+        move |cx| {
+            for &(label, val) in WT_ITEMS {
+                let p_ref = params.clone();
+                let gui_ctx = gui_context.clone();
+                Label::new(cx, label)
+                    .class("dropdown-item")
+                    .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                    .font_weight(FontWeightKeyword::Bold)
+                    .on_press(move |cx| {
+                        let setter = ParamSetter::new(gui_ctx.as_ref());
+                        let param = &p_ref.oscs[osc_idx].wt_select;
+                        setter.begin_set_parameter(param);
+                        setter.set_parameter(param, val);
+                        setter.end_set_parameter(param);
+                        cx.emit(PopupEvent::Close);
+                    });
+            }
+
+            let bank_ref = bank.clone();
+            let p_ref = params.clone();
+            let gui_ctx = gui_context.clone();
+            let dialog_flag_ref = dialog_open.clone();
+            Label::new(cx, "Load .WAV...")
+                .class("dropdown-action-item")
+                .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                .font_weight(FontWeightKeyword::Bold)
+                .on_press(move |cx| {
+                    cx.emit(PopupEvent::Close);
+                    if !dialog_flag_ref.swap(true, Ordering::AcqRel) {
+                        let bank = bank_ref.clone();
+                        let params = p_ref.clone();
+                        let gui_context = gui_ctx.clone();
+                        let dialog_flag = dialog_flag_ref.clone();
+
+                        std::thread::spawn(move || {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("WAV Audio", &["wav", "WAV"])
+                                .pick_file()
+                            {
+                                if let Ok(wt) = j_syn_dsp::Wavetable::load_from_wav(&path) {
+                                    bank.swap_custom(osc_idx, Arc::new(wt));
+                                    if let Ok(mut guard) = params.wavetable_paths.lock() {
+                                        guard[osc_idx] = path.to_string_lossy().into_owned();
+                                    }
+                                    let setter = ParamSetter::new(gui_context.as_ref());
+                                    setter.begin_set_parameter(&params.oscs[osc_idx].wt_select);
+                                    setter.set_parameter(
+                                        &params.oscs[osc_idx].wt_select,
+                                        WavetableChoice::Custom,
+                                    );
+                                    setter.end_set_parameter(&params.oscs[osc_idx].wt_select);
+                                }
+                            }
+                            dialog_flag.store(false, Ordering::Release);
+                        });
+                    }
+                });
+        },
+    )
 }
 
-impl LoadWavButton {
-    pub fn new(
-        cx: &mut Context,
-        osc_idx: usize,
-        bank: Arc<WavetableBank>,
-        params: Arc<JSynPluginParams>,
-        gui_context: Arc<dyn GuiContext>,
-    ) -> Handle<'_, Self> {
-        Self {
-            osc_idx,
-            bank,
-            params,
-            gui_context,
-            dialog_open: Arc::new(AtomicBool::new(false)),
-        }
-        .build(cx, |cx| {
-            Label::new(cx, "LOAD .WAV")
-                .class("load-wav-text")
+fn build_header_knob_cell<L, Params, P, FMap>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    accent_rgb: (u8, u8, u8),
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    HStack::new(cx, move |cx| {
+        RotaryKnob::new(cx, params.clone(), params_to_param, bipolar, accent_rgb)
+            .width(Pixels(30.0))
+            .height(Pixels(30.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+
+        VStack::new(cx, move |cx| {
+            Label::new(cx, title)
+                .class("knob-title")
                 .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
                 .font_weight(FontWeightKeyword::Bold)
                 .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .child_space(Stretch(1.0))
-                .hoverable(false);
-        })
-        .class("load-wav-btn")
-    }
-}
+                .height(Pixels(11.0))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0));
 
-impl View for LoadWavButton {
-    fn element(&self) -> Option<&'static str> {
-        Some("load-wav-button")
-    }
-
-    fn event(&mut self, _cx: &mut EventContext, event: &mut Event) {
-        event.map(|window_event, meta| {
-            if let WindowEvent::MouseDown(MouseButton::Left) = window_event {
-                if !self.dialog_open.swap(true, Ordering::AcqRel) {
-                    let osc_idx = self.osc_idx;
-                    let bank = self.bank.clone();
-                    let params = self.params.clone();
-                    let gui_context = self.gui_context.clone();
-                    let dialog_flag = self.dialog_open.clone();
-
-                    std::thread::spawn(move || {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("WAV Audio", &["wav", "WAV"])
-                            .pick_file()
-                        {
-                            if let Ok(wt) = j_syn_dsp::Wavetable::load_from_wav(&path) {
-                                bank.swap_custom(osc_idx, Arc::new(wt));
-                                if let Ok(mut guard) = params.wavetable_paths.lock() {
-                                    guard[osc_idx] = path.to_string_lossy().into_owned();
-                                }
-                                let setter = ParamSetter::new(gui_context.as_ref());
-                                setter.begin_set_parameter(&params.oscs[osc_idx].wt_select);
-                                setter.set_parameter(
-                                    &params.oscs[osc_idx].wt_select,
-                                    crate::WavetableChoice::Custom,
-                                );
-                                setter.end_set_parameter(&params.oscs[osc_idx].wt_select);
-                            }
-                        }
-                        dialog_flag.store(false, Ordering::Release);
+            HStack::new(
+                cx,
+                ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
+                    let readout_lens = param_data.make_lens(|param| {
+                        param.normalized_value_to_string(param.modulated_normalized_value(), true)
                     });
-                }
-                meta.consume();
-            }
-        });
-    }
+                    Label::new(cx, readout_lens)
+                        .class("knob-readout-text")
+                        .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                        .font_weight(FontWeightKeyword::Bold)
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0))
+                        .child_space(Stretch(1.0));
+                }),
+            )
+            .class("knob-readout-box")
+            .width(Pixels(52.0))
+            .height(Pixels(15.0));
+        })
+        .width(Pixels(52.0))
+        .height(Auto)
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0))
+        .row_between(Pixels(1.0));
+    })
+    .width(Auto)
+    .height(Pixels(34.0))
+    .col_between(Pixels(5.0));
 }
 
 fn build_knob_cell<L, Params, P, FMap>(
@@ -1017,7 +1384,7 @@ fn build_mini_pill_cell<L, Params, P, FMap>(
             .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
             .font_weight(FontWeightKeyword::Bold)
             .width(Stretch(1.0))
-            .height(Pixels(11.0))
+            .height(Pixels(13.0))
             .child_space(Stretch(1.0));
 
         ParamStepPill::new(cx, params, params_to_param, num_steps)
@@ -1026,6 +1393,8 @@ fn build_mini_pill_cell<L, Params, P, FMap>(
     })
     .width(Pixels(pill_w))
     .height(Auto)
+    .top(Stretch(1.0))
+    .bottom(Stretch(1.0))
     .row_between(Pixels(2.0));
 }
 
@@ -1067,6 +1436,22 @@ fn build_osc_panel(
     gui_context: Arc<dyn GuiContext>,
     accent: (u8, u8, u8),
 ) {
+    const WARP_ITEMS: &[(&str, WarpModeParam)] = &[
+        ("None", WarpModeParam::None),
+        ("Bend-", WarpModeParam::BendMinus),
+        ("Bend+", WarpModeParam::BendPlus),
+        ("Spectrum", WarpModeParam::Spectrum),
+    ];
+    const MOD_SRC_ITEMS: &[(&str, ModSourceParam)] = &[
+        ("Off", ModSourceParam::Off),
+        ("Osc 1", ModSourceParam::Osc1),
+        ("Osc 2", ModSourceParam::Osc2),
+        ("Osc 3", ModSourceParam::Osc3),
+        ("Osc 4", ModSourceParam::Osc4),
+    ];
+    const MOD_TYPE_ITEMS: &[(&str, ModTypeParam)] =
+        &[("PM", ModTypeParam::Pm), ("RM", ModTypeParam::Rm)];
+
     let osc_label = match osc_idx {
         0 => "OSC 1",
         1 => "OSC 2",
@@ -1079,220 +1464,221 @@ fn build_osc_panel(
         &p.oscs[idx]
     }
 
-    VStack::new(cx, move |cx| {
-        // Row 1: Enable toggle, WT selector, LOAD .WAV, Retrig toggle
-        HStack::new(cx, |cx| {
-            LedToggleSwitch::new(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).enabled,
-                osc_label,
-                osc_label,
-                accent,
-            )
-            .width(Pixels(58.0))
-            .height(Pixels(20.0));
+    HStack::new(cx, move |cx| {
+        // Left sub-block: Header (OSC toggle + WT dropdown + RETRIG), Scope, and Warp/Mod dropdowns below
+        VStack::new(cx, |cx| {
+            HStack::new(cx, |cx| {
+                LedToggleSwitch::new(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).enabled,
+                    osc_label,
+                    osc_label,
+                    accent,
+                )
+                .width(Pixels(54.0))
+                .height(Pixels(20.0));
 
-            ParamStepPill::new(cx, UiData::params, move |p| &get_osc(p, osc_idx).wt_select, 5)
+                build_wavetable_dropdown(
+                    cx,
+                    osc_idx,
+                    bank.clone(),
+                    params.clone(),
+                    gui_context.clone(),
+                )
                 .width(Stretch(1.0))
                 .height(Pixels(20.0));
 
-            LoadWavButton::new(cx, osc_idx, bank.clone(), params.clone(), gui_context.clone())
-                .width(Pixels(62.0))
+                LedToggleSwitch::new(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).retrig,
+                    "RETRIG",
+                    "RETRIG",
+                    accent,
+                )
+                .width(Pixels(54.0))
                 .height(Pixels(20.0));
+            })
+            .col_between(Pixels(4.0))
+            .height(Pixels(20.0))
+            .width(Stretch(1.0));
 
-            LedToggleSwitch::new(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).retrig,
-                "RETRIG",
-                "RETRIG",
-                accent,
-            )
-            .width(Pixels(58.0))
-            .height(Pixels(20.0));
-        })
-        .class("module-header")
-        .height(Pixels(24.0))
-        .width(Stretch(1.0))
-        .col_between(Pixels(5.0));
-
-        // Row 2: Compact Pitch & Unison 6-column flex strip inside card bounds
-        HStack::new(cx, |cx| {
-            build_flex_pill_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).octave,
-                "OCT",
-                7,
-            );
-            build_flex_pill_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).semi,
-                "SEMI",
-                25,
-            );
-            build_flex_pill_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).fine,
-                "FINE",
-                201,
-            );
-            build_flex_pill_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).unison,
-                "UNI",
-                8,
-            );
-            build_flex_pill_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).detune,
-                "DETUNE",
-                101,
-            );
-            build_flex_pill_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).spread,
-                "SPREAD",
-                101,
-            );
-        })
-        .col_between(Pixels(4.0))
-        .height(Pixels(28.0))
-        .width(Stretch(1.0));
-
-        // Row 3: Live wavetable waveform preview + Warp/Mod selectors
-        HStack::new(cx, |cx| {
             WavetableScope::new(cx, osc_idx, bank.clone(), params.clone())
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
 
-            VStack::new(cx, |cx| {
-                HStack::new(cx, |cx| {
-                    Label::new(cx, "WARP")
-                        .class("mini-label")
-                        .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
-                        .font_weight(FontWeightKeyword::Bold)
-                        .width(Pixels(32.0))
-                        .height(Stretch(1.0))
-                        .child_space(Stretch(1.0));
-                    ParamStepPill::new(
-                        cx,
-                        UiData::params,
-                        move |p| &get_osc(p, osc_idx).warp_mode,
-                        4,
-                    )
-                    .width(Stretch(1.0))
-                    .height(Pixels(18.0));
-                })
-                .col_between(Pixels(4.0))
-                .height(Pixels(18.0))
-                .width(Stretch(1.0));
-
-                HStack::new(cx, |cx| {
-                    Label::new(cx, "MOD")
-                        .class("mini-label")
-                        .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
-                        .font_weight(FontWeightKeyword::Bold)
-                        .width(Pixels(28.0))
-                        .height(Stretch(1.0))
-                        .child_space(Stretch(1.0));
-                    ParamStepPill::new(
-                        cx,
-                        UiData::params,
-                        move |p| &get_osc(p, osc_idx).mod_source,
-                        5,
-                    )
-                    .width(Stretch(1.0))
-                    .height(Pixels(18.0));
-                    ParamStepPill::new(
-                        cx,
-                        UiData::params,
-                        move |p| &get_osc(p, osc_idx).mod_type,
-                        2,
-                    )
+            HStack::new(cx, |cx| {
+                Label::new(cx, "WARP")
+                    .class("mini-label")
+                    .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                    .font_weight(FontWeightKeyword::Bold)
                     .width(Pixels(34.0))
-                    .height(Pixels(18.0));
-                })
-                .col_between(Pixels(3.0))
-                .height(Pixels(18.0))
-                .width(Stretch(1.0));
+                    .height(Stretch(1.0))
+                    .child_space(Stretch(1.0));
+                build_enum_dropdown(
+                    cx,
+                    params.clone(),
+                    gui_context.clone(),
+                    move |p| &get_osc(p, osc_idx).warp_mode,
+                    WARP_ITEMS,
+                )
+                .width(Stretch(1.0))
+                .height(Pixels(19.0));
             })
-            .width(Pixels(134.0))
-            .height(Pixels(40.0))
-            .row_between(Pixels(4.0));
-        })
-        .col_between(Pixels(8.0))
-        .height(Pixels(40.0))
-        .width(Stretch(1.0));
+            .col_between(Pixels(4.0))
+            .height(Pixels(19.0))
+            .width(Stretch(1.0));
 
-        // Row 4: Primary 6-knob flex row cleanly fit inside card width
-        HStack::new(cx, |cx| {
-            build_flex_knob_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).wt_pos,
-                "WT POS",
-                false,
-                accent,
-                32.0,
-            );
-            build_flex_knob_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).phase,
-                "PHASE",
-                false,
-                accent,
-                32.0,
-            );
-            build_flex_knob_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).warp_amount,
-                "WARP",
-                false,
-                accent,
-                32.0,
-            );
-            build_flex_knob_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).mod_depth,
-                "MOD",
-                false,
-                accent,
-                32.0,
-            );
-            build_flex_knob_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).pan,
-                "PAN",
-                true,
-                accent,
-                32.0,
-            );
-            build_flex_knob_cell(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).level,
-                "LEVEL",
-                false,
-                accent,
-                32.0,
-            );
+            HStack::new(cx, |cx| {
+                Label::new(cx, "MOD")
+                    .class("mini-label")
+                    .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
+                    .font_weight(FontWeightKeyword::Bold)
+                    .width(Pixels(34.0))
+                    .height(Stretch(1.0))
+                    .child_space(Stretch(1.0));
+                build_enum_dropdown(
+                    cx,
+                    params.clone(),
+                    gui_context.clone(),
+                    move |p| &get_osc(p, osc_idx).mod_source,
+                    MOD_SRC_ITEMS,
+                )
+                .width(Stretch(1.0))
+                .height(Pixels(19.0));
+                build_enum_dropdown(
+                    cx,
+                    params.clone(),
+                    gui_context.clone(),
+                    move |p| &get_osc(p, osc_idx).mod_type,
+                    MOD_TYPE_ITEMS,
+                )
+                .width(Pixels(46.0))
+                .height(Pixels(19.0));
+            })
+            .col_between(Pixels(4.0))
+            .height(Pixels(19.0))
+            .width(Stretch(1.0));
         })
-        .col_between(Pixels(3.0))
+        .width(Pixels(244.0))
+        .height(Stretch(1.0))
+        .row_between(Pixels(3.0));
+
+        // Right sub-block: 7 draggable value boxes (OCT/SEMI/FINE/PHASE/UNI/DETUNE/SPREAD) + 5 enlarged knobs
+        VStack::new(cx, |cx| {
+            HStack::new(cx, |cx| {
+                build_flex_pill_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).octave,
+                    "OCT",
+                    7,
+                );
+                build_flex_pill_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).semi,
+                    "SEMI",
+                    25,
+                );
+                build_flex_pill_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).fine,
+                    "FINE",
+                    201,
+                );
+                build_flex_pill_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).phase,
+                    "PHASE",
+                    361,
+                );
+                build_flex_pill_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).unison,
+                    "UNI",
+                    8,
+                );
+                build_flex_pill_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).detune,
+                    "DETUNE",
+                    101,
+                );
+                build_flex_pill_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).spread,
+                    "SPREAD",
+                    101,
+                );
+            })
+            .col_between(Pixels(3.0))
+            .height(Pixels(28.0))
+            .width(Stretch(1.0));
+
+            HStack::new(cx, |cx| {
+                build_flex_knob_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).wt_pos,
+                    "WT POS",
+                    false,
+                    accent,
+                    36.0,
+                );
+                build_flex_knob_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).warp_amount,
+                    "WARP",
+                    false,
+                    accent,
+                    36.0,
+                );
+                build_flex_knob_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).mod_depth,
+                    "MOD",
+                    false,
+                    accent,
+                    36.0,
+                );
+                build_flex_knob_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).pan,
+                    "PAN",
+                    true,
+                    accent,
+                    36.0,
+                );
+                build_flex_knob_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).level,
+                    "LEVEL",
+                    false,
+                    accent,
+                    36.0,
+                );
+            })
+            .col_between(Pixels(4.0))
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
+        })
         .width(Stretch(1.0))
-        .height(Stretch(1.0));
+        .height(Stretch(1.0))
+        .row_between(Pixels(3.0));
     })
     .class("hardware-module")
+    .col_between(Pixels(8.0))
     .width(Stretch(1.0))
     .height(Stretch(1.0));
 }
@@ -1365,7 +1751,7 @@ pub(crate) fn create(
         let gui_ctx_for_ui = gui_context.clone();
 
         VStack::new(cx, move |cx| {
-            // Header bar
+            // Header bar with Master & Voice controls
             HStack::new(cx, |cx| {
                 Element::new(cx).class("rack-screw");
                 HStack::new(cx, |cx| {
@@ -1374,87 +1760,158 @@ pub(crate) fn create(
                         .class("header-title")
                         .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
                         .font_weight(FontWeightKeyword::Bold);
-                    Label::new(cx, "16-VOICE WAVETABLE SYNTHESIZER")
+                    Label::new(cx, "16-VOICE WAVETABLE")
                         .class("header-subtitle")
                         .font_family(vec![FamilyOwned::Name(String::from(assets::NOTO_SANS))])
                         .font_weight(FontWeightKeyword::Bold);
                 })
-                .col_between(Pixels(10.0))
+                .col_between(Pixels(8.0))
                 .child_top(Stretch(1.0))
                 .child_bottom(Stretch(1.0))
                 .width(Auto);
 
                 Element::new(cx).width(Stretch(1.0));
+
+                HStack::new(cx, |cx| {
+                    build_bool_dropdown(
+                        cx,
+                        params_for_ui.clone(),
+                        gui_ctx_for_ui.clone(),
+                        |p| &p.hq_mode,
+                        "Vintage 2007",
+                        "HQ",
+                    )
+                    .width(Pixels(112.0))
+                    .height(Pixels(24.0))
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0));
+
+                    build_bool_dropdown(
+                        cx,
+                        params_for_ui.clone(),
+                        gui_ctx_for_ui.clone(),
+                        |p| &p.mono_legato,
+                        "Poly 16",
+                        "Mono Legato",
+                    )
+                    .width(Pixels(106.0))
+                    .height(Pixels(24.0))
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0));
+
+                    build_mini_pill_cell(
+                        cx,
+                        UiData::params,
+                        |p| &p.pitch_bend_range,
+                        "PB RANGE",
+                        24,
+                        54.0,
+                    );
+
+                    build_header_knob_cell(
+                        cx,
+                        UiData::params,
+                        |p| &p.glide_ms,
+                        "GLIDE",
+                        false,
+                        gold,
+                    );
+
+                    build_header_knob_cell(
+                        cx,
+                        UiData::params,
+                        |p| &p.master_volume_db,
+                        "MASTER",
+                        false,
+                        amber,
+                    );
+                })
+                .col_between(Pixels(10.0))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0))
+                .width(Auto)
+                .height(Stretch(1.0));
+
                 Element::new(cx).class("rack-screw");
             })
             .class("header-bar")
+            .col_between(Pixels(10.0))
             .width(Stretch(1.0))
-            .height(Pixels(34.0))
+            .height(Pixels(54.0))
             .child_left(Pixels(12.0))
             .child_right(Pixels(12.0))
             .child_top(Stretch(1.0))
             .child_bottom(Stretch(1.0));
 
-            // Main chassis: Split Layout
+            // Main chassis: 3-Column Layout (Oscillators | Filters | Master FX) + 4-Tab Bottom Bar
             VStack::new(cx, |cx| {
                 VStack::new(cx, |cx| {
-                    // Top Section (Always Visible): 2x2 Oscillator Grid + Right Filter/Master Strip
+                    // Top Section: 3 Columns
                     HStack::new(cx, |cx| {
-                        // Left: 2x2 Oscillator Grid
+                        // Column 1 (Left): OSC 1..4 stacked vertically + compact NOISE slot
                         VStack::new(cx, |cx| {
-                            HStack::new(cx, |cx| {
-                                build_osc_panel(
-                                    cx,
-                                    0,
-                                    bank_for_ui.clone(),
-                                    params_for_ui.clone(),
-                                    gui_ctx_for_ui.clone(),
-                                    amber,
-                                );
-                                build_osc_panel(
-                                    cx,
-                                    1,
-                                    bank_for_ui.clone(),
-                                    params_for_ui.clone(),
-                                    gui_ctx_for_ui.clone(),
-                                    gold,
-                                );
-                            })
-                            .col_between(Pixels(8.0))
-                            .width(Stretch(1.0))
-                            .height(Stretch(1.0));
+                            build_osc_panel(
+                                cx,
+                                0,
+                                bank_for_ui.clone(),
+                                params_for_ui.clone(),
+                                gui_ctx_for_ui.clone(),
+                                amber,
+                            );
+                            build_osc_panel(
+                                cx,
+                                1,
+                                bank_for_ui.clone(),
+                                params_for_ui.clone(),
+                                gui_ctx_for_ui.clone(),
+                                gold,
+                            );
+                            build_osc_panel(
+                                cx,
+                                2,
+                                bank_for_ui.clone(),
+                                params_for_ui.clone(),
+                                gui_ctx_for_ui.clone(),
+                                coral,
+                            );
+                            build_osc_panel(
+                                cx,
+                                3,
+                                bank_for_ui.clone(),
+                                params_for_ui.clone(),
+                                gui_ctx_for_ui.clone(),
+                                amber,
+                            );
 
+                            // Reserved compact Noise slot below OSC 4
                             HStack::new(cx, |cx| {
-                                build_osc_panel(
+                                Label::new(cx, "NOISE (M2)")
+                                    .class("module-title")
+                                    .font_family(vec![FamilyOwned::Name(String::from(
+                                        assets::NOTO_SANS,
+                                    ))])
+                                    .font_weight(FontWeightKeyword::Bold)
+                                    .width(Pixels(92.0));
+                                build_placeholder_bay(
                                     cx,
-                                    2,
-                                    bank_for_ui.clone(),
-                                    params_for_ui.clone(),
-                                    gui_ctx_for_ui.clone(),
-                                    coral,
-                                );
-                                build_osc_panel(
-                                    cx,
-                                    3,
-                                    bank_for_ui.clone(),
-                                    params_for_ui.clone(),
-                                    gui_ctx_for_ui.clone(),
-                                    amber,
+                                    "NOISE GENERATOR",
+                                    "COLOR / AMP / FILTER ROUTING (MILESTONE 2)",
                                 );
                             })
+                            .class("hardware-module")
                             .col_between(Pixels(8.0))
                             .width(Stretch(1.0))
-                            .height(Stretch(1.0));
+                            .height(Pixels(46.0));
                         })
-                        .row_between(Pixels(8.0))
-                        .width(Stretch(3.2))
+                        .row_between(Pixels(6.0))
+                        .width(Stretch(2.2))
                         .height(Stretch(1.0));
 
-                        // Right: Reserved Filter / Master Strip
+                        // Column 2 (Center): FILTER 1 stacked vertically above FILTER 2
                         VStack::new(cx, |cx| {
                             VStack::new(cx, |cx| {
                                 HStack::new(cx, |cx| {
-                                    Label::new(cx, "FILTER & ROUTING (M2)")
+                                    Label::new(cx, "FILTER 1 (M2)")
                                         .class("module-title")
                                         .font_family(vec![FamilyOwned::Name(String::from(
                                             assets::NOTO_SANS,
@@ -1467,13 +1924,8 @@ pub(crate) fn create(
 
                                 build_placeholder_bay(
                                     cx,
-                                    "FILTER 1 (SER / PAR)",
+                                    "MULTIMODE FILTER 1",
                                     "LP / BP / HP / DAFT / SCREAM",
-                                );
-                                build_placeholder_bay(
-                                    cx,
-                                    "FILTER 2",
-                                    "RESERVED FOR MILESTONE 2",
                                 );
                             })
                             .class("hardware-module")
@@ -1482,7 +1934,7 @@ pub(crate) fn create(
 
                             VStack::new(cx, |cx| {
                                 HStack::new(cx, |cx| {
-                                    Label::new(cx, "MASTER OUTPUT")
+                                    Label::new(cx, "FILTER 2 (M2)")
                                         .class("module-title")
                                         .font_family(vec![FamilyOwned::Name(String::from(
                                             assets::NOTO_SANS,
@@ -1493,247 +1945,145 @@ pub(crate) fn create(
                                 .height(Pixels(22.0))
                                 .width(Stretch(1.0));
 
-                                HStack::new(cx, |cx| {
-                                    build_knob_cell(
-                                        cx,
-                                        UiData::params,
-                                        |p| &p.master_volume_db,
-                                        "MASTER",
-                                        false,
-                                        amber,
-                                        40.0,
-                                        58.0,
-                                    );
-
-                                    VStack::new(cx, |cx| {
-                                        LedToggleSwitch::new(
-                                            cx,
-                                            UiData::params,
-                                            |p| &p.hq_mode,
-                                            "2007 MODE",
-                                            "HQ MODE",
-                                            amber,
-                                        )
-                                        .width(Stretch(1.0))
-                                        .height(Pixels(22.0));
-
-                                        LedToggleSwitch::new(
-                                            cx,
-                                            UiData::params,
-                                            |p| &p.mono_legato,
-                                            "POLY 16",
-                                            "MONO LEG",
-                                            gold,
-                                        )
-                                        .width(Stretch(1.0))
-                                        .height(Pixels(22.0));
-                                    })
-                                    .row_between(Pixels(6.0))
-                                    .top(Stretch(1.0))
-                                    .bottom(Stretch(1.0))
-                                    .width(Stretch(1.0))
-                                    .height(Auto);
-                                })
-                                .col_between(Pixels(8.0))
-                                .child_top(Stretch(1.0))
-                                .child_bottom(Stretch(1.0))
-                                .width(Stretch(1.0))
-                                .height(Stretch(1.0));
+                                build_placeholder_bay(
+                                    cx,
+                                    "MULTIMODE FILTER 2",
+                                    "DUAL / COMB / FORMANT",
+                                );
                             })
                             .class("hardware-module")
                             .width(Stretch(1.0))
-                            .height(Pixels(126.0));
+                            .height(Stretch(1.0));
                         })
                         .row_between(Pixels(8.0))
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0));
+
+                        // Column 3 (Right): 4 vertically stacked Master FX slot cards
+                        VStack::new(cx, |cx| {
+                            for (title, subtitle) in [
+                                ("FX 1: OTT", "MULTIBAND UPWARD/DOWNWARD (M4)"),
+                                ("FX 2: DISTORTION", "TUBE / DIODE / CLIPPER (M4)"),
+                                ("FX 3: DELAY / CHORUS", "SYNC DELAY / DIMENSION (M4)"),
+                                ("FX 4: REVERB / CLIP", "HALL REVERB / LIMITER (M4)"),
+                            ] {
+                                VStack::new(cx, |cx| {
+                                    HStack::new(cx, |cx| {
+                                        Label::new(cx, title)
+                                            .class("module-title")
+                                            .font_family(vec![FamilyOwned::Name(String::from(
+                                                assets::NOTO_SANS,
+                                            ))])
+                                            .font_weight(FontWeightKeyword::Bold);
+                                    })
+                                    .class("module-header")
+                                    .height(Pixels(20.0))
+                                    .width(Stretch(1.0));
+
+                                    build_placeholder_bay(cx, title, subtitle);
+                                })
+                                .class("hardware-module")
+                                .width(Stretch(1.0))
+                                .height(Stretch(1.0));
+                            }
+                        })
+                        .row_between(Pixels(6.0))
                         .width(Stretch(1.0))
                         .height(Stretch(1.0));
                     })
                     .col_between(Pixels(8.0))
                     .width(Stretch(1.0))
-                    .height(Stretch(1.75));
+                    .height(Stretch(3.15));
 
-                    // Bottom Section: Tab Bar + Swappable Content Pane
+                    // Bottom Section: Tab Bar (VOICE & ENV | MODSEQ | ROUTING | FX RACK) + Content Pane
                     VStack::new(cx, |cx| {
                         HStack::new(cx, |cx| {
                             build_tab_button(cx, BottomTab::VoiceEnv, "VOICE & ENV");
-                            build_tab_button(cx, BottomTab::PerformerMod, "PERFORMER / MOD");
+                            build_tab_button(cx, BottomTab::ModSeq, "MODSEQ");
                             build_tab_button(cx, BottomTab::Routing, "ROUTING");
                             build_tab_button(cx, BottomTab::FxRack, "FX RACK");
                         })
                         .class("tab-bar")
                         .col_between(Pixels(6.0))
-                        .height(Pixels(28.0))
+                        .height(Pixels(26.0))
                         .width(Stretch(1.0));
 
                         Binding::new(cx, UiData::active_tab, move |cx, active| {
                             match active.get(cx) {
                                 BottomTab::VoiceEnv => {
-                                    HStack::new(cx, |cx| {
-                                        // Master & Voice
-                                        VStack::new(cx, |cx| {
-                                            HStack::new(cx, |cx| {
-                                                Label::new(cx, "MASTER & VOICE")
-                                                    .class("module-title")
-                                                    .font_family(vec![FamilyOwned::Name(
-                                                        String::from(assets::NOTO_SANS),
-                                                    )])
-                                                    .font_weight(FontWeightKeyword::Bold);
-                                            })
-                                            .class("module-header")
-                                            .height(Pixels(22.0))
-                                            .width(Stretch(1.0));
-
-                                            HStack::new(cx, |cx| {
-                                                build_knob_cell(
-                                                    cx,
-                                                    UiData::params,
-                                                    |p| &p.master_volume_db,
-                                                    "MASTER",
-                                                    false,
-                                                    amber,
-                                                    44.0,
-                                                    64.0,
-                                                );
-
-                                                VStack::new(cx, |cx| {
-                                                    LedToggleSwitch::new(
-                                                        cx,
-                                                        UiData::params,
-                                                        |p| &p.hq_mode,
-                                                        "2007 MODE",
-                                                        "HQ MODE",
-                                                        amber,
-                                                    )
-                                                    .width(Pixels(102.0))
-                                                    .height(Pixels(24.0));
-
-                                                    LedToggleSwitch::new(
-                                                        cx,
-                                                        UiData::params,
-                                                        |p| &p.mono_legato,
-                                                        "POLY 16",
-                                                        "MONO LEG",
-                                                        gold,
-                                                    )
-                                                    .width(Pixels(102.0))
-                                                    .height(Pixels(24.0));
-                                                })
-                                                .row_between(Pixels(6.0))
-                                                .top(Stretch(1.0))
-                                                .bottom(Stretch(1.0))
-                                                .width(Auto)
-                                                .height(Auto);
-
-                                                build_knob_cell(
-                                                    cx,
-                                                    UiData::params,
-                                                    |p| &p.glide_ms,
-                                                    "GLIDE",
-                                                    false,
-                                                    gold,
-                                                    44.0,
-                                                    64.0,
-                                                );
-
-                                                build_mini_pill_cell(
-                                                    cx,
-                                                    UiData::params,
-                                                    |p| &p.pitch_bend_range,
-                                                    "PB RANGE",
-                                                    24,
-                                                    58.0,
-                                                );
-                                            })
-                                            .col_between(Pixels(14.0))
-                                            .child_left(Stretch(1.0))
-                                            .child_right(Stretch(1.0))
-                                            .child_top(Stretch(1.0))
-                                            .child_bottom(Stretch(1.0))
-                                            .width(Stretch(1.0))
-                                            .height(Stretch(1.0));
+                                    VStack::new(cx, |cx| {
+                                        HStack::new(cx, |cx| {
+                                            Label::new(cx, "AMP ENVELOPE (ADSR)")
+                                                .class("module-title")
+                                                .font_family(vec![FamilyOwned::Name(
+                                                    String::from(assets::NOTO_SANS),
+                                                )])
+                                                .font_weight(FontWeightKeyword::Bold);
                                         })
-                                        .class("hardware-module")
-                                        .width(Stretch(1.1))
-                                        .height(Stretch(1.0));
+                                        .class("module-header")
+                                        .height(Pixels(22.0))
+                                        .width(Stretch(1.0));
 
-                                        // Amp Envelope
-                                        VStack::new(cx, |cx| {
-                                            HStack::new(cx, |cx| {
-                                                Label::new(cx, "AMP ENVELOPE (ADSR)")
-                                                    .class("module-title")
-                                                    .font_family(vec![FamilyOwned::Name(
-                                                        String::from(assets::NOTO_SANS),
-                                                    )])
-                                                    .font_weight(FontWeightKeyword::Bold);
-                                            })
-                                            .class("module-header")
-                                            .height(Pixels(22.0))
-                                            .width(Stretch(1.0));
-
-                                            HStack::new(cx, |cx| {
-                                                build_knob_cell(
-                                                    cx,
-                                                    UiData::params,
-                                                    |p| &p.amp_attack,
-                                                    "ATTACK",
-                                                    false,
-                                                    amber,
-                                                    44.0,
-                                                    68.0,
-                                                );
-                                                build_knob_cell(
-                                                    cx,
-                                                    UiData::params,
-                                                    |p| &p.amp_decay,
-                                                    "DECAY",
-                                                    false,
-                                                    amber,
-                                                    44.0,
-                                                    68.0,
-                                                );
-                                                build_knob_cell(
-                                                    cx,
-                                                    UiData::params,
-                                                    |p| &p.amp_sustain,
-                                                    "SUSTAIN",
-                                                    false,
-                                                    gold,
-                                                    44.0,
-                                                    68.0,
-                                                );
-                                                build_knob_cell(
-                                                    cx,
-                                                    UiData::params,
-                                                    |p| &p.amp_release,
-                                                    "RELEASE",
-                                                    false,
-                                                    coral,
-                                                    44.0,
-                                                    68.0,
-                                                );
-                                            })
-                                            .col_between(Pixels(14.0))
-                                            .child_left(Stretch(1.0))
-                                            .child_right(Stretch(1.0))
-                                            .child_top(Stretch(1.0))
-                                            .child_bottom(Stretch(1.0))
-                                            .width(Stretch(1.0))
-                                            .height(Stretch(1.0));
+                                        HStack::new(cx, |cx| {
+                                            build_knob_cell(
+                                                cx,
+                                                UiData::params,
+                                                |p| &p.amp_attack,
+                                                "ATTACK",
+                                                false,
+                                                amber,
+                                                44.0,
+                                                80.0,
+                                            );
+                                            build_knob_cell(
+                                                cx,
+                                                UiData::params,
+                                                |p| &p.amp_decay,
+                                                "DECAY",
+                                                false,
+                                                amber,
+                                                44.0,
+                                                80.0,
+                                            );
+                                            build_knob_cell(
+                                                cx,
+                                                UiData::params,
+                                                |p| &p.amp_sustain,
+                                                "SUSTAIN",
+                                                false,
+                                                gold,
+                                                44.0,
+                                                80.0,
+                                            );
+                                            build_knob_cell(
+                                                cx,
+                                                UiData::params,
+                                                |p| &p.amp_release,
+                                                "RELEASE",
+                                                false,
+                                                coral,
+                                                44.0,
+                                                80.0,
+                                            );
                                         })
-                                        .class("hardware-module")
+                                        .col_between(Pixels(24.0))
+                                        .child_left(Stretch(1.0))
+                                        .child_right(Stretch(1.0))
+                                        .child_top(Stretch(1.0))
+                                        .child_bottom(Stretch(1.0))
                                         .width(Stretch(1.0))
                                         .height(Stretch(1.0));
                                     })
-                                    .col_between(Pixels(8.0))
+                                    .class("hardware-module")
                                     .width(Stretch(1.0))
                                     .height(Stretch(1.0));
                                 }
-                                BottomTab::PerformerMod => {
+                                BottomTab::ModSeq => {
                                     VStack::new(cx, |cx| {
                                         HStack::new(cx, |cx| {
                                             Label::new(
                                                 cx,
-                                                "PERFORMER / MSEG & LFO MODULATION (MILESTONE 3)",
+                                                "MODSEQ / PERFORMER & LFO MODULATION (MILESTONE 3)",
                                             )
                                             .class("module-title")
                                             .font_family(vec![FamilyOwned::Name(String::from(
@@ -1768,35 +2118,22 @@ pub(crate) fn create(
                                 BottomTab::Routing => {
                                     VStack::new(cx, |cx| {
                                         HStack::new(cx, |cx| {
-                                            Label::new(
-                                                cx,
-                                                "SIGNAL FLOW & FILTER ROUTING MATRIX (MILESTONES 2-3)",
-                                            )
-                                            .class("module-title")
-                                            .font_family(vec![FamilyOwned::Name(String::from(
-                                                assets::NOTO_SANS,
-                                            ))])
-                                            .font_weight(FontWeightKeyword::Bold);
+                                            Label::new(cx, "ROUTING (M2)")
+                                                .class("module-title")
+                                                .font_family(vec![FamilyOwned::Name(String::from(
+                                                    assets::NOTO_SANS,
+                                                ))])
+                                                .font_weight(FontWeightKeyword::Bold);
                                         })
                                         .class("module-header")
                                         .height(Pixels(22.0))
                                         .width(Stretch(1.0));
 
-                                        HStack::new(cx, |cx| {
-                                            build_placeholder_bay(
-                                                cx,
-                                                "OSC 1-4 -> FILTER 1 / FILTER 2",
-                                                "SERIAL / PARALLEL FILTER BALANCE & FEEDBACK LOOP (M2)",
-                                            );
-                                            build_placeholder_bay(
-                                                cx,
-                                                "INSERT FX -> EQ -> MASTER BUS",
-                                                "PRE / POST FILTER INSERT ROUTING & VOICING (M2-3)",
-                                            );
-                                        })
-                                        .col_between(Pixels(8.0))
-                                        .width(Stretch(1.0))
-                                        .height(Stretch(1.0));
+                                        build_placeholder_bay(
+                                            cx,
+                                            "SERIAL / PARALLEL FILTER & INSERT ROUTING",
+                                            "OSC 1-4 + NOISE -> F1 / F2 -> FEEDBACK -> MASTER (M2)",
+                                        );
                                     })
                                     .class("hardware-module")
                                     .width(Stretch(1.0))
