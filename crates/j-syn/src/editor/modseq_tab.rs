@@ -675,8 +675,8 @@ pub(super) fn build_modseq_tab(
                                     "FREQ",
                                     false,
                                     accent,
-                                    32.0,
-                                    66.0,
+                                    42.0,
+                                    68.0,
                                 );
 
                                 build_knob_cell(
@@ -686,8 +686,8 @@ pub(super) fn build_modseq_tab(
                                     "SMOOTH",
                                     false,
                                     CORAL_RGB,
-                                    32.0,
-                                    66.0,
+                                    42.0,
+                                    68.0,
                                 );
                             }
                         })
@@ -716,8 +716,8 @@ pub(super) fn build_modseq_tab(
                                 "ATTACK",
                                 false,
                                 accent,
-                                34.0,
-                                68.0,
+                                46.0,
+                                74.0,
                             );
                             build_knob_cell(
                                 cx,
@@ -726,8 +726,8 @@ pub(super) fn build_modseq_tab(
                                 "DECAY",
                                 false,
                                 accent,
-                                34.0,
-                                68.0,
+                                46.0,
+                                74.0,
                             );
                             build_knob_cell(
                                 cx,
@@ -736,8 +736,8 @@ pub(super) fn build_modseq_tab(
                                 "SUSTAIN",
                                 false,
                                 GOLD_RGB,
-                                34.0,
-                                68.0,
+                                46.0,
+                                74.0,
                             );
                             build_knob_cell(
                                 cx,
@@ -746,8 +746,8 @@ pub(super) fn build_modseq_tab(
                                 "RELEASE",
                                 false,
                                 CORAL_RGB,
-                                34.0,
-                                68.0,
+                                46.0,
+                                74.0,
                             );
                         })
                         .col_between(Pixels(16.0))

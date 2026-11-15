@@ -104,7 +104,7 @@ fn build_insert_slot_row(
                     "DRIVE",
                     false,
                     accent,
-                    24.0,
+                    34.0,
                     ModDestination::insert_drive(slot_idx),
                     mod_ui.clone(),
                     0,

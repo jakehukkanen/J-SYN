@@ -2,6 +2,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::WavetableBank;
@@ -46,30 +47,62 @@ where
         .hoverable(false);
 }
 
-pub(super) fn build_param_readout_box<'a, L, Params, P, FMap>(
-    cx: &'a mut Context,
-    params: L,
-    params_to_param: FMap,
-) -> Handle<'a, HStack>
-where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    HStack::new(
-        cx,
-        ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
-            let readout_lens = param_data.make_lens(|param| {
-                param.normalized_value_to_string(param.modulated_normalized_value(), true)
-            });
-            bold_label(cx, readout_lens, "knob-readout-text")
-                .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .child_space(Stretch(1.0));
-        }),
-    )
-    .class("knob-readout-box")
+pub(super) struct ScrollDropdown {
+    scroll_accum: f32,
+    last_sign: f32,
+    last_step: Instant,
+    on_step: Box<dyn Fn(&mut EventContext, isize) + Send + Sync>,
+}
+
+impl ScrollDropdown {
+    fn new<'a, F, B>(cx: &'a mut Context, on_step: F, build_inner: B) -> Handle<'a, Self>
+    where
+        F: Fn(&mut EventContext, isize) + Send + Sync + 'static,
+        B: FnOnce(&mut Context) -> Handle<'_, Dropdown>,
+    {
+        Self {
+            scroll_accum: 0.0,
+            last_sign: 0.0,
+            last_step: Instant::now() - Duration::from_millis(100),
+            on_step: Box::new(on_step),
+        }
+        .build(cx, |cx| {
+            build_inner(cx).width(Stretch(1.0)).height(Stretch(1.0));
+        })
+    }
+}
+
+impl View for ScrollDropdown {
+    fn element(&self) -> Option<&'static str> {
+        Some("scroll-dropdown")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| {
+            if let WindowEvent::MouseScroll(_x, y) = window_event {
+                if *y == 0.0 {
+                    return;
+                }
+                let sign = y.signum();
+                if self.last_sign != 0.0 && sign != self.last_sign {
+                    self.scroll_accum = 0.0;
+                }
+                self.last_sign = sign;
+                self.scroll_accum += *y;
+
+                let now = Instant::now();
+                if self.scroll_accum.abs() >= 0.8
+                    && now.duration_since(self.last_step) >= Duration::from_millis(40)
+                {
+                    let delta = if self.scroll_accum < 0.0 { 1 } else { -1 };
+                    (self.on_step)(cx, delta);
+                    self.scroll_accum = 0.0;
+                    self.last_step = now;
+                }
+                meta.consume();
+            }
+        });
+    }
 }
 
 pub(super) fn build_enum_dropdown<'a, E, P, FMap>(
@@ -78,46 +111,68 @@ pub(super) fn build_enum_dropdown<'a, E, P, FMap>(
     gui_context: Arc<dyn GuiContext>,
     params_to_param: FMap,
     items: &'static [(&'static str, E)],
-) -> Handle<'a, Dropdown>
+) -> Handle<'a, ScrollDropdown>
 where
     E: Enum + Copy + PartialEq + Send + Sync + 'static,
     P: Param<Plain = E> + 'static,
     FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
 {
-    Dropdown::new(
+    let p_scroll = params.clone();
+    let g_scroll = gui_context.clone();
+    ScrollDropdown::new(
         cx,
-        move |cx| {
-            HStack::new(
-                cx,
-                ParamWidgetBase::build_view(
-                    UiData::params,
-                    params_to_param,
-                    move |cx, param_data| {
-                        let text_lens = param_data.make_lens(|param| {
-                            param.normalized_value_to_string(
-                                param.modulated_normalized_value(),
-                                true,
-                            )
-                        });
-                        build_dropdown_trigger_labels(cx, text_lens);
-                    },
-                ),
-            )
-            .height(Stretch(1.0))
+        move |_cx, delta| {
+            if items.is_empty() {
+                return;
+            }
+            let param = params_to_param(&p_scroll);
+            let cur = param.unmodulated_plain_value();
+            let pos = items.iter().position(|&(_, v)| v == cur).unwrap_or(0);
+            let next = (pos as isize + delta).clamp(0, items.len() as isize - 1) as usize;
+            if next != pos {
+                let setter = ParamSetter::new(g_scroll.as_ref());
+                setter.begin_set_parameter(param);
+                setter.set_parameter(param, items[next].1);
+                setter.end_set_parameter(param);
+            }
         },
         move |cx| {
-            for &(label, val) in items {
-                let p_ref = params.clone();
-                let gui_ctx = gui_context.clone();
-                bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                    let setter = ParamSetter::new(gui_ctx.as_ref());
-                    let param = params_to_param(&p_ref);
-                    setter.begin_set_parameter(param);
-                    setter.set_parameter(param, val);
-                    setter.end_set_parameter(param);
-                    cx.emit(PopupEvent::Close);
-                });
-            }
+            Dropdown::new(
+                cx,
+                move |cx| {
+                    HStack::new(
+                        cx,
+                        ParamWidgetBase::build_view(
+                            UiData::params,
+                            params_to_param,
+                            move |cx, param_data| {
+                                let text_lens = param_data.make_lens(|param| {
+                                    param.normalized_value_to_string(
+                                        param.modulated_normalized_value(),
+                                        true,
+                                    )
+                                });
+                                build_dropdown_trigger_labels(cx, text_lens);
+                            },
+                        ),
+                    )
+                    .height(Stretch(1.0))
+                },
+                move |cx| {
+                    for &(label, val) in items {
+                        let p_ref = params.clone();
+                        let gui_ctx = gui_context.clone();
+                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                            let setter = ParamSetter::new(gui_ctx.as_ref());
+                            let param = params_to_param(&p_ref);
+                            setter.begin_set_parameter(param);
+                            setter.set_parameter(param, val);
+                            setter.end_set_parameter(param);
+                            cx.emit(PopupEvent::Close);
+                        });
+                    }
+                },
+            )
         },
     )
 }
@@ -129,46 +184,68 @@ pub(super) fn build_bool_dropdown<'a, P, FMap>(
     params_to_param: FMap,
     false_label: &'static str,
     true_label: &'static str,
-) -> Handle<'a, Dropdown>
+) -> Handle<'a, ScrollDropdown>
 where
     P: Param<Plain = bool> + 'static,
     FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
 {
-    Dropdown::new(
+    let p_scroll = params.clone();
+    let g_scroll = gui_context.clone();
+    ScrollDropdown::new(
         cx,
-        move |cx| {
-            HStack::new(
-                cx,
-                ParamWidgetBase::build_view(
-                    UiData::params,
-                    params_to_param,
-                    move |cx, param_data| {
-                        let text_lens = param_data.make_lens(move |param| {
-                            if param.modulated_normalized_value() >= 0.5 {
-                                true_label.to_string()
-                            } else {
-                                false_label.to_string()
-                            }
-                        });
-                        build_dropdown_trigger_labels(cx, text_lens);
-                    },
-                ),
-            )
-            .height(Stretch(1.0))
+        move |_cx, delta| {
+            let param = params_to_param(&p_scroll);
+            let cur = if param.unmodulated_plain_value() {
+                1isize
+            } else {
+                0isize
+            };
+            let next = (cur + delta).clamp(0, 1);
+            if next != cur {
+                let setter = ParamSetter::new(g_scroll.as_ref());
+                setter.begin_set_parameter(param);
+                setter.set_parameter(param, next == 1);
+                setter.end_set_parameter(param);
+            }
         },
         move |cx| {
-            for &(label, val) in &[(false_label, false), (true_label, true)] {
-                let p_ref = params.clone();
-                let gui_ctx = gui_context.clone();
-                bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                    let setter = ParamSetter::new(gui_ctx.as_ref());
-                    let param = params_to_param(&p_ref);
-                    setter.begin_set_parameter(param);
-                    setter.set_parameter(param, val);
-                    setter.end_set_parameter(param);
-                    cx.emit(PopupEvent::Close);
-                });
-            }
+            Dropdown::new(
+                cx,
+                move |cx| {
+                    HStack::new(
+                        cx,
+                        ParamWidgetBase::build_view(
+                            UiData::params,
+                            params_to_param,
+                            move |cx, param_data| {
+                                let text_lens = param_data.make_lens(move |param| {
+                                    if param.modulated_normalized_value() >= 0.5 {
+                                        true_label.to_string()
+                                    } else {
+                                        false_label.to_string()
+                                    }
+                                });
+                                build_dropdown_trigger_labels(cx, text_lens);
+                            },
+                        ),
+                    )
+                    .height(Stretch(1.0))
+                },
+                move |cx| {
+                    for &(label, val) in &[(false_label, false), (true_label, true)] {
+                        let p_ref = params.clone();
+                        let gui_ctx = gui_context.clone();
+                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                            let setter = ParamSetter::new(gui_ctx.as_ref());
+                            let param = params_to_param(&p_ref);
+                            setter.begin_set_parameter(param);
+                            setter.set_parameter(param, val);
+                            setter.end_set_parameter(param);
+                            cx.emit(PopupEvent::Close);
+                        });
+                    }
+                },
+            )
         },
     )
 }
@@ -179,7 +256,7 @@ pub(super) fn build_wavetable_dropdown(
     bank: Arc<WavetableBank>,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
-) -> Handle<'_, Dropdown> {
+) -> Handle<'_, ScrollDropdown> {
     const WT_ITEMS: &[(&str, WavetableChoice)] = &[
         ("Basic Shapes", WavetableChoice::BasicShapes),
         ("Digital Formant", WavetableChoice::DigitalFormant),
@@ -188,114 +265,160 @@ pub(super) fn build_wavetable_dropdown(
         ("Custom .WAV", WavetableChoice::Custom),
     ];
     let dialog_open = Arc::new(AtomicBool::new(false));
+    let p_scroll = params.clone();
+    let g_scroll = gui_context.clone();
 
-    Dropdown::new(
+    ScrollDropdown::new(
         cx,
-        move |cx| {
-            HStack::new(
-                cx,
-                ParamWidgetBase::build_view(
-                    UiData::params,
-                    move |p| &p.oscs[osc_idx].wt_select,
-                    move |cx, param_data| {
-                        let text_lens = param_data.make_lens(|param| {
-                            param.normalized_value_to_string(
-                                param.modulated_normalized_value(),
-                                true,
-                            )
-                        });
-                        build_dropdown_trigger_labels(cx, text_lens);
-                    },
-                ),
-            )
-            .height(Stretch(1.0))
+        move |_cx, delta| {
+            let param = &p_scroll.oscs[osc_idx].wt_select;
+            let cur = param.value();
+            let pos = WT_ITEMS.iter().position(|&(_, v)| v == cur).unwrap_or(0);
+            let next = (pos as isize + delta).clamp(0, WT_ITEMS.len() as isize - 1) as usize;
+            if next != pos {
+                let setter = ParamSetter::new(g_scroll.as_ref());
+                setter.begin_set_parameter(param);
+                setter.set_parameter(param, WT_ITEMS[next].1);
+                setter.end_set_parameter(param);
+            }
         },
         move |cx| {
-            for &(label, val) in WT_ITEMS {
-                let p_ref = params.clone();
-                let gui_ctx = gui_context.clone();
-                bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                    let setter = ParamSetter::new(gui_ctx.as_ref());
-                    let param = &p_ref.oscs[osc_idx].wt_select;
-                    setter.begin_set_parameter(param);
-                    setter.set_parameter(param, val);
-                    setter.end_set_parameter(param);
-                    cx.emit(PopupEvent::Close);
-                });
-            }
+            Dropdown::new(
+                cx,
+                move |cx| {
+                    HStack::new(
+                        cx,
+                        ParamWidgetBase::build_view(
+                            UiData::params,
+                            move |p| &p.oscs[osc_idx].wt_select,
+                            move |cx, param_data| {
+                                let text_lens = param_data.make_lens(|param| {
+                                    param.normalized_value_to_string(
+                                        param.modulated_normalized_value(),
+                                        true,
+                                    )
+                                });
+                                build_dropdown_trigger_labels(cx, text_lens);
+                            },
+                        ),
+                    )
+                    .height(Stretch(1.0))
+                },
+                move |cx| {
+                    for &(label, val) in WT_ITEMS {
+                        let p_ref = params.clone();
+                        let gui_ctx = gui_context.clone();
+                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                            let setter = ParamSetter::new(gui_ctx.as_ref());
+                            let param = &p_ref.oscs[osc_idx].wt_select;
+                            setter.begin_set_parameter(param);
+                            setter.set_parameter(param, val);
+                            setter.end_set_parameter(param);
+                            cx.emit(PopupEvent::Close);
+                        });
+                    }
 
-            let bank_ref = bank.clone();
-            let p_ref = params.clone();
-            let gui_ctx = gui_context.clone();
-            let dialog_flag_ref = dialog_open.clone();
-            bold_label(cx, "Load .WAV...", "dropdown-action-item").on_press(move |cx| {
-                cx.emit(PopupEvent::Close);
-                if !dialog_flag_ref.swap(true, Ordering::AcqRel) {
-                    let bank = bank_ref.clone();
-                    let params = p_ref.clone();
-                    let gui_context = gui_ctx.clone();
-                    let dialog_flag = dialog_flag_ref.clone();
+                    let bank_ref = bank.clone();
+                    let p_ref = params.clone();
+                    let gui_ctx = gui_context.clone();
+                    let dialog_flag_ref = dialog_open.clone();
+                    bold_label(cx, "Load .WAV...", "dropdown-action-item").on_press(move |cx| {
+                        cx.emit(PopupEvent::Close);
+                        if !dialog_flag_ref.swap(true, Ordering::AcqRel) {
+                            let bank = bank_ref.clone();
+                            let params = p_ref.clone();
+                            let gui_context = gui_ctx.clone();
+                            let dialog_flag = dialog_flag_ref.clone();
 
-                    std::thread::spawn(move || {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("WAV Audio", &["wav", "WAV"])
-                            .pick_file()
-                        {
-                            if let Ok(wt) = j_syn_dsp::Wavetable::load_from_wav(&path) {
-                                bank.swap_custom(osc_idx, Arc::new(wt));
-                                if let Ok(mut guard) = params.wavetable_paths.lock() {
-                                    guard[osc_idx] = path.to_string_lossy().into_owned();
+                            std::thread::spawn(move || {
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .add_filter("WAV Audio", &["wav", "WAV"])
+                                    .pick_file()
+                                {
+                                    if let Ok(wt) = j_syn_dsp::Wavetable::load_from_wav(&path) {
+                                        bank.swap_custom(osc_idx, Arc::new(wt));
+                                        if let Ok(mut guard) = params.wavetable_paths.lock() {
+                                            guard[osc_idx] =
+                                                path.to_string_lossy().into_owned();
+                                        }
+                                        let setter = ParamSetter::new(gui_context.as_ref());
+                                        setter.begin_set_parameter(
+                                            &params.oscs[osc_idx].wt_select,
+                                        );
+                                        setter.set_parameter(
+                                            &params.oscs[osc_idx].wt_select,
+                                            WavetableChoice::Custom,
+                                        );
+                                        setter
+                                            .end_set_parameter(&params.oscs[osc_idx].wt_select);
+                                    }
                                 }
-                                let setter = ParamSetter::new(gui_context.as_ref());
-                                setter.begin_set_parameter(&params.oscs[osc_idx].wt_select);
-                                setter.set_parameter(
-                                    &params.oscs[osc_idx].wt_select,
-                                    WavetableChoice::Custom,
-                                );
-                                setter.end_set_parameter(&params.oscs[osc_idx].wt_select);
-                            }
+                                dialog_flag.store(false, Ordering::Release);
+                            });
                         }
-                        dialog_flag.store(false, Ordering::Release);
                     });
-                }
-            });
+                },
+            )
         },
     )
 }
 
 pub(super) fn build_ui_scale_dropdown(cx: &mut Context) {
+    const SCALE_ITEMS: &[(&str, u32, f64)] = &[
+        ("85%", 85_u32, 0.85_f64),
+        ("100%", 100_u32, 1.0_f64),
+        ("115%", 115_u32, 1.15_f64),
+        ("125%", 125_u32, 1.25_f64),
+    ];
+
     VStack::new(cx, |cx| {
         bold_label(cx, "UI SCALE", "mini-label")
             .width(Stretch(1.0))
             .height(Pixels(13.0))
             .child_space(Stretch(1.0));
 
-        Dropdown::new(
+        ScrollDropdown::new(
             cx,
-            |cx| {
-                HStack::new(cx, move |cx| {
-                    build_dropdown_trigger_labels(
-                        cx,
-                        UiData::ui_scale_pct.map(|pct| format!("{pct}%")),
-                    );
-                })
-                .height(Stretch(1.0))
-            },
-            move |cx| {
-                for &(label, pct, factor) in &[
-                    ("85%", 85_u32, 0.85_f64),
-                    ("100%", 100_u32, 1.0_f64),
-                    ("115%", 115_u32, 1.15_f64),
-                    ("125%", 125_u32, 1.25_f64),
-                ] {
-                    bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                        cx.set_user_scale_factor(factor);
-                        cx.emit(UiEvent::SetUiScale(pct));
-                        cx.emit(PopupEvent::Close);
-                        #[cfg(target_os = "macos")]
-                        super::notify_baseview_resize_macos();
-                    });
+            move |cx, delta| {
+                let cur_pct = UiData::ui_scale_pct.get(cx);
+                let pos = SCALE_ITEMS
+                    .iter()
+                    .position(|&(_, pct, _)| pct == cur_pct)
+                    .unwrap_or(1);
+                let next =
+                    (pos as isize + delta).clamp(0, SCALE_ITEMS.len() as isize - 1) as usize;
+                if next != pos {
+                    let (_, pct, factor) = SCALE_ITEMS[next];
+                    cx.set_user_scale_factor(factor);
+                    cx.emit(UiEvent::SetUiScale(pct));
+                    #[cfg(target_os = "macos")]
+                    super::notify_baseview_resize_macos();
                 }
+            },
+            |cx| {
+                Dropdown::new(
+                    cx,
+                    |cx| {
+                        HStack::new(cx, move |cx| {
+                            build_dropdown_trigger_labels(
+                                cx,
+                                UiData::ui_scale_pct.map(|pct| format!("{pct}%")),
+                            );
+                        })
+                        .height(Stretch(1.0))
+                    },
+                    move |cx| {
+                        for &(label, pct, factor) in SCALE_ITEMS {
+                            bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                                cx.set_user_scale_factor(factor);
+                                cx.emit(UiEvent::SetUiScale(pct));
+                                cx.emit(PopupEvent::Close);
+                                #[cfg(target_os = "macos")]
+                                super::notify_baseview_resize_macos();
+                            });
+                        }
+                    },
+                )
             },
         )
         .width(Pixels(60.0))
@@ -347,36 +470,25 @@ fn build_header_knob_cell_inner<L, Params, P, FMap>(
     HStack::new(cx, move |cx| {
         build_rotary_knob_with_opt_mod(
             cx,
-            params.clone(),
+            params,
             params_to_param,
             bipolar,
             accent_rgb,
-            mod_target.clone(),
+            mod_target,
         )
-        .width(Pixels(30.0))
-        .height(Pixels(30.0))
+        .width(Pixels(36.0))
+        .height(Pixels(36.0))
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
 
-        VStack::new(cx, move |cx| {
-            bold_label(cx, title, "knob-title")
-                .width(Stretch(1.0))
-                .height(Pixels(11.0))
-                .child_top(Stretch(1.0))
-                .child_bottom(Stretch(1.0));
-
-            build_param_readout_box(cx, params, params_to_param)
-                .width(Pixels(52.0))
-                .height(Pixels(15.0));
-        })
-        .width(Pixels(52.0))
-        .height(Auto)
-        .top(Stretch(1.0))
-        .bottom(Stretch(1.0))
-        .row_between(Pixels(1.0));
+        bold_label(cx, title, "knob-title")
+            .width(Pixels(46.0))
+            .height(Stretch(1.0))
+            .child_top(Stretch(1.0))
+            .child_bottom(Stretch(1.0));
     })
     .width(Auto)
-    .height(Pixels(34.0))
+    .height(Pixels(38.0))
     .col_between(Pixels(5.0));
 }
 
@@ -440,18 +552,12 @@ pub(super) fn build_knob_cell<L, Params, P, FMap>(
     VStack::new(cx, move |cx| {
         bold_label(cx, title, "knob-title")
             .width(Stretch(1.0))
-            .height(Pixels(13.0))
+            .height(Pixels(14.0))
             .child_space(Stretch(1.0));
 
-        build_rotary_knob_with_opt_mod(cx, params.clone(), params_to_param, bipolar, accent_rgb, None)
+        build_rotary_knob_with_opt_mod(cx, params, params_to_param, bipolar, accent_rgb, None)
             .width(Pixels(knob_sz))
             .height(Pixels(knob_sz))
-            .left(Stretch(1.0))
-            .right(Stretch(1.0));
-
-        build_param_readout_box(cx, params, params_to_param)
-            .width(Pixels(cell_w - 4.0))
-            .height(Pixels(17.0))
             .left(Stretch(1.0))
             .right(Stretch(1.0));
     })
@@ -481,12 +587,12 @@ pub(super) fn build_flex_knob_cell_mod<L, Params, P, FMap>(
     VStack::new(cx, move |cx| {
         bold_label(cx, title, "knob-title")
             .width(Stretch(1.0))
-            .height(Pixels(12.0))
+            .height(Pixels(14.0))
             .child_space(Stretch(1.0));
 
         build_rotary_knob_with_opt_mod(
             cx,
-            params.clone(),
+            params,
             params_to_param,
             bipolar,
             accent_rgb,
@@ -496,15 +602,11 @@ pub(super) fn build_flex_knob_cell_mod<L, Params, P, FMap>(
         .height(Pixels(knob_sz))
         .left(Stretch(1.0))
         .right(Stretch(1.0));
-
-        build_param_readout_box(cx, params, params_to_param)
-            .width(Stretch(1.0))
-            .height(Pixels(15.0));
     })
     .class("knob-cell")
     .width(Stretch(1.0))
     .height(Auto)
-    .row_between(Pixels(1.0));
+    .row_between(Pixels(2.0));
 }
 
 pub(super) fn build_mini_pill_cell<L, Params, P, FMap>(
@@ -553,7 +655,7 @@ fn build_flex_pill_cell_inner<L, Params, P, FMap>(
     VStack::new(cx, move |cx| {
         bold_label(cx, title, "mini-label")
             .width(Stretch(1.0))
-            .height(Pixels(10.0))
+            .height(Pixels(12.0))
             .child_space(Stretch(1.0));
 
         let handle = match mod_target.clone() {

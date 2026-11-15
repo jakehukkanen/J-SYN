@@ -107,22 +107,26 @@ label {
 }
 
 .knob-title {
-  font-size: 9;
+  font-size: 10;
   font-weight: bold;
   color: #eee1d3;
 }
 
-.knob-readout-box {
-  background-color: #211c18;
+.knob-tooltip {
+  background-color: #1c1713;
   border-width: 1px;
-  border-color: #493e36;
-  border-radius: 3px;
+  border-color: #f5b349;
+  border-radius: 4px;
+  child-left: 6px;
+  child-right: 6px;
+  child-top: 2px;
+  child-bottom: 2px;
 }
 
-.knob-readout-text {
-  font-size: 9;
+.knob-tooltip-text {
+  font-size: 11;
   font-weight: bold;
-  color: #ffd382;
+  color: #fff3dc;
 }
 
 .compact-pill {
@@ -142,7 +146,7 @@ label {
 }
 
 .compact-pill-text {
-  font-size: 9;
+  font-size: 10;
   font-weight: bold;
   color: #ffd382;
 }
@@ -221,7 +225,7 @@ dropdown popup {
 }
 
 .switch-label {
-  font-size: 9;
+  font-size: 10;
   font-weight: bold;
   color: #e8dacb;
 }
@@ -231,7 +235,7 @@ led-toggle:checked .switch-label {
 }
 
 .mini-label {
-  font-size: 9;
+  font-size: 10;
   font-weight: bold;
   color: #bfa994;
 }
@@ -266,7 +270,7 @@ led-toggle:checked .switch-label {
 }
 
 .tab-btn-label {
-  font-size: 9;
+  font-size: 10;
   font-weight: bold;
   color: #cbb9a6;
 }

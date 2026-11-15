@@ -86,5 +86,5 @@ pub(super) fn build_noise_panel(
     .child_top(Stretch(1.0))
     .child_bottom(Stretch(1.0))
     .width(Stretch(1.0))
-    .height(Pixels(44.0));
+    .height(Pixels(48.0));
 }

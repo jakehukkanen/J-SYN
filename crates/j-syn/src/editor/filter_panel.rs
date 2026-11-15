@@ -255,7 +255,7 @@ fn build_filter_aux_knob_cell(
     accent_rgb: (u8, u8, u8),
     knob_sz: f32,
 ) {
-    let params_for_readout = params.clone();
+    let params_for_tt = params.clone();
     VStack::new(cx, move |cx| {
         HStack::new(
             cx,
@@ -267,15 +267,16 @@ fn build_filter_aux_knob_cell(
                         param_data.make_lens(|param| aux_label_for_mode(param.value()).to_string());
                     bold_label(cx, title_lens, "knob-title")
                         .width(Stretch(1.0))
-                        .height(Pixels(12.0))
+                        .height(Pixels(14.0))
                         .child_space(Stretch(1.0));
                 },
             ),
         )
         .width(Stretch(1.0))
-        .height(Pixels(12.0));
+        .height(Pixels(14.0));
 
-        RotaryKnob::new_with_mod(
+        let p_tt = params_for_tt.clone();
+        RotaryKnob::new_with_mod_formatter(
             cx,
             UiData::params,
             move |p| &p.filters[filter_idx].aux,
@@ -284,54 +285,35 @@ fn build_filter_aux_knob_cell(
             ModDestination::filter_aux(filter_idx),
             mod_ui,
             0,
+            Arc::new(move |aux_param| {
+                let mode = p_tt.filters[filter_idx].mode.value();
+                if matches!(
+                    mode,
+                    FilterModeParam::HpPeak
+                        | FilterModeParam::HpNotch
+                        | FilterModeParam::LpNotch
+                        | FilterModeParam::LpPeak
+                ) {
+                    let hz =
+                        j_syn_dsp::filter::aux_to_freq2_hz(aux_param.modulated_plain_value());
+                    format_freq_hz(hz)
+                } else {
+                    aux_param.normalized_value_to_string(
+                        aux_param.modulated_normalized_value(),
+                        true,
+                    )
+                }
+            }),
         )
         .width(Pixels(knob_sz))
         .height(Pixels(knob_sz))
         .left(Stretch(1.0))
         .right(Stretch(1.0));
-
-        HStack::new(
-            cx,
-            ParamWidgetBase::build_view(
-                UiData::params,
-                move |p| &p.filters[filter_idx].aux,
-                move |cx, param_data| {
-                    let p_ref = params_for_readout.clone();
-                    let readout_lens = param_data.make_lens(move |aux_param| {
-                        let mode = p_ref.filters[filter_idx].mode.value();
-                        if matches!(
-                            mode,
-                            FilterModeParam::HpPeak
-                                | FilterModeParam::HpNotch
-                                | FilterModeParam::LpNotch
-                                | FilterModeParam::LpPeak
-                        ) {
-                            let hz = j_syn_dsp::filter::aux_to_freq2_hz(
-                                aux_param.modulated_plain_value(),
-                            );
-                            format_freq_hz(hz)
-                        } else {
-                            aux_param.normalized_value_to_string(
-                                aux_param.modulated_normalized_value(),
-                                true,
-                            )
-                        }
-                    });
-                    bold_label(cx, readout_lens, "knob-readout-text")
-                        .width(Stretch(1.0))
-                        .height(Stretch(1.0))
-                        .child_space(Stretch(1.0));
-                },
-            ),
-        )
-        .class("knob-readout-box")
-        .width(Stretch(1.0))
-        .height(Pixels(15.0));
     })
     .class("knob-cell")
     .width(Stretch(1.0))
     .height(Auto)
-    .row_between(Pixels(1.0));
+    .row_between(Pixels(2.0));
 }
 
 pub(super) fn build_filter_panel(
@@ -404,7 +386,7 @@ pub(super) fn build_filter_panel(
                     "CUTOFF",
                     false,
                     accent,
-                    32.0,
+                    44.0,
                     ModDestination::filter_cutoff(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -416,7 +398,7 @@ pub(super) fn build_filter_panel(
                     "RES",
                     false,
                     accent,
-                    32.0,
+                    44.0,
                     ModDestination::filter_res(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -428,7 +410,7 @@ pub(super) fn build_filter_panel(
                     "DRIVE",
                     false,
                     accent,
-                    32.0,
+                    44.0,
                     ModDestination::filter_drive(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -439,7 +421,7 @@ pub(super) fn build_filter_panel(
                     params.clone(),
                     mod_ui.clone(),
                     accent,
-                    32.0,
+                    44.0,
                 );
             }
         })

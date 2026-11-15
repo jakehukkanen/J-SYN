@@ -235,7 +235,7 @@ pub(super) fn build_osc_panel(
                 );
             })
             .col_between(Pixels(3.0))
-            .height(Pixels(28.0))
+            .height(Pixels(30.0))
             .width(Stretch(1.0));
 
             let ui_knobs = mod_ui.clone();
@@ -247,7 +247,7 @@ pub(super) fn build_osc_panel(
                     "WT POS",
                     false,
                     accent,
-                    36.0,
+                    46.0,
                     ModDestination::osc_wt_pos(osc_idx),
                     ui_knobs.clone(),
                     0,
@@ -259,7 +259,7 @@ pub(super) fn build_osc_panel(
                     "WARP",
                     false,
                     accent,
-                    36.0,
+                    46.0,
                     ModDestination::osc_warp(osc_idx),
                     ui_knobs.clone(),
                     0,
@@ -271,7 +271,7 @@ pub(super) fn build_osc_panel(
                     "MOD",
                     false,
                     accent,
-                    36.0,
+                    46.0,
                     ModDestination::osc_mod_depth(osc_idx),
                     ui_knobs.clone(),
                     0,
@@ -283,7 +283,7 @@ pub(super) fn build_osc_panel(
                     "PAN",
                     true,
                     accent,
-                    36.0,
+                    46.0,
                     ModDestination::osc_pan(osc_idx),
                     ui_knobs.clone(),
                     0,
@@ -295,7 +295,7 @@ pub(super) fn build_osc_panel(
                     "LEVEL",
                     false,
                     accent,
-                    36.0,
+                    46.0,
                     ModDestination::osc_level(osc_idx),
                     ui_knobs.clone(),
                     0,

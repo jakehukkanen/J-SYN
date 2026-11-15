@@ -74,11 +74,28 @@ impl Data for BottomTab {
     }
 }
 
+#[derive(Clone, PartialEq, Debug, Default)]
+pub(crate) struct TooltipState {
+    pub visible: bool,
+    pub text: String,
+    pub center_x: f32,
+    pub anchor_top: f32,
+    pub anchor_bottom: f32,
+}
+
+impl Data for TooltipState {
+    fn same(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
 pub(crate) enum UiEvent {
     SelectTab(BottomTab),
     SelectModSeqSubTab(ModSeqSubTab),
     ModUiChanged,
     SetUiScale(u32),
+    ShowTooltip(TooltipState),
+    HideTooltip,
 }
 
 #[derive(Lens)]
@@ -89,6 +106,7 @@ pub(crate) struct UiData {
     pub modseq_subtab: ModSeqSubTab,
     pub mod_ui_rev: u64,
     pub ui_scale_pct: u32,
+    pub tooltip: TooltipState,
 }
 
 impl Model for UiData {
@@ -97,10 +115,12 @@ impl Model for UiData {
             UiEvent::SelectTab(tab) => {
                 self.active_tab = *tab;
                 self.mod_ui.set_active_tab(*tab);
+                self.tooltip.visible = false;
                 meta.consume();
             }
             UiEvent::SelectModSeqSubTab(sub) => {
                 self.modseq_subtab = *sub;
+                self.tooltip.visible = false;
                 meta.consume();
             }
             UiEvent::ModUiChanged => {
@@ -109,6 +129,14 @@ impl Model for UiData {
             }
             UiEvent::SetUiScale(pct) => {
                 self.ui_scale_pct = *pct;
+                meta.consume();
+            }
+            UiEvent::ShowTooltip(state) => {
+                self.tooltip = state.clone();
+                meta.consume();
+            }
+            UiEvent::HideTooltip => {
+                self.tooltip.visible = false;
                 meta.consume();
             }
         });
@@ -395,8 +423,8 @@ fn build_bottom_tabs(
                                     "ATTACK",
                                     false,
                                     AMBER_RGB,
-                                    36.0,
-                                    72.0,
+                                    48.0,
+                                    78.0,
                                 );
                                 build_knob_cell(
                                     cx,
@@ -405,8 +433,8 @@ fn build_bottom_tabs(
                                     "DECAY",
                                     false,
                                     AMBER_RGB,
-                                    36.0,
-                                    72.0,
+                                    48.0,
+                                    78.0,
                                 );
                                 build_knob_cell(
                                     cx,
@@ -415,8 +443,8 @@ fn build_bottom_tabs(
                                     "SUSTAIN",
                                     false,
                                     GOLD_RGB,
-                                    36.0,
-                                    72.0,
+                                    48.0,
+                                    78.0,
                                 );
                                 build_knob_cell(
                                     cx,
@@ -425,8 +453,8 @@ fn build_bottom_tabs(
                                     "RELEASE",
                                     false,
                                     CORAL_RGB,
-                                    36.0,
-                                    72.0,
+                                    48.0,
+                                    78.0,
                                 );
                             })
                             .col_between(Pixels(22.0))
@@ -452,8 +480,8 @@ fn build_bottom_tabs(
                                     "F1 KEYTRK",
                                     false,
                                     AMBER_RGB,
-                                    32.0,
-                                    66.0,
+                                    44.0,
+                                    72.0,
                                 );
                                 build_knob_cell(
                                     cx,
@@ -462,8 +490,8 @@ fn build_bottom_tabs(
                                     "F2 KEYTRK",
                                     false,
                                     CORAL_RGB,
-                                    32.0,
-                                    66.0,
+                                    44.0,
+                                    72.0,
                                 );
 
                                 VStack::new(cx, |cx| {
@@ -602,6 +630,7 @@ pub(crate) fn create(
             modseq_subtab: ModSeqSubTab::MSeq(0),
             mod_ui_rev: 0,
             ui_scale_pct: initial_scale_pct,
+            tooltip: TooltipState::default(),
         }
         .build(cx);
 
@@ -654,6 +683,40 @@ pub(crate) fn create(
             .class("main-chassis")
             .width(Stretch(1.0))
             .height(Stretch(1.0));
+
+            // Global floating value tooltip overlay
+            HStack::new(cx, |cx| {
+                HStack::new(cx, |cx| {
+                    bold_label(cx, UiData::tooltip.map(|tt| tt.text.clone()), "knob-tooltip-text")
+                        .width(Auto)
+                        .height(Stretch(1.0))
+                        .child_space(Stretch(1.0))
+                        .hoverable(false);
+                })
+                .class("knob-tooltip")
+                .width(Auto)
+                .height(Pixels(20.0))
+                .hoverable(false);
+            })
+            .position_type(PositionType::SelfDirected)
+            .left(UiData::tooltip.map(|tt| {
+                Pixels((tt.center_x - 64.0).clamp(4.0, BASE_WIDTH as f32 - 132.0))
+            }))
+            .top(UiData::tooltip.map(|tt| {
+                let top_y = if tt.anchor_top >= 26.0 {
+                    tt.anchor_top - 24.0
+                } else {
+                    (tt.anchor_bottom + 4.0).min(BASE_HEIGHT as f32 - 24.0)
+                };
+                Pixels(top_y)
+            }))
+            .child_left(Stretch(1.0))
+            .child_right(Stretch(1.0))
+            .width(Pixels(128.0))
+            .height(Pixels(20.0))
+            .z_index(300)
+            .display(UiData::tooltip.map(|tt| tt.visible))
+            .hoverable(false);
         })
         .class("plugin-root")
         .width(Stretch(1.0))

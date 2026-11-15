@@ -13,7 +13,9 @@ use nih_plug_vizia::widgets::RawParamEvent;
 
 use super::controls::bold_label;
 use super::mod_bar::ModUiState;
-use super::UiEvent;
+use super::{TooltipState, UiEvent};
+
+pub(super) type ValueFormatter = Arc<dyn Fn(&ParamWidgetBase) -> String + Send + Sync>;
 
 const KNOB_DRAG_PIXELS: f32 = 150.0;
 const KNOB_FINE_MULTIPLIER: f32 = 0.12;
@@ -71,9 +73,11 @@ pub struct RotaryKnob {
     drag_state: Option<DragState>,
     mod_depth_drag: Option<ModDepthDrag>,
     scrolled_lines: f32,
+    hovered: bool,
     bipolar: bool,
     accent_rgb: (u8, u8, u8),
     mod_binding: Option<ModTargetBinding>,
+    value_formatter: Option<ValueFormatter>,
 }
 
 impl RotaryKnob {
@@ -90,7 +94,7 @@ impl RotaryKnob {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
-        Self::build_inner(cx, params, params_to_param, bipolar, accent_rgb, None)
+        Self::build_inner(cx, params, params_to_param, bipolar, accent_rgb, None, None)
     }
 
     pub fn new_with_mod<'a, L, Params, P, FMap>(
@@ -120,6 +124,39 @@ impl RotaryKnob {
                 mod_ui,
                 tab_tag,
             }),
+            None,
+        )
+    }
+
+    pub fn new_with_mod_formatter<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        bipolar: bool,
+        accent_rgb: (u8, u8, u8),
+        dest: ModDestination,
+        mod_ui: Arc<ModUiState>,
+        tab_tag: u8,
+        value_formatter: ValueFormatter,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self::build_inner(
+            cx,
+            params,
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            Some(ModTargetBinding {
+                dest,
+                mod_ui,
+                tab_tag,
+            }),
+            Some(value_formatter),
         )
     }
 
@@ -130,6 +167,7 @@ impl RotaryKnob {
         bipolar: bool,
         accent_rgb: (u8, u8, u8),
         mod_binding: Option<ModTargetBinding>,
+        value_formatter: Option<ValueFormatter>,
     ) -> Handle<'a, Self>
     where
         L: Lens<Target = Params> + Clone,
@@ -143,9 +181,11 @@ impl RotaryKnob {
             drag_state: None,
             mod_depth_drag: None,
             scrolled_lines: 0.0,
+            hovered: false,
             bipolar,
             accent_rgb,
             mod_binding,
+            value_formatter,
         }
         .build(
             cx,
@@ -158,6 +198,34 @@ impl RotaryKnob {
                 });
             }),
         )
+    }
+
+    fn format_tooltip_text(&self) -> String {
+        if let Some(md) = self.mod_depth_drag {
+            format!("Mod: {:+.0}%", md.start_depth * 100.0)
+        } else if let Some(ref fmt) = self.value_formatter {
+            fmt(&self.param_base)
+        } else {
+            self.param_base.normalized_value_to_string(
+                self.param_base.modulated_normalized_value(),
+                true,
+            )
+        }
+    }
+
+    fn emit_tooltip(&self, cx: &mut EventContext) {
+        let bounds = cx.bounds();
+        if bounds.w <= 0.0 || bounds.h <= 0.0 {
+            return;
+        }
+        let dpx = cx.scale_factor().max(0.1);
+        cx.emit(UiEvent::ShowTooltip(TooltipState {
+            visible: true,
+            text: self.format_tooltip_text(),
+            center_x: (bounds.x + bounds.w * 0.5) / dpx,
+            anchor_top: bounds.y / dpx,
+            anchor_bottom: (bounds.y + bounds.h) / dpx,
+        }));
     }
 
     fn reset_to_default(&mut self, cx: &mut EventContext) {
@@ -176,6 +244,9 @@ impl RotaryKnob {
         self.param_base.begin_set_parameter(cx);
         self.param_base.set_normalized_value(cx, target);
         self.param_base.end_set_parameter(cx);
+        if self.hovered {
+            self.emit_tooltip(cx);
+        }
         cx.needs_redraw();
     }
 }
@@ -188,11 +259,26 @@ impl View for RotaryKnob {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|raw_param_event, _| {
             if let RawParamEvent::ParametersChanged = raw_param_event {
+                if self.hovered || self.drag_active {
+                    self.emit_tooltip(cx);
+                }
                 cx.needs_redraw();
             }
         });
 
         event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseOver => {
+                self.hovered = true;
+                self.emit_tooltip(cx);
+                cx.needs_redraw();
+            }
+            WindowEvent::MouseOut => {
+                self.hovered = false;
+                if !self.drag_active && self.mod_depth_drag.is_none() {
+                    cx.emit(UiEvent::HideTooltip);
+                }
+                cx.needs_redraw();
+            }
             WindowEvent::MouseDown(MouseButton::Left)
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
                 if cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL) {
@@ -219,6 +305,7 @@ impl View for RotaryKnob {
                             cx.focus();
                             cx.set_active(true);
                             cx.emit(UiEvent::ModUiChanged);
+                            self.emit_tooltip(cx);
                             cx.needs_redraw();
                             meta.consume();
                             return;
@@ -234,6 +321,7 @@ impl View for RotaryKnob {
                     start_y: cx.mouse().cursory,
                     start_val: self.param_base.unmodulated_normalized_value(),
                 });
+                self.emit_tooltip(cx);
                 cx.needs_redraw();
                 meta.consume();
             }
@@ -268,6 +356,11 @@ impl View for RotaryKnob {
                     self.mod_depth_drag = None;
                     cx.release();
                     cx.set_active(false);
+                    if self.hovered {
+                        self.emit_tooltip(cx);
+                    } else {
+                        cx.emit(UiEvent::HideTooltip);
+                    }
                     cx.needs_redraw();
                     meta.consume();
                 } else if self.drag_active {
@@ -276,12 +369,18 @@ impl View for RotaryKnob {
                     cx.release();
                     cx.set_active(false);
                     self.param_base.end_set_parameter(cx);
+                    if self.hovered {
+                        self.emit_tooltip(cx);
+                    } else {
+                        cx.emit(UiEvent::HideTooltip);
+                    }
                     cx.needs_redraw();
                     meta.consume();
                 }
             }
             WindowEvent::MouseMove(_x, y) => {
                 if handle_mod_depth_move(&mut self.mod_depth_drag, &self.mod_binding, cx, *y) {
+                    self.emit_tooltip(cx);
                     meta.consume();
                     return;
                 }
@@ -304,6 +403,7 @@ impl View for RotaryKnob {
                     state.start_y = *y;
                     state.start_val = new_val;
 
+                    self.emit_tooltip(cx);
                     cx.needs_redraw();
                     meta.consume();
                 }
@@ -325,6 +425,9 @@ impl View for RotaryKnob {
 
                     if !self.drag_active {
                         self.param_base.end_set_parameter(cx);
+                    }
+                    if self.hovered || self.drag_active {
+                        self.emit_tooltip(cx);
                     }
                     cx.needs_redraw();
                 }
