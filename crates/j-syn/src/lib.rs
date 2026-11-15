@@ -1214,7 +1214,7 @@ impl Default for JSynPluginParams {
 
 pub struct JSynPlugin {
     params: Arc<JSynPluginParams>,
-    engine: SynthEngine,
+    engine: Box<SynthEngine>,
     wavetable_bank: Arc<WavetableBank>,
 }
 
@@ -1222,7 +1222,7 @@ impl Default for JSynPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(JSynPluginParams::default()),
-            engine: SynthEngine::new(44100.0),
+            engine: Box::new(SynthEngine::new(44100.0)),
             wavetable_bank: Arc::new(WavetableBank::new()),
         }
     }
@@ -1533,6 +1533,62 @@ mod tests {
             param_map.len(),
             unique_ids.len(),
             "Duplicate plugin parameter IDs detected in JSynPluginParams"
+        );
+    }
+
+    #[test]
+    fn single_vizia_timer_and_fast_state_and_idle_processing() {
+        use std::time::{Duration, Instant};
+
+        // Boxing SynthEngine keeps JSynPlugin compact on the host stack during init/state save.
+        assert!(std::mem::size_of::<JSynPlugin>() <= 256);
+
+        let start_init = Instant::now();
+        let mut plugin = JSynPlugin::default();
+        assert!(
+            start_init.elapsed() < Duration::from_secs(2),
+            "JSynPlugin::default() took too long: {:?}",
+            start_init.elapsed()
+        );
+
+        // Verify persisted custom state (`mod_matrix`, `modseq_steps`) round-trips quickly via nih-plug.
+        let start_state = Instant::now();
+        let serialized = plugin.params.serialize_fields();
+        assert!(serialized.contains_key("mod_matrix"));
+        assert!(serialized.contains_key("modseq_steps"));
+
+        let restored = JSynPluginParams::default();
+        restored.deserialize_fields(&serialized);
+        let reserialized = restored.serialize_fields();
+        assert_eq!(reserialized.get("mod_matrix"), serialized.get("mod_matrix"));
+        assert_eq!(reserialized.get("modseq_steps"), serialized.get("modseq_steps"));
+        assert!(
+            start_state.elapsed() < Duration::from_secs(1),
+            "Plugin state serialize/deserialize round-trip took too long: {:?}",
+            start_state.elapsed()
+        );
+
+        // Verify idle processing with default FX slots and active-patch FX slots produces silence quickly.
+        let default_params = j_syn_dsp::SynthParams::default();
+        let mut patch_fx_params = j_syn_dsp::SynthParams::default();
+        for (slot_idx, slot) in patch_fx_params.fx_slots.iter_mut().enumerate() {
+            *slot = j_syn_dsp::fx::FxSlotParams::init_patch_slot(slot_idx);
+        }
+
+        let start_idle = Instant::now();
+        for _ in 0..4096 {
+            let (l, r) = plugin.engine.process_sample(&default_params, &plugin.wavetable_bank);
+            assert_eq!(l, 0.0);
+            assert_eq!(r, 0.0);
+        }
+        for _ in 0..4096 {
+            let (l, r) = plugin.engine.process_sample(&patch_fx_params, &plugin.wavetable_bank);
+            assert!(l.abs() < 1e-6 && r.abs() < 1e-6);
+        }
+        assert!(
+            start_idle.elapsed() < Duration::from_secs(1),
+            "Idle DSP processing took too long: {:?}",
+            start_idle.elapsed()
         );
     }
 }

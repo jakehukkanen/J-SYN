@@ -2,7 +2,6 @@
 //! with `▲`/`▼` slot swapping, `STACK 1..4` control, context-sensitive FX knobs, and live scopes).
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use j_syn_dsp::mod_matrix::{ModDestination, FX_SCOPE_LEN};
 use j_syn_dsp::{FxRackState, FxType};
@@ -375,14 +374,7 @@ impl JSatClipperScope {
             params,
             mod_ui,
         }
-        .build(cx, |cx| {
-            let timer = cx.add_timer(Duration::from_millis(24), None, |cx, action| {
-                if matches!(action, TimerAction::Tick(_)) {
-                    cx.needs_redraw();
-                }
-            });
-            cx.start_timer(timer);
-        })
+        .build(cx, |_| {})
     }
 }
 
@@ -434,14 +426,7 @@ impl FxSlotVisualizer {
             params,
             mod_ui,
         }
-        .build(cx, |cx| {
-            let timer = cx.add_timer(Duration::from_millis(24), None, |cx, action| {
-                if matches!(action, TimerAction::Tick(_)) {
-                    cx.needs_redraw();
-                }
-            });
-            cx.start_timer(timer);
-        })
+        .build(cx, |_| {})
     }
 }
 

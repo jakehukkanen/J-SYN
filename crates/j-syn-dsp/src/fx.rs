@@ -150,6 +150,17 @@ fn flush_denormal(x: f32) -> f32 {
 }
 
 #[inline]
+fn track_idle(idle_samples: &mut u32, in_l: f32, in_r: f32) -> bool {
+    if in_l.abs() < 1e-8 && in_r.abs() < 1e-8 {
+        *idle_samples = idle_samples.saturating_add(1);
+        true
+    } else {
+        *idle_samples = 0;
+        false
+    }
+}
+
+#[inline]
 fn butterworth_lp_coeffs(sample_rate: f64, freq_hz: f64) -> BiquadCoeffs {
     let clamped = freq_hz.clamp(10.0, sample_rate * 0.45);
     let w0 = 2.0 * PI * clamped / sample_rate;
@@ -305,6 +316,7 @@ struct OttStereo {
     low_ap: [Biquad; 2],
     bands: [OttBandComp; 3],
     sample_rate: f32,
+    idle_samples: u32,
 }
 
 impl OttStereo {
@@ -319,6 +331,7 @@ impl OttStereo {
                 OttBandComp::new(-38.0, -22.0),
             ],
             sample_rate: 44_100.0,
+            idle_samples: 1024,
         };
         s.set_sample_rate(sample_rate);
         s
@@ -344,10 +357,20 @@ impl OttStereo {
         for band in &mut self.bands {
             band.reset();
         }
+        self.idle_samples = 1024;
     }
 
     #[inline]
     fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+        if track_idle(&mut self.idle_samples, in_l, in_r)
+            && self.idle_samples > 256
+            && self.bands[0].env < 1e-6
+            && self.bands[1].env < 1e-6
+            && self.bands[2].env < 1e-6
+        {
+            return (0.0, 0.0, 0.0);
+        }
+
         let depth = p[0].clamp(0.0, 1.0);
         let time_scale = 0.25 * 16.0_f32.powf(p[1].clamp(0.0, 1.0));
         let in_db = -18.0 + p[2].clamp(0.0, 1.0) * 36.0;
@@ -399,6 +422,7 @@ struct DistortionStereo {
     hold_l: f32,
     hold_r: f32,
     sample_rate: f32,
+    idle_samples: u32,
 }
 
 impl DistortionStereo {
@@ -413,6 +437,7 @@ impl DistortionStereo {
             hold_l: 0.0,
             hold_r: 0.0,
             sample_rate: 44_100.0,
+            idle_samples: 1024,
         };
         s.set_sample_rate(sample_rate);
         s
@@ -440,6 +465,7 @@ impl DistortionStereo {
         self.crush_phase = 1.0;
         self.hold_l = 0.0;
         self.hold_r = 0.0;
+        self.idle_samples = 1024;
     }
 
     #[inline]
@@ -457,6 +483,10 @@ impl DistortionStereo {
 
     #[inline]
     fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+        if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 128 {
+            return (0.0, 0.0, 0.0);
+        }
+
         let mode_idx = Self::sub_mode_index(p[0].clamp(0.0, 1.0));
         let drive = p[1].clamp(0.0, 1.0);
         let tone = p[2].clamp(0.0, 1.0);
@@ -528,6 +558,7 @@ struct ChorusStereo {
     lfo_phase: f32,
     sample_rate: f32,
     dirty: bool,
+    idle_samples: u32,
 }
 
 impl ChorusStereo {
@@ -539,6 +570,7 @@ impl ChorusStereo {
             lfo_phase: 0.0,
             sample_rate: sample_rate.max(1_000.0),
             dirty: false,
+            idle_samples: 1024,
         }
     }
 
@@ -554,6 +586,7 @@ impl ChorusStereo {
         }
         self.write_pos = 0;
         self.lfo_phase = 0.0;
+        self.idle_samples = 1024;
     }
 
     #[inline]
@@ -569,6 +602,16 @@ impl ChorusStereo {
 
     #[inline]
     fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+        if track_idle(&mut self.idle_samples, in_l, in_r) {
+            if !self.dirty {
+                return (0.0, 0.0, 0.0);
+            }
+            if self.idle_samples > (CHORUS_BUF_LEN as u32 + 64) {
+                self.reset();
+                return (0.0, 0.0, 0.0);
+            }
+        }
+
         let rate_hz = 0.05 * 100.0_f32.powf(p[0].clamp(0.0, 1.0));
         let depth = p[1].clamp(0.0, 1.0);
         let width = p[2].clamp(0.0, 1.0);
@@ -618,6 +661,7 @@ struct DelayStereo {
     lp_r: f32,
     sample_rate: f32,
     dirty: bool,
+    idle_samples: u32,
 }
 
 impl DelayStereo {
@@ -632,6 +676,7 @@ impl DelayStereo {
             lp_r: 0.0,
             sample_rate: sample_rate.max(1_000.0),
             dirty: false,
+            idle_samples: 1024,
         }
     }
 
@@ -648,6 +693,7 @@ impl DelayStereo {
         self.write_pos = 0;
         self.lp_l = 0.0;
         self.lp_r = 0.0;
+        self.idle_samples = 1024;
     }
 
     #[inline]
@@ -674,6 +720,10 @@ impl DelayStereo {
         p: [f32; 4],
         tempo_bpm: f32,
     ) -> (f32, f32, f32) {
+        if track_idle(&mut self.idle_samples, in_l, in_r) && !self.dirty {
+            return (0.0, 0.0, 0.0);
+        }
+
         let idx = Self::sync_index(p[0]);
         let beats = DELAY_SYNC_BEATS[idx];
         let bpm = tempo_bpm.clamp(20.0, 300.0);
@@ -695,6 +745,16 @@ impl DelayStereo {
 
         self.lp_l = flush_denormal(self.lp_l + lp_coeff * (tap_l - self.lp_l));
         self.lp_r = flush_denormal(self.lp_r + lp_coeff * (tap_r - self.lp_r));
+
+        if self.idle_samples > (MAX_DELAY_SAMPLES as u32)
+            && tap_l.abs() < 1e-8
+            && tap_r.abs() < 1e-8
+            && self.lp_l.abs() < 1e-8
+            && self.lp_r.abs() < 1e-8
+        {
+            self.reset();
+            return (0.0, 0.0, 0.0);
+        }
 
         let fb_l = fast_tanh((in_l + self.lp_l * feedback + self.lp_r * (feedback * 0.12)) * 0.5) * 2.0;
         let fb_r = fast_tanh((in_r + self.lp_r * feedback + self.lp_l * (feedback * 0.12)) * 0.5) * 2.0;
@@ -729,6 +789,7 @@ struct ReverbStereo {
     ap_pos_r: [usize; 2],
     sample_rate: f32,
     dirty: bool,
+    idle_samples: u32,
 }
 
 impl ReverbStereo {
@@ -746,6 +807,7 @@ impl ReverbStereo {
             ap_pos_r: [0; 2],
             sample_rate: sample_rate.max(1_000.0),
             dirty: false,
+            idle_samples: 1024,
         }
     }
 
@@ -771,6 +833,7 @@ impl ReverbStereo {
         self.comb_damp_r = [0.0; 4];
         self.ap_pos_l = [0; 2];
         self.ap_pos_r = [0; 2];
+        self.idle_samples = 1024;
     }
 
     #[inline]
@@ -803,6 +866,10 @@ impl ReverbStereo {
 
     #[inline]
     fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+        if track_idle(&mut self.idle_samples, in_l, in_r) && !self.dirty {
+            return (0.0, 0.0, 0.0);
+        }
+
         let size = 0.45 + p[0].clamp(0.0, 1.0) * 0.90;
         let decay = 0.40 + p[1].clamp(0.0, 1.0) * 0.55;
         let damp = 0.08 + p[2].clamp(0.0, 1.0) * 0.72;
@@ -852,6 +919,14 @@ impl ReverbStereo {
         let stereo_l = (wet_l * 0.85 + wet_r * 0.15) * 1.4;
         let stereo_r = (wet_r * 0.85 + wet_l * 0.15) * 1.4;
 
+        if self.idle_samples > (REVERB_COMB_LEN as u32 * 4)
+            && stereo_l.abs() < 1e-8
+            && stereo_r.abs() < 1e-8
+        {
+            self.reset();
+            return (0.0, 0.0, 0.0);
+        }
+
         let out_l = in_l + (stereo_l - in_l) * mix;
         let out_r = in_r + (stereo_r - in_r) * mix;
         let activity = (stereo_l.abs().max(stereo_r.abs()) * mix).clamp(0.0, 1.0);
@@ -863,6 +938,7 @@ impl ReverbStereo {
 struct JSatClipperStereo {
     oversamplers: [Oversampler4x; 2],
     adaa: [TanhAdaa2; 2],
+    idle_samples: u32,
 }
 
 impl JSatClipperStereo {
@@ -870,6 +946,7 @@ impl JSatClipperStereo {
         Self {
             oversamplers: [Oversampler4x::new(); 2],
             adaa: [TanhAdaa2::default(); 2],
+            idle_samples: 1024,
         }
     }
 
@@ -878,10 +955,15 @@ impl JSatClipperStereo {
             self.oversamplers[ch].reset();
             self.adaa[ch].reset();
         }
+        self.idle_samples = 1024;
     }
 
     #[inline]
     fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+        if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 128 {
+            return (0.0, 0.0, 0.0);
+        }
+
         let drive_db = p[0].clamp(0.0, 1.0) * 24.0;
         let ceil_db = -18.0 + p[1].clamp(0.0, 1.0) * 18.0;
         let knee = p[2].clamp(0.0, 1.0);
@@ -985,20 +1067,21 @@ impl StereoFxStage {
 
 /// Master 8-slot serial FX Rack (`[[StereoFxStage; 4]; 8]` pre-allocated once on the heap).
 pub struct FxRackState {
-    stages: Box<[[StereoFxStage; MAX_FX_STACK]; NUM_FX_SLOTS]>,
-    last_slot_types: [FxType; NUM_FX_SLOTS],
+    stages: Box<[[StereoFxStage; MAX_FX_STACK]]>,
+    last_slot_types: [Option<FxType>; NUM_FX_SLOTS],
     scope_accum: [(f32, f32, f32, usize); NUM_FX_SLOTS],
 }
 
 impl FxRackState {
     pub fn new(sample_rate: f32) -> Self {
         let sr = sample_rate.max(1_000.0);
-        let stages = Box::new(std::array::from_fn(|_| {
-            std::array::from_fn(|_| StereoFxStage::new(sr))
-        }));
+        let mut stages_vec = Vec::with_capacity(NUM_FX_SLOTS);
+        for _ in 0..NUM_FX_SLOTS {
+            stages_vec.push(std::array::from_fn(|_| StereoFxStage::new(sr)));
+        }
         Self {
-            stages,
-            last_slot_types: [FxType::Off; NUM_FX_SLOTS],
+            stages: stages_vec.into_boxed_slice(),
+            last_slot_types: [None; NUM_FX_SLOTS],
             scope_accum: [(0.0, 0.0, 0.0, 0); NUM_FX_SLOTS],
         }
     }
@@ -1018,6 +1101,7 @@ impl FxRackState {
                 stage.reset();
             }
         }
+        self.last_slot_types = [None; NUM_FX_SLOTS];
         self.scope_accum = [(0.0, 0.0, 0.0, 0); NUM_FX_SLOTS];
     }
 
@@ -1050,14 +1134,20 @@ impl FxRackState {
         let mut r = in_r;
 
         for (slot_idx, slot) in slots.iter().enumerate() {
-            if self.last_slot_types[slot_idx] != slot.fx_type {
-                for stage in &mut self.stages[slot_idx] {
-                    stage.reset();
+            match self.last_slot_types[slot_idx] {
+                Some(prev) if prev != slot.fx_type => {
+                    for stage in &mut self.stages[slot_idx] {
+                        stage.reset();
+                    }
+                    self.last_slot_types[slot_idx] = Some(slot.fx_type);
+                    if let Some(tel) = telemetry {
+                        tel.fx_scopes[slot_idx].clear();
+                    }
                 }
-                self.last_slot_types[slot_idx] = slot.fx_type;
-                if let Some(tel) = telemetry {
-                    tel.fx_scopes[slot_idx].clear();
+                None => {
+                    self.last_slot_types[slot_idx] = Some(slot.fx_type);
                 }
+                Some(_) => {}
             }
 
             let pre_peak = l.abs().max(r.abs());
