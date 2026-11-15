@@ -1253,23 +1253,22 @@ impl ParamStepPill {
                 HStack::new(cx, move |cx| {
                     bold_label(cx, title, "inline-pill-label")
                         .width(Auto)
-                        .height(Stretch(1.0))
-                        .child_top(Stretch(1.0))
-                        .child_bottom(Stretch(1.0))
+                        .height(Auto)
+                        .top(Stretch(1.0))
+                        .bottom(Stretch(1.0))
                         .hoverable(false);
                     bold_label(cx, text_lens, "inline-pill-value")
                         .width(Stretch(1.0))
-                        .height(Stretch(1.0))
-                        .child_top(Stretch(1.0))
-                        .child_bottom(Stretch(1.0))
-                        .overflow(Overflow::Hidden)
+                        .height(Auto)
+                        .top(Stretch(1.0))
+                        .bottom(Stretch(1.0))
                         .hoverable(false);
                 })
                 .col_between(Pixels(3.0))
                 .width(Stretch(1.0))
                 .height(Stretch(1.0))
-                .child_left(Pixels(3.0))
-                .child_right(Pixels(3.0))
+                .child_left(Pixels(4.0))
+                .child_right(Pixels(4.0))
                 .hoverable(false);
             } else {
                 ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {

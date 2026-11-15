@@ -718,8 +718,7 @@ impl Voice {
             sample_rate,
         );
 
-        let gain = env_level * self.velocity;
-        (post_l * gain, post_r * gain)
+        (post_l * env_level, post_r * env_level)
     }
 }
 
@@ -796,7 +795,7 @@ impl TailVoice {
         self.active = true;
         self.age = age;
         self.current_midi_note = voice.current_midi_note;
-        self.amp_at_steal = voice.amp_env.level() * voice.velocity;
+        self.amp_at_steal = voice.amp_env.level();
         self.fade_total = fade_samples.max(1);
         self.fade_remaining = self.fade_total;
         self.oscillators = voice.oscillators.clone();

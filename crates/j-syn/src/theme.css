@@ -871,6 +871,8 @@ led-toggle:checked .switch-label {
   border-radius: 3px;
   child-left: 2px;
   child-right: 2px;
+  child-top: 0px;
+  child-bottom: 0px;
 }
 
 .inline-pill.stk-pill:hover {

@@ -942,7 +942,7 @@ fn build_fx_slot_header(
             .class("stk-pill");
         })
         .width(Pixels(60.0))
-        .height(Pixels(19.0));
+        .height(Pixels(20.0));
 
         if show_reorder {
             let p_up = params.clone();

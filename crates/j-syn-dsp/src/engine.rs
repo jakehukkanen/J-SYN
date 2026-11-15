@@ -718,7 +718,7 @@ impl SynthEngine {
         fade_samples: u32,
         age: u64,
     ) {
-        if voice.amp_env.level() * voice.velocity <= 1e-4 {
+        if voice.amp_env.level() <= 1e-4 {
             return;
         }
         let slot = if let Some(idx) = tail_voices.iter().position(|tv| !tv.active) {
