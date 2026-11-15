@@ -293,8 +293,10 @@ impl View for RotaryKnob {
                         let center_x = bounds.x + bounds.w * 0.5;
                         let center_y = bounds.y + bounds.h * 0.52;
                         let max_r = (bounds.w.min(bounds.h) * 0.5) - 2.0 * dpx;
+                        let mod_ring_r = max_r * 0.99;
+                        let arc_r = (max_r * 0.81).min(mod_ring_r - 3.6 * dpx);
                         let dist = (cx.mouse().cursorx - center_x).hypot(cx.mouse().cursory - center_y);
-                        if cx.modifiers().contains(Modifiers::ALT) || dist > max_r * 0.78 {
+                        if cx.modifiers().contains(Modifiers::ALT) || dist > (arc_r + 1.4 * dpx) {
                             self.mod_depth_drag = Some(ModDepthDrag {
                                 slot_idx,
                                 start_y: cx.mouse().cursory,
@@ -448,9 +450,10 @@ impl View for RotaryKnob {
         let center_y = bounds.y + bounds.h * 0.52;
         let max_r = (bounds.w.min(bounds.h) * 0.5) - 2.0 * dpx;
 
-        let arc_r = max_r * 0.90;
-        let body_r = max_r * 0.70;
-        let cap_r = max_r * 0.57;
+        let mod_ring_r = max_r * 0.99;
+        let arc_r = (max_r * 0.81).min(mod_ring_r - 3.6 * dpx);
+        let body_r = arc_r * 0.78;
+        let cap_r = body_r * 0.80;
 
         let norm = self.param_base.modulated_normalized_value().clamp(0.0, 1.0);
 
@@ -466,14 +469,14 @@ impl View for RotaryKnob {
                 let (sr, sg, sb) = drag_src.color_rgb();
                 let is_hover = mb.mod_ui.is_drop_target(mb.dest);
                 let mut ring = vg::Path::new();
-                ring.circle(center_x, center_y, max_r * 1.02);
+                ring.circle(center_x, center_y, mod_ring_r + 1.0 * dpx);
                 let mut ring_paint = vg::Paint::color(vg::Color::rgba(
                     sr,
                     sg,
                     sb,
-                    if is_hover { 235 } else { 68 },
+                    if is_hover { 245 } else { 80 },
                 ));
-                ring_paint.set_line_width((if is_hover { 2.1 } else { 1.0 }) * dpx);
+                ring_paint.set_line_width((if is_hover { 2.2 } else { 1.1 }) * dpx);
                 canvas.stroke_path(&ring, &ring_paint);
             }
         }
@@ -482,18 +485,18 @@ impl View for RotaryKnob {
         for i in 0..num_ticks {
             let t = i as f32 / (num_ticks - 1) as f32;
             let a = start_angle + t * sweep_angle;
-            let r_in = max_r * 0.94;
-            let r_out = max_r * 1.02;
+            let r_in = arc_r - 1.4 * dpx;
+            let r_out = arc_r + 1.4 * dpx;
             let mut tick = vg::Path::new();
             tick.move_to(center_x + a.cos() * r_in, center_y + a.sin() * r_in);
             tick.line_to(center_x + a.cos() * r_out, center_y + a.sin() * r_out);
             let is_major = i == 0 || i == num_ticks - 1 || i == num_ticks / 2;
             let mut paint = if is_major {
-                vg::Paint::color(vg::Color::rgba(218, 198, 175, 215))
+                vg::Paint::color(vg::Color::rgba(218, 198, 175, 200))
             } else {
-                vg::Paint::color(vg::Color::rgba(155, 138, 120, 155))
+                vg::Paint::color(vg::Color::rgba(155, 138, 120, 135))
             };
-            paint.set_line_width((if is_major { 1.2 } else { 0.9 }) * dpx);
+            paint.set_line_width((if is_major { 1.1 } else { 0.8 }) * dpx);
             canvas.stroke_path(&tick, &paint);
         }
 
@@ -556,10 +559,24 @@ impl View for RotaryKnob {
         );
         canvas.fill_path(&body_path, &body_paint);
 
-        let mut rim_stroke = vg::Paint::color(vg::Color::rgba(24, 20, 17, 235));
+        let mut rim_stroke = vg::Paint::color(if self.hovered || self.drag_active {
+            vg::Color::rgba(ar, ag, ab, 210)
+        } else {
+            vg::Color::rgba(24, 20, 17, 235)
+        });
         rim_stroke.set_line_width(1.1 * dpx);
         canvas.stroke_path(&body_path, &rim_stroke);
 
+        let cap_hi = if self.hovered || self.drag_active {
+            vg::Color::rgb(156, 138, 122)
+        } else {
+            vg::Color::rgb(138, 122, 108)
+        };
+        let cap_lo = if self.hovered || self.drag_active {
+            vg::Color::rgb(74, 63, 55)
+        } else {
+            vg::Color::rgb(62, 53, 46)
+        };
         let mut cap_path = vg::Path::new();
         cap_path.circle(center_x, center_y, cap_r);
         let cap_paint = vg::Paint::radial_gradient(
@@ -567,8 +584,8 @@ impl View for RotaryKnob {
             center_y - cap_r * 0.35,
             cap_r * 0.08,
             cap_r * 1.1,
-            vg::Color::rgb(138, 122, 108),
-            vg::Color::rgb(62, 53, 46),
+            cap_hi,
+            cap_lo,
         );
         canvas.fill_path(&cap_path, &cap_paint);
 
@@ -587,14 +604,28 @@ impl View for RotaryKnob {
         ptr_paint.set_line_cap(vg::LineCap::Round);
         canvas.stroke_path(&ptr_path, &ptr_paint);
 
-        // Radial modulation rings + live animated modulation indicator
+        // Radial modulation collar on a separated recessed outer track + end-cap tick
         if let Some(ref mb) = self.mod_binding {
             let (slots, _indices, count) = mb.mod_ui.slots_for_dest(mb.dest);
             if count > 0 {
+                let mut mod_track = vg::Path::new();
+                mod_track.arc(
+                    center_x,
+                    center_y,
+                    mod_ring_r,
+                    start_angle,
+                    end_angle,
+                    vg::Solidity::Hole,
+                );
+                let mut mod_track_paint = vg::Paint::color(vg::Color::rgba(14, 11, 9, 235));
+                mod_track_paint.set_line_width(3.4 * dpx);
+                mod_track_paint.set_line_cap(vg::LineCap::Round);
+                canvas.stroke_path(&mod_track, &mod_track_paint);
+
                 let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
-                let mod_ring_r = max_r * 1.01;
                 for slot in slots.iter().take(count) {
                     let (sr, sg, sb) = slot.source.color_rgb();
+                    let target_norm = (base_norm + slot.depth).clamp(0.0, 1.0);
                     let (lo_norm, hi_norm) = if slot.bipolar {
                         let span = slot.depth.abs();
                         (
@@ -602,19 +633,39 @@ impl View for RotaryKnob {
                             (base_norm + span).clamp(0.0, 1.0),
                         )
                     } else {
-                        let target = (base_norm + slot.depth).clamp(0.0, 1.0);
-                        (base_norm.min(target), base_norm.max(target))
+                        (base_norm.min(target_norm), base_norm.max(target_norm))
                     };
-                    if (hi_norm - lo_norm) > 0.005 {
+                    if (hi_norm - lo_norm) > 0.004 {
                         let a0 = start_angle + lo_norm * sweep_angle;
                         let a1 = start_angle + hi_norm * sweep_angle;
+                        let mut mglow = vg::Path::new();
+                        mglow.arc(center_x, center_y, mod_ring_r, a0, a1, vg::Solidity::Hole);
+                        let mut mglow_paint = vg::Paint::color(vg::Color::rgba(sr, sg, sb, 75));
+                        mglow_paint.set_line_width(4.2 * dpx);
+                        mglow_paint.set_line_cap(vg::LineCap::Round);
+                        canvas.stroke_path(&mglow, &mglow_paint);
+
                         let mut mpath = vg::Path::new();
                         mpath.arc(center_x, center_y, mod_ring_r, a0, a1, vg::Solidity::Hole);
-                        let mut mpaint = vg::Paint::color(vg::Color::rgba(sr, sg, sb, 225));
-                        mpaint.set_line_width(2.0 * dpx);
+                        let mut mpaint = vg::Paint::color(vg::Color::rgba(sr, sg, sb, 248));
+                        mpaint.set_line_width(2.2 * dpx);
                         mpaint.set_line_cap(vg::LineCap::Round);
                         canvas.stroke_path(&mpath, &mpaint);
                     }
+
+                    // Bright radial end-cap tick marking modulation endpoint
+                    let cap_angle = start_angle + target_norm * sweep_angle;
+                    let tx0 = center_x + cap_angle.cos() * (mod_ring_r - 2.2 * dpx);
+                    let ty0 = center_y + cap_angle.sin() * (mod_ring_r - 2.2 * dpx);
+                    let tx1 = center_x + cap_angle.cos() * (mod_ring_r + 2.2 * dpx);
+                    let ty1 = center_y + cap_angle.sin() * (mod_ring_r + 2.2 * dpx);
+                    let mut end_tick = vg::Path::new();
+                    end_tick.move_to(tx0, ty0);
+                    end_tick.line_to(tx1, ty1);
+                    let mut tick_paint = vg::Paint::color(vg::Color::rgb(255, 250, 240));
+                    tick_paint.set_line_width(1.7 * dpx);
+                    tick_paint.set_line_cap(vg::LineCap::Round);
+                    canvas.stroke_path(&end_tick, &tick_paint);
                 }
 
                 let live_offset = mb.mod_ui.telemetry.dest_offset(mb.dest);
@@ -624,10 +675,10 @@ impl View for RotaryKnob {
                 let lx = center_x + live_angle.cos() * mod_ring_r;
                 let ly = center_y + live_angle.sin() * mod_ring_r;
                 let mut dot = vg::Path::new();
-                dot.circle(lx, ly, 2.2 * dpx);
+                dot.circle(lx, ly, 2.3 * dpx);
                 canvas.fill_path(&dot, &vg::Paint::color(vg::Color::rgb(255, 248, 232)));
                 let mut dot_ring = vg::Paint::color(vg::Color::rgb(dr, dg, db));
-                dot_ring.set_line_width(1.1 * dpx);
+                dot_ring.set_line_width(1.2 * dpx);
                 canvas.stroke_path(&dot, &dot_ring);
             }
         }
@@ -638,6 +689,7 @@ impl View for RotaryKnob {
 pub struct LedToggleSwitch {
     param_base: ParamWidgetBase,
     accent_rgb: (u8, u8, u8),
+    hovered: bool,
 }
 
 impl LedToggleSwitch {
@@ -658,29 +710,38 @@ impl LedToggleSwitch {
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
             accent_rgb,
+            hovered: false,
         }
         .build(
             cx,
             ParamWidgetBase::build_view(params.clone(), params_to_param, move |cx, param_data| {
-                let is_on_lens =
-                    param_data.make_lens(|param| param.modulated_normalized_value() >= 0.5);
-                Binding::new(cx, is_on_lens, move |cx, is_on| {
-                    cx.needs_redraw();
-                    let label_text = if is_on.get(cx) { on_label } else { off_label };
-                    HStack::new(cx, move |cx| {
-                        Element::new(cx)
-                            .width(Pixels(12.0))
-                            .height(Stretch(1.0))
-                            .hoverable(false);
-                        bold_label(cx, label_text, "switch-label").hoverable(false);
-                    })
-                    .child_top(Stretch(1.0))
-                    .child_bottom(Stretch(1.0))
-                    .child_left(Pixels(5.0))
-                    .child_right(Pixels(6.0))
-                    .col_between(Pixels(3.0))
-                    .hoverable(false);
+                let text_lens = param_data.make_lens(move |param| {
+                    if param.modulated_normalized_value() >= 0.5 {
+                        on_label
+                    } else {
+                        off_label
+                    }
                 });
+                HStack::new(cx, move |cx| {
+                    Element::new(cx)
+                        .width(Pixels(11.0))
+                        .height(Stretch(1.0))
+                        .hoverable(false);
+                    bold_label(cx, text_lens, "switch-label")
+                        .width(Auto)
+                        .height(Stretch(1.0))
+                        .child_top(Stretch(1.0))
+                        .child_bottom(Stretch(1.0))
+                        .hoverable(false);
+                })
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0))
+                .child_left(Pixels(4.0))
+                .child_right(Pixels(4.0))
+                .col_between(Pixels(3.0))
+                .hoverable(false);
             }),
         )
         .checked(ParamWidgetBase::make_lens(
@@ -714,6 +775,14 @@ impl View for LedToggleSwitch {
         });
 
         event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseOver => {
+                self.hovered = true;
+                cx.needs_redraw();
+            }
+            WindowEvent::MouseOut => {
+                self.hovered = false;
+                cx.needs_redraw();
+            }
             WindowEvent::MouseDown(MouseButton::Left)
             | WindowEvent::MouseDoubleClick(MouseButton::Left)
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
@@ -746,7 +815,16 @@ impl View for LedToggleSwitch {
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, r);
 
-        let housing_paint = if is_on {
+        let housing_paint = if is_on && self.hovered {
+            vg::Paint::linear_gradient(
+                bounds.x,
+                bounds.y,
+                bounds.x,
+                bounds.y + bounds.h,
+                vg::Color::rgb(98, 84, 72),
+                vg::Color::rgb(64, 54, 46),
+            )
+        } else if is_on {
             vg::Paint::linear_gradient(
                 bounds.x,
                 bounds.y,
@@ -754,6 +832,15 @@ impl View for LedToggleSwitch {
                 bounds.y + bounds.h,
                 vg::Color::rgb(82, 70, 60),
                 vg::Color::rgb(52, 44, 38),
+            )
+        } else if self.hovered {
+            vg::Paint::linear_gradient(
+                bounds.x,
+                bounds.y,
+                bounds.x,
+                bounds.y + bounds.h,
+                vg::Color::rgb(68, 58, 50),
+                vg::Color::rgb(48, 40, 35),
             )
         } else {
             vg::Paint::linear_gradient(
@@ -768,7 +855,9 @@ impl View for LedToggleSwitch {
         canvas.fill_path(&bg, &housing_paint);
 
         let mut border = vg::Paint::color(if is_on {
-            vg::Color::rgba(ar, ag, ab, 175)
+            vg::Color::rgba(ar, ag, ab, if self.hovered { 235 } else { 175 })
+        } else if self.hovered {
+            vg::Color::rgba(ar, ag, ab, 120)
         } else {
             vg::Color::rgba(24, 20, 17, 235)
         });

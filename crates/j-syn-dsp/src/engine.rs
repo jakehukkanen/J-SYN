@@ -397,11 +397,12 @@ impl SynthEngine {
         if params.engine_mode == EngineMode::Hq {
             let dt_sample = 1.0 / self.sample_rate;
             for i in 0..4 {
-                self.global_modseq_vals[i] = self.global_modseqs[i].advance(
+                self.global_modseq_vals[i] = self.global_modseqs[i].advance_with_mseg(
                     dt_sample,
                     params.tempo_bpm,
                     &params.modseqs[i],
                     &params.modseq_steps.seqs[i],
+                    &params.modseq_steps.msegs[i],
                 );
             }
             for v in &mut self.voices {
@@ -419,11 +420,12 @@ impl SynthEngine {
         } else if is_control_tick {
             let dt_tick = (self.control_tick_period as f32) / self.sample_rate;
             for i in 0..4 {
-                self.global_modseq_vals[i] = self.global_modseqs[i].advance(
+                self.global_modseq_vals[i] = self.global_modseqs[i].advance_with_mseg(
                     dt_tick,
                     params.tempo_bpm,
                     &params.modseqs[i],
                     &params.modseq_steps.seqs[i],
+                    &params.modseq_steps.msegs[i],
                 );
             }
             for v in &mut self.voices {

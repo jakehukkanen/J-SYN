@@ -1188,3 +1188,72 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
     let p1 = eng_ms.telemetry().modseq_phase(1);
     assert!((0.0..=1.0).contains(&p1));
 }
+
+#[test]
+fn test_modseq_stamps_and_mseg_curve() {
+    use j_syn_dsp::{
+        evaluate_modseq_curve, evaluate_mseg_curve, ModDestination, ModMatrixSource, ModSeqMode,
+        ModSeqStep, ModSeqStepShape, ModSeqSyncMode, ModSlot, MsegCurve, MsegNode,
+        MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
+    };
+
+    // 1. Verify Performer stamp shapes evaluate cleanly across step bounds
+    let mut steps = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
+    for (idx, &shape) in ModSeqStepShape::STAMPS.iter().enumerate() {
+        steps[idx] = ModSeqStep::stamped(shape, 0.8, 0.0);
+    }
+    // Step 0 = Sine (0 at start, ~0.8 at midpoint), Step 4 = Pulse (0.8 first half, 0.0 second half)
+    assert!(evaluate_modseq_curve(&steps, 8, 0.01) < 0.05);
+    assert!((evaluate_modseq_curve(&steps, 8, 0.5 / 8.0) - 0.8).abs() < 1e-3);
+    assert!((evaluate_modseq_curve(&steps, 8, 4.25 / 8.0) - 0.8).abs() < 1e-4);
+    assert!(evaluate_modseq_curve(&steps, 8, 4.75 / 8.0).abs() < 1e-4);
+
+    // 2. Verify MSEG multi-node curve & zero-allocation audio-thread evaluation
+    let mut mseg = MsegCurve {
+        nodes: [MsegNode::default(); MAX_MSEG_NODES],
+        num_nodes: 3,
+    };
+    mseg.nodes[0] = MsegNode {
+        time_x: 0.0,
+        level_y: 0.1,
+        tension: 0.0,
+    };
+    mseg.nodes[1] = MsegNode {
+        time_x: 0.25,
+        level_y: 1.0,
+        tension: 0.0,
+    };
+    mseg.nodes[2] = MsegNode {
+        time_x: 1.0,
+        level_y: 0.0,
+        tension: 0.0,
+    };
+    assert!((evaluate_mseg_curve(&mseg, 0.0) - 0.1).abs() < 1e-5);
+    assert!((evaluate_mseg_curve(&mseg, 0.25) - 1.0).abs() < 1e-5);
+    assert!((evaluate_mseg_curve(&mseg, 0.625) - 0.5).abs() < 1e-5);
+
+    let bank = WavetableBank::new();
+    let mut params = SynthParams::default();
+    params.modseqs[0].mode = ModSeqMode::Mseg;
+    params.modseqs[0].sync_mode = ModSeqSyncMode::FreeHz;
+    params.modseqs[0].free_hz = 4.0;
+    params.modseqs[0].smooth = 0.0;
+    params.modseq_steps.msegs[0] = mseg;
+    params.mod_matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::ModSeq1,
+        destination: ModDestination::Filter1Cutoff,
+        depth: 0.5,
+        bipolar: false,
+        enabled: true,
+    };
+
+    let mut engine = SynthEngine::new(48_000.0);
+    engine.note_on(0, 60, 1.0, None, &params);
+    for _ in 0..3000 {
+        let (l, r) = engine.process_sample(&params, &bank);
+        assert!(l.is_finite() && r.is_finite());
+    }
+    let tel = engine.telemetry();
+    assert!(tel.modseq_phase(0) > 0.2 && tel.modseq_phase(0) < 0.35);
+    assert!(tel.dest_offset(ModDestination::Filter1Cutoff) > 0.35);
+}

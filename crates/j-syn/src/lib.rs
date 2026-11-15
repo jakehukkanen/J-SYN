@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use arc_swap::ArcSwap;
 use j_syn_dsp::{
     AdsrParams, EngineMode, FactoryWavetable, FilterMode, FilterParams, FilterRouting, FilterSlope,
-    InsertMode, InsertParams, InsertPosition, ModMatrixState, ModOrder, ModSeqParams,
+    InsertMode, InsertParams, InsertPosition, ModMatrixState, ModOrder, ModSeqMode, ModSeqParams,
     ModSeqPlayMode, ModSeqRate, ModSeqRetrig, ModSeqStepBank, ModSeqSyncMode, ModSource, ModType,
     NoiseParams, NoiseType, OscParams, PolyMode, RoutingParams, SynthEngine, SynthParams, WarpMode,
     Wavetable, WavetableBank,
@@ -851,6 +851,23 @@ impl From<ModSeqPlayParam> for ModSeqPlayMode {
 }
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModSeqModeParam {
+    #[name = "Performer"]
+    Performer,
+    #[name = "MSEG"]
+    Mseg,
+}
+
+impl From<ModSeqModeParam> for ModSeqMode {
+    fn from(val: ModSeqModeParam) -> Self {
+        match val {
+            ModSeqModeParam::Performer => ModSeqMode::Performer,
+            ModSeqModeParam::Mseg => ModSeqMode::Mseg,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModSeqRetrigParam {
     #[name = "Poly"]
     PolyVoice,
@@ -907,6 +924,9 @@ impl ModEnvPluginParams {
 
 #[derive(Params)]
 pub struct ModSeqPluginParams {
+    #[id = "mode"]
+    pub mode: EnumParam<ModSeqModeParam>,
+
     #[id = "sync"]
     pub sync_mode: EnumParam<ModSeqSyncParam>,
 
@@ -932,6 +952,7 @@ pub struct ModSeqPluginParams {
 impl Default for ModSeqPluginParams {
     fn default() -> Self {
         Self {
+            mode: EnumParam::new("Mode", ModSeqModeParam::Performer),
             sync_mode: EnumParam::new("Sync", ModSeqSyncParam::TempoSync),
             sync_rate: EnumParam::new("Rate", ModSeqRateParam::Bars1),
             free_hz: FloatParam::new(
@@ -956,6 +977,7 @@ impl Default for ModSeqPluginParams {
 impl ModSeqPluginParams {
     pub fn to_dsp(&self) -> ModSeqParams {
         ModSeqParams {
+            mode: self.mode.value().into(),
             sync_mode: self.sync_mode.value().into(),
             sync_rate: self.sync_rate.value().into(),
             free_hz: self.free_hz.value(),

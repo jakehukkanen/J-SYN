@@ -598,11 +598,12 @@ impl Voice {
         for i in 0..4 {
             let ms_p = &params.modseqs[i];
             sources[4 + i] = if ms_p.retrig == ModSeqRetrig::PolyVoice {
-                self.modseqs[i].advance(
+                self.modseqs[i].advance_with_mseg(
                     dt_seconds,
                     params.tempo_bpm,
                     ms_p,
                     &params.modseq_steps.seqs[i],
+                    &params.modseq_steps.msegs[i],
                 )
             } else {
                 global_modseq_vals[i]

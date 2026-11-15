@@ -70,6 +70,12 @@ label {
   child-space: 6px;
 }
 
+.drawer-module {
+  child-top: 3px;
+  child-bottom: 3px;
+  row-between: 2px;
+}
+
 .hardware-module {
   background-color: #3e362f;
   border-width: 1px;
@@ -127,6 +133,21 @@ label {
   font-size: 11;
   font-weight: bold;
   color: #fff3dc;
+}
+
+.knob-readout-box {
+  background-color: #211c17;
+  border-width: 1px;
+  border-color: #463b32;
+  border-radius: 3px;
+  child-left: 3px;
+  child-right: 3px;
+}
+
+.knob-readout-text {
+  font-size: 9;
+  font-weight: bold;
+  color: #ffd382;
 }
 
 .compact-pill {
@@ -260,12 +281,12 @@ led-toggle:checked .switch-label {
 }
 
 .tab-btn:hover {
-  background-color: #443a31;
-  border-color: #8a6a42;
+  background-color: #4a3f35;
+  border-color: #f5b349;
 }
 
 .tab-btn:checked {
-  background-color: #534332;
+  background-color: #5a4835;
   border-color: #f5b349;
 }
 
@@ -395,12 +416,12 @@ led-toggle:checked .switch-label {
 }
 
 .subtab-btn:hover {
-  background-color: #3b322a;
-  border-color: #8a6a42;
+  background-color: #44392f;
+  border-color: #f5b349;
 }
 
 .subtab-btn:checked {
-  background-color: #514030;
+  background-color: #584533;
   border-color: #f5b349;
 }
 
@@ -423,12 +444,202 @@ led-toggle:checked .switch-label {
 }
 
 .preset-btn:hover {
-  background-color: #463829;
+  background-color: #48392a;
   border-color: #f2cb61;
+}
+
+.preset-btn:checked {
+  background-color: #59442e;
+  border-color: #f5b349;
+}
+
+.preset-btn:checked .preset-btn-label {
+  color: #fff6e6;
 }
 
 .preset-btn-label {
   font-size: 8.5;
   font-weight: bold;
   color: #e6d1ba;
+}
+
+.view-switch-group {
+  background-color: #26201b;
+  border-width: 1px;
+  border-color: #4b4037;
+  border-radius: 4px;
+  child-left: 2px;
+  child-right: 2px;
+  child-top: 1px;
+  child-bottom: 1px;
+}
+
+.view-switch-btn {
+  background-color: transparent;
+  border-width: 1px;
+  border-color: transparent;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.view-switch-btn:hover {
+  background-color: #3d332a;
+  border-color: #8a6a42;
+}
+
+.view-switch-btn:checked {
+  background-color: #594631;
+  border-color: #f5b349;
+}
+
+.view-switch-label {
+  font-size: 9.5;
+  font-weight: bold;
+  color: #cbb9a6;
+}
+
+.view-switch-btn:checked .view-switch-label {
+  color: #fff6e6;
+}
+
+.matrix-card {
+  child-left: 10px;
+  child-right: 10px;
+  child-top: 8px;
+  child-bottom: 8px;
+}
+
+.matrix-count-badge {
+  font-size: 10;
+  font-weight: bold;
+  color: #00e5ff;
+}
+
+.matrix-clear-btn {
+  background-color: #472826;
+  border-width: 1px;
+  border-color: #8a4b44;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.matrix-clear-btn:hover {
+  background-color: #6b3530;
+  border-color: #ff6b6b;
+}
+
+.matrix-clear-text {
+  font-size: 9;
+  font-weight: bold;
+  color: #ffe3de;
+}
+
+.matrix-col-header {
+  background-color: #29231e;
+  border-width: 1px;
+  border-color: #4b4037;
+  border-radius: 3px;
+}
+
+.matrix-col-title {
+  font-size: 9;
+  font-weight: bold;
+  color: #bfa994;
+}
+
+.matrix-row {
+  background-color: #2c251f;
+  border-width: 1px;
+  border-color: #483d34;
+  border-radius: 3px;
+}
+
+.matrix-row:hover {
+  background-color: #372e27;
+  border-color: #6d5c4e;
+}
+
+.matrix-cell-idx {
+  font-size: 9.5;
+  font-weight: bold;
+  color: #9e8a77;
+}
+
+.matrix-cell-src {
+  font-size: 10;
+  font-weight: bold;
+  color: #f7eee4;
+}
+
+.matrix-cell-arrow {
+  font-size: 10;
+  font-weight: bold;
+  color: #bfa994;
+}
+
+.matrix-cell-dest {
+  font-size: 10;
+  font-weight: bold;
+  color: #ffd382;
+}
+
+.matrix-depth-box {
+  background-color: #211c17;
+  border-width: 1px;
+  border-color: #52463d;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.matrix-depth-box:hover {
+  border-color: #f5b349;
+}
+
+.matrix-depth-val {
+  font-size: 9.5;
+  font-weight: bold;
+  color: #fff3dc;
+}
+
+.matrix-btn {
+  background-color: #382f28;
+  border-width: 1px;
+  border-color: #5c4e43;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.matrix-btn:hover {
+  background-color: #4d4034;
+  border-color: #f5b349;
+}
+
+.matrix-btn:checked {
+  background-color: #4d4228;
+  border-color: #00e676;
+}
+
+.matrix-del-btn {
+  background-color: #3f2826;
+  border-width: 1px;
+  border-color: #7a4540;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.matrix-del-btn:hover {
+  background-color: #6b3632;
+  border-color: #ff6b6b;
+}
+
+.matrix-btn-text {
+  font-size: 9;
+  font-weight: bold;
+  color: #f6efe6;
+}
+
+.matrix-empty-hint {
+  font-size: 10.5;
+  font-weight: bold;
+  color: #9a8675;
 }

@@ -93,21 +93,43 @@ impl ModMatrixSource {
     }
 
     #[inline]
+    pub fn full_label(self) -> &'static str {
+        match self {
+            Self::None => "--",
+            Self::Env1 => "ENV 1 (AMP)",
+            Self::Env2 => "ENV 2",
+            Self::Env3 => "ENV 3",
+            Self::Env4 => "ENV 4",
+            Self::ModSeq1 => "MODSEQ 1",
+            Self::ModSeq2 => "MODSEQ 2",
+            Self::ModSeq3 => "MODSEQ 3",
+            Self::ModSeq4 => "MODSEQ 4",
+            Self::Velocity => "VELOCITY",
+            Self::Keytrack => "KEYTRACK",
+            Self::ModWheel => "MOD WHEEL",
+            Self::Aftertouch => "AFTERTOUCH",
+        }
+    }
+
+    #[inline]
     pub fn color_rgb(self) -> (u8, u8, u8) {
         match self {
             Self::None => (140, 125, 110),
-            Self::Env1 => (245, 179, 73),     // Warm amber
-            Self::Env2 => (108, 212, 255),    // Cyan
-            Self::Env3 => (134, 232, 146),    // Mint green
-            Self::Env4 => (235, 140, 215),    // Orchid
-            Self::ModSeq1 => (255, 206, 84),  // Gold
-            Self::ModSeq2 => (240, 128, 96),  // Coral
-            Self::ModSeq3 => (162, 152, 255), // Periwinkle
-            Self::ModSeq4 => (86, 224, 198),  // Teal
-            Self::Velocity => (255, 112, 112),
-            Self::Keytrack => (190, 224, 96),
-            Self::ModWheel => (255, 156, 200),
-            Self::Aftertouch => (255, 168, 76),
+            // Envelopes: Mint (#00E676) high-contrast family
+            Self::Env1 => (0, 230, 118),
+            Self::Env2 => (46, 242, 150),
+            Self::Env3 => (0, 212, 142),
+            Self::Env4 => (92, 248, 172),
+            // ModSeqs: Cyan (#00E5FF) high-contrast family
+            Self::ModSeq1 => (0, 229, 255),
+            Self::ModSeq2 => (56, 206, 255),
+            Self::ModSeq3 => (0, 245, 232),
+            Self::ModSeq4 => (100, 220, 255),
+            // MIDI / performance sources: Coral (#FF5252) high-contrast family
+            Self::Velocity => (255, 82, 82),
+            Self::Keytrack => (255, 112, 96),
+            Self::ModWheel => (255, 92, 130),
+            Self::Aftertouch => (255, 126, 82),
         }
     }
 }

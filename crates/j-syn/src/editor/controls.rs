@@ -534,6 +534,78 @@ pub(super) fn build_header_knob_cell_mod<L, Params, P, FMap>(
     );
 }
 
+pub(super) fn build_param_readout_box<'a, L, Params, P, FMap>(
+    cx: &'a mut Context,
+    params: L,
+    params_to_param: FMap,
+) -> Handle<'a, HStack>
+where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    HStack::new(
+        cx,
+        ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
+            let readout_lens = param_data.make_lens(|param| {
+                param.normalized_value_to_string(param.modulated_normalized_value(), true)
+            });
+            bold_label(cx, readout_lens, "knob-readout-text")
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .child_space(Stretch(1.0));
+        }),
+    )
+    .class("knob-readout-box")
+}
+
+pub(super) fn build_knob_cell_with_readout<L, Params, P, FMap>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    accent_rgb: (u8, u8, u8),
+    knob_sz: f32,
+    cell_w: f32,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        bold_label(cx, title, "knob-title")
+            .width(Stretch(1.0))
+            .height(Pixels(12.0))
+            .child_space(Stretch(1.0));
+
+        build_rotary_knob_with_opt_mod(
+            cx,
+            params.clone(),
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            None,
+        )
+        .width(Pixels(knob_sz))
+        .height(Pixels(knob_sz))
+        .left(Stretch(1.0))
+        .right(Stretch(1.0));
+
+        build_param_readout_box(cx, params, params_to_param)
+            .width(Pixels(cell_w - 6.0))
+            .height(Pixels(14.0))
+            .left(Stretch(1.0))
+            .right(Stretch(1.0));
+    })
+    .class("knob-cell")
+    .width(Pixels(cell_w))
+    .height(Auto)
+    .row_between(Pixels(1.0));
+}
+
 pub(super) fn build_knob_cell<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,

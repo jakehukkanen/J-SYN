@@ -95,9 +95,14 @@ fn freq_to_norm(freq_hz: f32) -> f32 {
 }
 
 #[inline]
-fn db_to_y(db: f32, inner_top: f32, inner_h: f32) -> f32 {
-    let norm = ((db + 36.0) / 60.0).clamp(0.0, 1.0);
+fn db_to_raw_y(db: f32, inner_top: f32, inner_h: f32) -> f32 {
+    let norm = ((db + 36.0) / 60.0).min(1.0);
     inner_top + (1.0 - norm) * inner_h
+}
+
+#[inline]
+fn db_to_y(db: f32, inner_top: f32, inner_h: f32) -> f32 {
+    db_to_raw_y(db, inner_top, inner_h).min(inner_top + inner_h)
 }
 
 impl FilterResponseScope {
@@ -180,27 +185,59 @@ impl View for FilterResponseScope {
 
         let dsp_params = self.params.filters[self.filter_idx].to_dsp();
         const CURVE_PTS: usize = 96;
+        let floor_y = inner_bottom - 0.5 * dpx;
         let mut curve = vg::Path::new();
         let mut fill = vg::Path::new();
+        let mut prev_x = inner_x;
+        let mut prev_raw_y = inner_bottom;
 
         for i in 0..CURVE_PTS {
             let t = i as f32 / (CURVE_PTS - 1) as f32;
             let freq_hz = 20.0 * 1000.0_f32.powf(t);
             let db = j_syn_dsp::evaluate_filter_response_db(&dsp_params, freq_hz);
             let x = inner_x + t * inner_w;
-            let y = db_to_y(db, inner_y, inner_h);
+            let raw_y = db_to_raw_y(db, inner_y, inner_h);
+            let fill_y = raw_y.min(inner_bottom);
             if i == 0 {
-                curve.move_to(x, y);
+                if raw_y < floor_y {
+                    curve.move_to(x, raw_y);
+                }
                 fill.move_to(x, inner_bottom);
-                fill.line_to(x, y);
+                fill.line_to(x, fill_y);
             } else {
-                curve.line_to(x, y);
-                fill.line_to(x, y);
+                let prev_in = prev_raw_y < floor_y;
+                let curr_in = raw_y < floor_y;
+                match (prev_in, curr_in) {
+                    (true, true) => curve.line_to(x, raw_y),
+                    (true, false) => {
+                        let denom = raw_y - prev_raw_y;
+                        let frac = if denom.abs() > 1e-6 {
+                            ((floor_y - prev_raw_y) / denom).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        curve.line_to(prev_x + frac * (x - prev_x), floor_y);
+                    }
+                    (false, true) => {
+                        let denom = raw_y - prev_raw_y;
+                        let frac = if denom.abs() > 1e-6 {
+                            ((floor_y - prev_raw_y) / denom).clamp(0.0, 1.0)
+                        } else {
+                            1.0
+                        };
+                        curve.move_to(prev_x + frac * (x - prev_x), floor_y);
+                        curve.line_to(x, raw_y);
+                    }
+                    (false, false) => {}
+                }
+                fill.line_to(x, fill_y);
             }
             if i + 1 == CURVE_PTS {
                 fill.line_to(x, inner_bottom);
                 fill.close();
             }
+            prev_x = x;
+            prev_raw_y = raw_y;
         }
 
         let (r, g, b) = self.accent;
@@ -223,20 +260,24 @@ impl View for FilterResponseScope {
         // Cutoff marker dot on curve
         let fc_x = inner_x + freq_to_norm(dsp_params.cutoff_hz) * inner_w;
         let fc_db = j_syn_dsp::evaluate_filter_response_db(&dsp_params, dsp_params.cutoff_hz);
-        let fc_y = db_to_y(fc_db, inner_y, inner_h);
-        let mut dot = vg::Path::new();
-        dot.circle(fc_x, fc_y, 2.8 * dpx);
-        canvas.fill_path(&dot, &vg::Paint::color(stroke_color));
+        let fc_raw_y = db_to_raw_y(fc_db, inner_y, inner_h);
+        if fc_raw_y < inner_bottom - 1.0 * dpx {
+            let mut dot = vg::Path::new();
+            dot.circle(fc_x, fc_raw_y, 2.8 * dpx);
+            canvas.fill_path(&dot, &vg::Paint::color(stroke_color));
+        }
 
         // Secondary Freq 2 marker dot for multi-filter modes
         if dsp_params.mode.is_multi() {
             let f2_hz = j_syn_dsp::filter::aux_to_freq2_hz(dsp_params.aux);
             let f2_x = inner_x + freq_to_norm(f2_hz) * inner_w;
             let f2_db = j_syn_dsp::evaluate_filter_response_db(&dsp_params, f2_hz);
-            let f2_y = db_to_y(f2_db, inner_y, inner_h);
-            let mut dot2 = vg::Path::new();
-            dot2.circle(f2_x, f2_y, 2.4 * dpx);
-            canvas.fill_path(&dot2, &vg::Paint::color(vg::Color::rgba(246, 239, 230, 200)));
+            let f2_raw_y = db_to_raw_y(f2_db, inner_y, inner_h);
+            if f2_raw_y < inner_bottom - 1.0 * dpx {
+                let mut dot2 = vg::Path::new();
+                dot2.circle(f2_x, f2_raw_y, 2.4 * dpx);
+                canvas.fill_path(&dot2, &vg::Paint::color(vg::Color::rgba(246, 239, 230, 200)));
+            }
         }
 
         let mut border = vg::Path::new();
@@ -373,7 +414,7 @@ pub(super) fn build_filter_panel(
 
         FilterResponseScope::new(cx, filter_idx, params.clone(), accent)
             .width(Stretch(1.0))
-            .height(Pixels(86.0));
+            .height(Pixels(92.0));
 
         HStack::new(cx, {
             let params = params.clone();

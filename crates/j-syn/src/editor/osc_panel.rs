@@ -73,7 +73,7 @@ pub(super) fn build_osc_panel(
                     osc_label,
                     accent,
                 )
-                .width(Pixels(54.0))
+                .width(Pixels(56.0))
                 .height(Pixels(20.0));
 
                 build_wavetable_dropdown(
@@ -94,7 +94,7 @@ pub(super) fn build_osc_panel(
                     "RETRIG",
                     accent,
                 )
-                .width(Pixels(54.0))
+                .width(Pixels(64.0))
                 .height(Pixels(20.0));
             })
             .col_between(Pixels(4.0))
@@ -161,7 +161,7 @@ pub(super) fn build_osc_panel(
             .height(Pixels(19.0))
             .width(Stretch(1.0));
         })
-        .width(Pixels(244.0))
+        .width(Pixels(254.0))
         .height(Stretch(1.0))
         .row_between(Pixels(3.0));
 
