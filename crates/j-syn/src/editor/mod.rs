@@ -56,7 +56,7 @@ use routing_tab::build_routing_tab;
 use widgets::LedToggleSwitch;
 
 const BASE_WIDTH: u32 = 1160;
-const BASE_HEIGHT: u32 = 760;
+const BASE_HEIGHT: u32 = 778;
 const DEFAULT_SCALE: f64 = 1.0;
 
 pub(super) const AMBER_RGB: (u8, u8, u8) = (245, 179, 73);
@@ -631,7 +631,7 @@ fn build_bottom_tabs(
     })
     .row_between(Pixels(3.0))
     .width(Stretch(1.0))
-    .height(Pixels(118.0));
+    .height(Pixels(136.0));
 }
 
 pub(crate) fn create(
