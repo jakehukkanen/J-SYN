@@ -1,0 +1,436 @@
+use crate::voice::{PolyMode, SynthParams, TailVoice, Voice};
+use crate::wavetable::{Wavetable, WavetableBank};
+
+pub const MAX_VOICES: usize = 16;
+pub const MAX_TAIL_VOICES: usize = 8;
+
+/// 16-voice polyphonic + Mono Legato synthesizer engine with 1.5 kHz control-rate tick
+/// and click-free 3 ms tail-voice stealing. Zero heap allocations during processing.
+pub struct SynthEngine {
+    pub voices: [Voice; MAX_VOICES],
+    pub tail_voices: [TailVoice; MAX_TAIL_VOICES],
+    sample_rate: f32,
+    voice_age_counter: u64,
+    last_note: Option<f32>,
+    mono_stack: [(u8, u8); 16],
+    mono_stack_len: usize,
+    pitch_bend_norm: f32,
+    pitch_bend_smoothed: f32,
+    control_tick_counter: u32,
+    control_tick_period: u32,
+    smoothed_wt_pos: [f32; 4],
+    smoothed_mod_depth: [f32; 4],
+    smoothed_warp_amount: [f32; 4],
+    smoothed_master_gain: f32,
+    rng_state: u32,
+}
+
+impl SynthEngine {
+    pub fn new(sample_rate: f32) -> Self {
+        let sr = sample_rate.max(1000.0);
+        Self {
+            voices: std::array::from_fn(|_| Voice::new()),
+            tail_voices: std::array::from_fn(|_| TailVoice::new()),
+            sample_rate: sr,
+            voice_age_counter: 0,
+            last_note: None,
+            mono_stack: [(0, 0); 16],
+            mono_stack_len: 0,
+            pitch_bend_norm: 0.0,
+            pitch_bend_smoothed: 0.0,
+            control_tick_counter: 0,
+            control_tick_period: (sr / 1500.0).round().max(1.0) as u32,
+            smoothed_wt_pos: [0.0; 4],
+            smoothed_mod_depth: [0.0; 4],
+            smoothed_warp_amount: [0.0; 4],
+            smoothed_master_gain: 0.707_106_77,
+            rng_state: 0x9E37_79B9,
+        }
+    }
+
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        let sr = sample_rate.max(1000.0);
+        self.sample_rate = sr;
+        self.control_tick_period = (sr / 1500.0).round().max(1.0) as u32;
+    }
+
+    pub fn reset(&mut self) {
+        for v in &mut self.voices {
+            v.reset();
+        }
+        for tv in &mut self.tail_voices {
+            tv.reset();
+        }
+        self.mono_stack_len = 0;
+        self.last_note = None;
+        self.pitch_bend_norm = 0.0;
+        self.pitch_bend_smoothed = 0.0;
+        self.control_tick_counter = 0;
+    }
+
+    #[inline]
+    pub fn set_pitch_bend(&mut self, value_0_to_1: f32) {
+        self.pitch_bend_norm = (value_0_to_1.clamp(0.0, 1.0) * 2.0) - 1.0;
+    }
+
+    pub fn note_on(
+        &mut self,
+        channel: u8,
+        note: u8,
+        velocity: f32,
+        voice_id: Option<i32>,
+        params: &SynthParams,
+    ) {
+        let vel = velocity.clamp(0.0, 1.0);
+        if vel <= 0.0 {
+            self.note_off(channel, note, voice_id, params);
+            return;
+        }
+
+        // Snap control-rate smoothers when starting from silence so newly triggered notes
+        // immediately reflect current knob positions on sample 0.
+        if !self.voices.iter().any(|v| v.active) {
+            self.smoothed_master_gain = params.master_gain;
+            for i in 0..4 {
+                self.smoothed_wt_pos[i] = params.oscs[i].wt_pos;
+                self.smoothed_mod_depth[i] = params.oscs[i].mod_depth;
+                self.smoothed_warp_amount[i] = params.oscs[i].warp_amount;
+            }
+        }
+
+        self.voice_age_counter = self.voice_age_counter.wrapping_add(1);
+        let age = self.voice_age_counter;
+        let fade_samples = (self.sample_rate * 0.003).round().max(1.0) as u32;
+
+        if params.poly_mode == PolyMode::MonoLegato {
+            // Release any polyphonic voices other than slot 0
+            for v in self.voices.iter_mut().skip(1) {
+                if v.active {
+                    Self::push_tail_voice(&mut self.tail_voices, v, fade_samples, age);
+                    v.reset();
+                }
+            }
+
+            // Push onto mono note stack (avoiding duplicate entry)
+            self.remove_from_mono_stack(channel, note);
+            if self.mono_stack_len < self.mono_stack.len() {
+                self.mono_stack[self.mono_stack_len] = (channel, note);
+                self.mono_stack_len += 1;
+            }
+
+            let v0 = &mut self.voices[0];
+            if v0.active && !v0.releasing && self.mono_stack_len > 1 {
+                // Legato transition: keep envelope & oscillator phases running, glide pitch.
+                v0.note = note;
+                v0.channel = channel;
+                v0.voice_id = voice_id;
+                v0.velocity = vel;
+                v0.age = age;
+                v0.target_midi_note = note as f32;
+                self.last_note = Some(note as f32);
+                return;
+            }
+
+            if v0.active {
+                Self::push_tail_voice(&mut self.tail_voices, v0, fade_samples, age);
+            }
+
+            let start_note = if params.glide_ms > 0.1 {
+                self.last_note.unwrap_or(note as f32)
+            } else {
+                note as f32
+            };
+            Self::init_voice(
+                &mut self.voices[0],
+                channel,
+                note,
+                vel,
+                voice_id,
+                age,
+                start_note,
+                note as f32,
+                params,
+                &mut self.rng_state,
+            );
+            self.last_note = Some(note as f32);
+            return;
+        }
+
+        // Polyphonic mode: find a free voice, or steal oldest/quietest voice into TailVoice pool.
+        let slot = if let Some(idx) = self.voices.iter().position(|v| !v.active) {
+            idx
+        } else {
+            let steal_idx = self.find_steal_candidate();
+            let stolen = &self.voices[steal_idx];
+            Self::push_tail_voice(&mut self.tail_voices, stolen, fade_samples, age);
+            steal_idx
+        };
+
+        let start_note = if params.glide_ms > 0.1 {
+            self.last_note.unwrap_or(note as f32)
+        } else {
+            note as f32
+        };
+
+        Self::init_voice(
+            &mut self.voices[slot],
+            channel,
+            note,
+            vel,
+            voice_id,
+            age,
+            start_note,
+            note as f32,
+            params,
+            &mut self.rng_state,
+        );
+        self.last_note = Some(note as f32);
+    }
+
+    pub fn note_off(
+        &mut self,
+        channel: u8,
+        note: u8,
+        voice_id: Option<i32>,
+        params: &SynthParams,
+    ) {
+        if params.poly_mode == PolyMode::MonoLegato {
+            self.remove_from_mono_stack(channel, note);
+            if self.mono_stack_len > 0 {
+                let (top_ch, top_note) = self.mono_stack[self.mono_stack_len - 1];
+                let v0 = &mut self.voices[0];
+                if v0.active {
+                    v0.channel = top_ch;
+                    v0.note = top_note;
+                    v0.target_midi_note = top_note as f32;
+                    self.last_note = Some(top_note as f32);
+                }
+            } else {
+                let v0 = &mut self.voices[0];
+                if v0.active {
+                    v0.releasing = true;
+                    v0.amp_env.release();
+                }
+            }
+            return;
+        }
+
+        for v in &mut self.voices {
+            if !v.active || v.releasing {
+                continue;
+            }
+            let id_match = match (voice_id, v.voice_id) {
+                (Some(ev_id), Some(v_id)) => ev_id == v_id,
+                _ => v.channel == channel && v.note == note,
+            };
+            if id_match {
+                v.releasing = true;
+                v.amp_env.release();
+            }
+        }
+    }
+
+    pub fn choke(&mut self, channel: u8, note: u8, voice_id: Option<i32>) {
+        self.remove_from_mono_stack(channel, note);
+        self.voice_age_counter = self.voice_age_counter.wrapping_add(1);
+        let age = self.voice_age_counter;
+        let fade_samples = (self.sample_rate * 0.003).round().max(1.0) as u32;
+
+        for v in &mut self.voices {
+            if !v.active {
+                continue;
+            }
+            let id_match = match (voice_id, v.voice_id) {
+                (Some(ev_id), Some(v_id)) => ev_id == v_id,
+                _ => v.channel == channel && v.note == note,
+            };
+            if id_match {
+                Self::push_tail_voice(&mut self.tail_voices, v, fade_samples, age);
+                v.reset();
+            }
+        }
+    }
+
+    pub fn all_notes_off(&mut self) {
+        self.mono_stack_len = 0;
+        for v in &mut self.voices {
+            if v.active && !v.releasing {
+                v.releasing = true;
+                v.amp_env.release();
+            }
+        }
+    }
+
+    pub fn all_sound_off(&mut self) {
+        self.mono_stack_len = 0;
+        self.voice_age_counter = self.voice_age_counter.wrapping_add(1);
+        let age = self.voice_age_counter;
+        let fade_samples = (self.sample_rate * 0.003).round().max(1.0) as u32;
+
+        for v in &mut self.voices {
+            if v.active {
+                Self::push_tail_voice(&mut self.tail_voices, v, fade_samples, age);
+                v.reset();
+            }
+        }
+    }
+
+    #[inline]
+    pub fn active_voice_count(&self) -> usize {
+        self.voices.iter().filter(|v| v.active).count()
+    }
+
+    /// Processes a single stereo sample using pre-loaded wavetable references.
+    #[inline]
+    pub fn process_sample(&mut self, params: &SynthParams, bank: &WavetableBank) -> (f32, f32) {
+        let g0 = bank.osc_tables[0].load();
+        let g1 = bank.osc_tables[1].load();
+        let g2 = bank.osc_tables[2].load();
+        let g3 = bank.osc_tables[3].load();
+        let tables: [&Wavetable; 4] = [&g0, &g1, &g2, &g3];
+        self.process_sample_with_tables(params, tables)
+    }
+
+    /// Processes a single stereo sample with already-guarded wavetable references.
+    #[inline]
+    pub fn process_sample_with_tables(
+        &mut self,
+        params: &SynthParams,
+        tables: [&Wavetable; 4],
+    ) -> (f32, f32) {
+        // 1.5 kHz control-rate modulation tick with lightweight 1-pole smoothing
+        if self.control_tick_counter == 0 {
+            const CR_COEFF: f32 = 0.28;
+            self.pitch_bend_smoothed +=
+                (self.pitch_bend_norm - self.pitch_bend_smoothed) * CR_COEFF;
+            self.smoothed_master_gain +=
+                (params.master_gain - self.smoothed_master_gain) * CR_COEFF;
+            for i in 0..4 {
+                self.smoothed_wt_pos[i] +=
+                    (params.oscs[i].wt_pos - self.smoothed_wt_pos[i]) * CR_COEFF;
+                self.smoothed_mod_depth[i] +=
+                    (params.oscs[i].mod_depth - self.smoothed_mod_depth[i]) * CR_COEFF;
+                self.smoothed_warp_amount[i] +=
+                    (params.oscs[i].warp_amount - self.smoothed_warp_amount[i]) * CR_COEFF;
+            }
+        }
+        self.control_tick_counter += 1;
+        if self.control_tick_counter >= self.control_tick_period {
+            self.control_tick_counter = 0;
+        }
+
+        let mut cr_params = *params;
+        for i in 0..4 {
+            cr_params.oscs[i].wt_pos = self.smoothed_wt_pos[i];
+            cr_params.oscs[i].mod_depth = self.smoothed_mod_depth[i];
+            cr_params.oscs[i].warp_amount = self.smoothed_warp_amount[i];
+        }
+
+        let pb_semi = self.pitch_bend_smoothed * params.pitch_bend_range;
+
+        let mut mix_l = 0.0_f32;
+        let mut mix_r = 0.0_f32;
+
+        for v in &mut self.voices {
+            if v.active {
+                let (vl, vr) = v.process_sample(&cr_params, tables, self.sample_rate, pb_semi);
+                mix_l += vl;
+                mix_r += vr;
+            }
+        }
+
+        for tv in &mut self.tail_voices {
+            if tv.active {
+                let (tl, tr) = tv.process_sample(&cr_params, tables, self.sample_rate, pb_semi);
+                mix_l += tl;
+                mix_r += tr;
+            }
+        }
+
+        // Polyphonic headroom scaling (~-9 dB) * master gain
+        const HEADROOM: f32 = 0.35;
+        let out_gain = HEADROOM * self.smoothed_master_gain;
+        (mix_l * out_gain, mix_r * out_gain)
+    }
+
+    fn init_voice(
+        v: &mut Voice,
+        channel: u8,
+        note: u8,
+        velocity: f32,
+        voice_id: Option<i32>,
+        age: u64,
+        start_note: f32,
+        target_note: f32,
+        params: &SynthParams,
+        rng_state: &mut u32,
+    ) {
+        v.active = true;
+        v.releasing = false;
+        v.channel = channel;
+        v.note = note;
+        v.voice_id = voice_id;
+        v.velocity = velocity;
+        v.age = age;
+        v.current_midi_note = start_note;
+        v.target_midi_note = target_note;
+        v.amp_env.reset_and_trigger();
+
+        for (i, osc) in v.oscillators.iter_mut().enumerate() {
+            if params.oscs[i].retrig {
+                v.osc_out[i] = 0.0;
+                v.prev_osc_out[i] = 0.0;
+            }
+            osc.on_note_on(params.oscs[i].retrig, rng_state);
+        }
+    }
+
+    fn find_steal_candidate(&self) -> usize {
+        // Prefer stealing a releasing voice with the lowest amplitude, otherwise oldest voice.
+        let mut best_idx = 0;
+        let mut best_score = f32::MAX;
+        for (i, v) in self.voices.iter().enumerate() {
+            let rel_bonus = if v.releasing { 0.0 } else { 10.0 };
+            let score = rel_bonus + v.amp_env.level() + (v.age as f32 * 1e-9);
+            if score < best_score {
+                best_score = score;
+                best_idx = i;
+            }
+        }
+        best_idx
+    }
+
+    fn push_tail_voice(
+        tail_voices: &mut [TailVoice; MAX_TAIL_VOICES],
+        voice: &Voice,
+        fade_samples: u32,
+        age: u64,
+    ) {
+        if voice.amp_env.level() * voice.velocity <= 1e-4 {
+            return;
+        }
+        let slot = if let Some(idx) = tail_voices.iter().position(|tv| !tv.active) {
+            idx
+        } else {
+            tail_voices
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, tv)| tv.age)
+                .map(|(idx, _)| idx)
+                .unwrap_or(0)
+        };
+        tail_voices[slot].steal_from(voice, fade_samples, age);
+    }
+
+    fn remove_from_mono_stack(&mut self, channel: u8, note: u8) {
+        let mut write = 0;
+        for read in 0..self.mono_stack_len {
+            let entry = self.mono_stack[read];
+            if entry.0 != channel || entry.1 != note {
+                self.mono_stack[write] = entry;
+                write += 1;
+            }
+        }
+        self.mono_stack_len = write;
+    }
+}

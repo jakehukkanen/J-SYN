@@ -1,0 +1,17 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Reference repositories
+J-SAT/
+tube-resonator/
+
+# Local scratch / audio renders
+*.pyc
+*.wav
