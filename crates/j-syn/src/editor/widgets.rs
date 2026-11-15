@@ -834,43 +834,45 @@ impl LedToggleSwitch {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
+        let text_params = params.clone();
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
             accent_rgb,
             hovered: false,
         }
-        .build(
-            cx,
-            ParamWidgetBase::build_view(params.clone(), params_to_param, move |cx, param_data| {
-                let text_lens = param_data.make_lens(move |param| {
+        .build(cx, move |cx| {
+            let text_lens = ParamWidgetBase::make_lens(
+                text_params,
+                params_to_param,
+                move |param| {
                     if param.modulated_normalized_value() >= 0.5 {
                         on_label
                     } else {
                         off_label
                     }
-                });
-                HStack::new(cx, move |cx| {
-                    Element::new(cx)
-                        .width(Pixels(11.0))
-                        .height(Stretch(1.0))
-                        .hoverable(false);
-                    bold_label(cx, text_lens, "switch-label")
-                        .width(Auto)
-                        .height(Stretch(1.0))
-                        .child_top(Stretch(1.0))
-                        .child_bottom(Stretch(1.0))
-                        .hoverable(false);
-                })
-                .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .child_top(Stretch(1.0))
-                .child_bottom(Stretch(1.0))
-                .child_left(Pixels(4.0))
-                .child_right(Pixels(4.0))
-                .col_between(Pixels(3.0))
-                .hoverable(false);
-            }),
-        )
+                },
+            );
+            HStack::new(cx, move |cx| {
+                Element::new(cx)
+                    .width(Pixels(11.0))
+                    .height(Stretch(1.0))
+                    .hoverable(false);
+                bold_label(cx, text_lens, "switch-label")
+                    .width(Auto)
+                    .height(Stretch(1.0))
+                    .child_top(Stretch(1.0))
+                    .child_bottom(Stretch(1.0))
+                    .hoverable(false);
+            })
+            .width(Stretch(1.0))
+            .height(Stretch(1.0))
+            .child_top(Stretch(1.0))
+            .child_bottom(Stretch(1.0))
+            .child_left(Pixels(4.0))
+            .child_right(Pixels(4.0))
+            .col_between(Pixels(3.0))
+            .hoverable(false);
+        })
         .checked(ParamWidgetBase::make_lens(
             params,
             params_to_param,

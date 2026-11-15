@@ -924,28 +924,28 @@ impl ModEnvPluginParams {
 
 #[derive(Params)]
 pub struct ModSeqPluginParams {
-    #[id = "mode"]
+    #[id = "ms_mode"]
     pub mode: EnumParam<ModSeqModeParam>,
 
-    #[id = "sync"]
+    #[id = "ms_sync"]
     pub sync_mode: EnumParam<ModSeqSyncParam>,
 
-    #[id = "rate"]
+    #[id = "ms_rate"]
     pub sync_rate: EnumParam<ModSeqRateParam>,
 
-    #[id = "hz"]
+    #[id = "ms_hz"]
     pub free_hz: FloatParam,
 
-    #[id = "play"]
+    #[id = "ms_play"]
     pub play_mode: EnumParam<ModSeqPlayParam>,
 
-    #[id = "retrig"]
+    #[id = "ms_retrig"]
     pub retrig: EnumParam<ModSeqRetrigParam>,
 
-    #[id = "steps"]
+    #[id = "ms_steps"]
     pub num_steps: IntParam,
 
-    #[id = "smooth"]
+    #[id = "ms_smooth"]
     pub smooth: FloatParam,
 }
 
@@ -1413,3 +1413,21 @@ impl Vst3Plugin for JSynPlugin {
 
 nih_export_clap!(JSynPlugin);
 nih_export_vst3!(JSynPlugin);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn all_plugin_parameter_ids_are_unique() {
+        let params = JSynPluginParams::default();
+        let param_map = params.param_map();
+        let unique_ids: HashSet<&str> = param_map.iter().map(|(id, _, _)| id.as_str()).collect();
+        assert_eq!(
+            param_map.len(),
+            unique_ids.len(),
+            "Duplicate plugin parameter IDs detected in JSynPluginParams"
+        );
+    }
+}

@@ -100,7 +100,7 @@ pub(super) fn build_osc_panel(
                     osc_label,
                     accent,
                 )
-                .width(Pixels(54.0))
+                .width(Pixels(56.0))
                 .height(Pixels(20.0));
 
                 build_wavetable_dropdown(
@@ -122,8 +122,7 @@ pub(super) fn build_osc_panel(
                     accent,
                 )
                 .width(Pixels(64.0))
-                .height(Pixels(20.0))
-                .z_index(10);
+                .height(Pixels(20.0));
             })
             .col_between(Pixels(4.0))
             .height(Pixels(20.0))
@@ -189,15 +188,13 @@ pub(super) fn build_osc_panel(
             .height(Pixels(19.0))
             .width(Stretch(1.0));
         })
-        .width(Pixels(244.0))
+        .width(Pixels(238.0))
         .height(Stretch(1.0))
         .row_between(Pixels(3.0));
 
-        // Right sub-block: 3-tier layout (Pitch/Phase row -> 5 Knobs -> Compact Unison strip)
-        let p_det = p_knobs.clone();
-        let p_spr = p_knobs.clone();
+        // Right sub-block: 7 borderless inline readouts aligned above 5 enlarged knobs
         VStack::new(cx, move |cx| {
-            let ui_pitch = mod_ui.clone();
+            let ui_pills = mod_ui.clone();
             HStack::new(cx, move |cx| {
                 build_inline_pill_cell(
                     cx,
@@ -205,7 +202,7 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).octave,
                     "OCT",
                     9,
-                    1.0,
+                    0.78,
                 );
                 build_inline_pill_cell_mod(
                     cx,
@@ -213,9 +210,9 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).semi,
                     "SEMI",
                     25,
-                    1.0,
+                    0.88,
                     ModDestination::osc_semi(osc_idx),
-                    ui_pitch.clone(),
+                    ui_pills.clone(),
                     0,
                 );
                 build_inline_pill_cell_mod(
@@ -224,34 +221,59 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).fine,
                     "FINE",
                     201,
-                    1.0,
+                    1.05,
                     ModDestination::osc_fine(osc_idx),
-                    ui_pitch.clone(),
+                    ui_pills.clone(),
                     0,
                 );
                 build_inline_pill_cell_mod(
                     cx,
                     UiData::params,
                     move |p| &get_osc(p, osc_idx).phase,
-                    "PH",
+                    "PHASE",
                     361,
-                    1.0,
+                    1.08,
                     ModDestination::osc_phase(osc_idx),
-                    ui_pitch,
+                    ui_pills.clone(),
+                    0,
+                );
+                build_inline_pill_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).unison,
+                    "UNI",
+                    8,
+                    0.75,
+                );
+                build_inline_pill_cell_mod(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).detune,
+                    "DETUNE",
+                    101,
+                    1.23,
+                    ModDestination::osc_detune(osc_idx),
+                    ui_pills.clone(),
+                    0,
+                );
+                build_inline_pill_cell_mod(
+                    cx,
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).spread,
+                    "SPREAD",
+                    101,
+                    1.23,
+                    ModDestination::osc_spread(osc_idx),
+                    ui_pills.clone(),
                     0,
                 );
             })
             .class("osc-inline-strip")
-            .col_between(Pixels(8.0))
-            .height(Pixels(18.0))
+            .col_between(Pixels(4.0))
+            .height(Pixels(20.0))
             .width(Stretch(1.0));
 
             let ui_knobs = mod_ui.clone();
-            let p_k1 = p_knobs.clone();
-            let p_k2 = p_knobs.clone();
-            let p_k3 = p_knobs.clone();
-            let p_k4 = p_knobs.clone();
-            let p_k5 = p_knobs;
             HStack::new(cx, move |cx| {
                 build_flex_knob_cell_mod_dim(
                     cx,
@@ -260,11 +282,11 @@ pub(super) fn build_osc_panel(
                     "WT POS",
                     false,
                     accent,
-                    42.0,
+                    46.0,
                     ModDestination::osc_wt_pos(osc_idx),
                     ui_knobs.clone(),
                     0,
-                    p_k1,
+                    p_knobs.clone(),
                     osc_check,
                 );
                 build_flex_knob_cell_mod_dim(
@@ -274,11 +296,11 @@ pub(super) fn build_osc_panel(
                     "WARP",
                     false,
                     accent,
-                    42.0,
+                    46.0,
                     ModDestination::osc_warp(osc_idx),
                     ui_knobs.clone(),
                     0,
-                    p_k2,
+                    p_knobs.clone(),
                     osc_check,
                 );
                 build_flex_knob_cell_mod_dim(
@@ -288,11 +310,11 @@ pub(super) fn build_osc_panel(
                     "MOD",
                     false,
                     accent,
-                    42.0,
+                    46.0,
                     ModDestination::osc_mod_depth(osc_idx),
                     ui_knobs.clone(),
                     0,
-                    p_k3,
+                    p_knobs.clone(),
                     osc_check,
                 );
                 build_flex_knob_cell_mod_dim(
@@ -302,11 +324,11 @@ pub(super) fn build_osc_panel(
                     "PAN",
                     true,
                     accent,
-                    42.0,
+                    46.0,
                     ModDestination::osc_pan(osc_idx),
                     ui_knobs.clone(),
                     0,
-                    p_k4,
+                    p_knobs.clone(),
                     osc_check,
                 );
                 build_flex_knob_cell_mod_dim(
@@ -316,69 +338,21 @@ pub(super) fn build_osc_panel(
                     "LEVEL",
                     false,
                     accent,
-                    42.0,
+                    46.0,
                     ModDestination::osc_level(osc_idx),
-                    ui_knobs,
+                    ui_knobs.clone(),
                     0,
-                    p_k5,
+                    p_knobs,
                     osc_check,
                 );
             })
             .col_between(Pixels(4.0))
-            .child_top(Stretch(1.0))
-            .child_bottom(Stretch(1.0))
             .width(Stretch(1.0))
             .height(Stretch(1.0));
-
-            let ui_uni = mod_ui;
-            HStack::new(cx, move |cx| {
-                build_inline_pill_cell(
-                    cx,
-                    UiData::params,
-                    move |p| &get_osc(p, osc_idx).unison,
-                    "UNI",
-                    8,
-                    1.0,
-                );
-                build_inline_pill_cell_mod(
-                    cx,
-                    UiData::params,
-                    move |p| &get_osc(p, osc_idx).detune,
-                    "DET",
-                    101,
-                    1.0,
-                    ModDestination::osc_detune(osc_idx),
-                    ui_uni.clone(),
-                    0,
-                )
-                .toggle_class(
-                    "pill-dimmed",
-                    UiData::mod_ui_rev.map(move |_| p_det.oscs[osc_idx].unison.value() <= 1),
-                );
-                build_inline_pill_cell_mod(
-                    cx,
-                    UiData::params,
-                    move |p| &get_osc(p, osc_idx).spread,
-                    "SPR",
-                    101,
-                    1.0,
-                    ModDestination::osc_spread(osc_idx),
-                    ui_uni,
-                    0,
-                )
-                .toggle_class(
-                    "pill-dimmed",
-                    UiData::mod_ui_rev.map(move |_| p_spr.oscs[osc_idx].unison.value() <= 1),
-                );
-            })
-            .class("osc-inline-strip")
-            .col_between(Pixels(10.0))
-            .height(Pixels(18.0))
-            .width(Stretch(1.0));
         })
         .width(Stretch(1.0))
         .height(Stretch(1.0))
-        .row_between(Pixels(2.0));
+        .row_between(Pixels(3.0));
     })
     .class("hardware-module")
     .toggle_class(

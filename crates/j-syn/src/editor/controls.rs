@@ -68,12 +68,8 @@ impl ScrollDropdown {
             on_step: Box::new(on_step),
         }
         .build(cx, |cx| {
-            build_inner(cx)
-                .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .overflow(Overflow::Hidden);
+            build_inner(cx).width(Stretch(1.0)).height(Stretch(1.0));
         })
-        .overflow(Overflow::Hidden)
     }
 }
 
@@ -878,7 +874,7 @@ where
         ),
         None => ParamStepPill::new_inline(cx, params, params_to_param, num_steps, title),
     };
-    handle.width(Stretch(weight)).height(Pixels(18.0))
+    handle.width(Stretch(weight)).height(Pixels(20.0))
 }
 
 pub(super) fn build_inline_pill_cell<'a, L, Params, P, FMap>(
