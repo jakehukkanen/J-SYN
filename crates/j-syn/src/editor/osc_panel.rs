@@ -21,55 +21,17 @@ use crate::{
     WarpModeParam,
 };
 
-#[inline]
-fn mod_source_idx(src: ModSourceParam) -> Option<usize> {
-    match src {
-        ModSourceParam::Off => None,
-        ModSourceParam::Osc1 => Some(0),
-        ModSourceParam::Osc2 => Some(1),
-        ModSourceParam::Osc3 => Some(2),
-        ModSourceParam::Osc4 => Some(3),
-    }
-}
-
-/// Returns `true` when oscillator `osc_idx` has base output above zero or is routed
-/// (directly or transitively) as a cross-modulation source by another oscillator.
-pub(super) fn is_osc_awake(p: &JSynPluginParams, osc_idx: usize) -> bool {
-    let mut awake = [false; 4];
-    for i in 0..4 {
-        if p.oscs[i].level.value() > 0.0001 {
-            awake[i] = true;
-        }
-        if let Some(src) = mod_source_idx(p.oscs[i].mod_source.value()) {
-            if src != i {
-                awake[src] = true;
-            }
-        }
-    }
-    for _ in 0..3 {
-        let prev = awake;
-        for i in 0..4 {
-            if prev[i] {
-                if let Some(src) = mod_source_idx(p.oscs[i].mod_source.value()) {
-                    awake[src] = true;
-                }
-            }
-        }
-    }
-    awake[osc_idx]
-}
-
 fn osc0_enabled(p: &JSynPluginParams) -> bool {
-    is_osc_awake(p, 0)
+    p.oscs[0].enabled.value()
 }
 fn osc1_enabled(p: &JSynPluginParams) -> bool {
-    is_osc_awake(p, 1)
+    p.oscs[1].enabled.value()
 }
 fn osc2_enabled(p: &JSynPluginParams) -> bool {
-    is_osc_awake(p, 2)
+    p.oscs[2].enabled.value()
 }
 fn osc3_enabled(p: &JSynPluginParams) -> bool {
-    is_osc_awake(p, 3)
+    p.oscs[3].enabled.value()
 }
 
 #[inline]
@@ -131,10 +93,16 @@ pub(super) fn build_osc_panel(
         let p_pitch = mod_ui.clone();
         let gui_left = gui_context.clone();
         VStack::new(cx, move |cx| {
-            bold_label(cx, osc_label, "module-title")
-                .width(Stretch(1.0))
-                .height(Pixels(16.0))
-                .child_space(Stretch(1.0));
+            LedToggleSwitch::new(
+                cx,
+                UiData::params,
+                move |p| &get_osc(p, osc_idx).enabled,
+                osc_label,
+                osc_label,
+                accent,
+            )
+            .width(Stretch(1.0))
+            .height(Pixels(20.0));
 
             build_pitch_pill_cell(
                 cx,

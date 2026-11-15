@@ -597,6 +597,9 @@ impl RoutingPluginParams {
 
 #[derive(Params)]
 pub struct OscPluginParams {
+    #[id = "enabled"]
+    pub enabled: BoolParam,
+
     #[id = "wt_select"]
     pub wt_select: EnumParam<WavetableChoice>,
 
@@ -657,9 +660,10 @@ impl OscPluginParams {
             2 => WavetableChoice::HarmonicSync,
             _ => WavetableChoice::AggressivePwm,
         };
-        let default_level = if osc_idx == 0 { 0.75 } else { 0.0 };
+        let default_level = if osc_idx == 0 { 0.75 } else { 0.5 };
 
         Self {
+            enabled: BoolParam::new("Enabled", osc_idx == 0),
             wt_select: EnumParam::new("Wavetable", default_wt),
             wt_pos: FloatParam::new("WT Pos", 0.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_unit(" %")
@@ -742,6 +746,7 @@ impl OscPluginParams {
 
     fn to_dsp(&self) -> OscParams {
         OscParams {
+            enabled: self.enabled.value(),
             wt_pos: self.wt_pos.value(),
             pitch_semitones: self.pitch.value(),
             phase_offset: (self.phase.value() / 360.0).rem_euclid(1.0).fract(),

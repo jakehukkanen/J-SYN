@@ -103,6 +103,7 @@ pub enum EngineMode {
 /// Per-oscillator control-rate / sample-rate parameters.
 #[derive(Debug, Clone, Copy)]
 pub struct OscParams {
+    pub enabled: bool,
     pub wt_pos: f32,
     pub pitch_semitones: f32,
     /// Normalized phase offset `[0.0, 1.0)` corresponding to `0°..360°`.
@@ -125,6 +126,7 @@ pub struct OscParams {
 impl Default for OscParams {
     fn default() -> Self {
         Self {
+            enabled: true,
             wt_pos: 0.0,
             pitch_semitones: 0.0,
             phase_offset: 0.0,

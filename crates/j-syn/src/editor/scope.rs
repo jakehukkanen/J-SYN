@@ -105,7 +105,7 @@ impl View for WavetableScope {
         let dpx = cx.scale_factor();
         let radius = 4.0 * dpx;
         let osc = &self.params.oscs[self.osc_idx];
-        let enabled = super::osc_panel::is_osc_awake(&self.params, self.osc_idx);
+        let enabled = self.params.oscs[self.osc_idx].enabled.value();
 
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);

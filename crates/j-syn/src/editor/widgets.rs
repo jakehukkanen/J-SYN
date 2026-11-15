@@ -312,7 +312,7 @@ impl RotaryKnob {
         let max_r = (bounds.w.min(bounds.h) * 0.5) - 2.0 * dpx;
         let mod_ring_r = max_r * 0.99;
         let arc_r = (max_r * 0.81).min(mod_ring_r - 3.6 * dpx);
-        (x - center_x).hypot(y - center_y) > (arc_r + 1.4 * dpx)
+        (x - center_x).hypot(y - center_y) > (arc_r + 0.6 * dpx)
     }
 
     fn reset_to_default(&mut self, cx: &mut EventContext) {

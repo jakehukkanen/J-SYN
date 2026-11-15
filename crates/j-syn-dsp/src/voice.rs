@@ -273,7 +273,7 @@ fn process_voice_bus<F: StereoFilterStage>(
         std::array::from_fn(|i| apply_osc_modulation(&params.oscs[i], i, mod_offsets));
     let mut osc_active = [false; 4];
     for i in 0..4 {
-        if mod_oscs[i].level > 0.0001 {
+        if mod_oscs[i].enabled && mod_oscs[i].level > 0.0001 {
             osc_active[i] = true;
         }
     }
@@ -281,7 +281,9 @@ fn process_voice_bus<F: StereoFilterStage>(
         for i in 0..4 {
             if osc_active[i] {
                 if let Some(src_idx) = mod_oscs[i].mod_source.osc_index() {
-                    osc_active[src_idx] = true;
+                    if mod_oscs[src_idx].enabled {
+                        osc_active[src_idx] = true;
+                    }
                 }
             }
         }

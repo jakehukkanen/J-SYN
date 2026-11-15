@@ -39,7 +39,7 @@ pub(super) fn build_noise_panel(
             "NOISE",
             CORAL_RGB,
         )
-        .width(Pixels(58.0))
+        .width(Pixels(72.0))
         .height(Pixels(22.0));
 
         build_enum_dropdown(

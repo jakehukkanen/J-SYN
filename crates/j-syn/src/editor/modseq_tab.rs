@@ -1271,7 +1271,7 @@ pub(super) fn build_modseq_tab(
                                                 HStack::new(cx, move |cx| {
                                                     bold_label(
                                                         cx,
-                                                        "LFO: DBL-CLICK NODE | R-DRAG BEND",
+                                                        "Double-click to add/delete nodes  •  Right-drag segment to bend",
                                                         "mini-label",
                                                     )
                                                     .width(Auto)
@@ -1312,7 +1312,7 @@ pub(super) fn build_modseq_tab(
                                                 HStack::new(cx, move |cx| {
                                                     bold_label(
                                                         cx,
-                                                        "MODSEQ: L-DRAG STAMP STEP  |  R-CLICK TILE TO FILL",
+                                                        "Drag grid to stamp  •  Right-click tile to fill",
                                                         "mini-label",
                                                     )
                                                     .width(Auto)
@@ -1596,8 +1596,8 @@ pub(super) fn build_modseq_tab(
                                     "RATE",
                                     false,
                                     accent,
-                                    32.0,
-                                    52.0,
+                                    38.0,
+                                    54.0,
                                     ModDestination::modseq_rate(seq_idx),
                                     u_ctrl,
                                     bottom_tab_tag(BottomTab::ModSeq),
@@ -1623,15 +1623,15 @@ pub(super) fn build_modseq_tab(
                                     "SMOOTH",
                                     false,
                                     CORAL_RGB,
-                                    32.0,
-                                    50.0,
+                                    38.0,
+                                    52.0,
                                 );
                             }
                         })
                         .col_between(Pixels(4.0))
                         .child_top(Stretch(1.0))
                         .child_bottom(Stretch(1.0))
-                        .width(Pixels(334.0))
+                        .width(Pixels(340.0))
                         .height(Stretch(1.0));
                     })
                     .col_between(Pixels(6.0))
