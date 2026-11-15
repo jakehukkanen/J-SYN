@@ -291,6 +291,62 @@ pub(super) fn step_wavetable(
     }
 }
 
+/// Render a recursive `DirectoryTree` as a scrollable list of root items and
+/// collapsible folder categories (`▸ Folder (N)` / `▾ Folder (N)`).
+/// Clicking a folder toggles its expanded state without closing the dropdown;
+/// clicking a file invokes `on_select_file`.
+pub(super) fn build_directory_tree_items<FFile, FFolder>(
+    cx: &mut Context,
+    tree: crate::presets::DirectoryTree,
+    expanded_folder: Option<String>,
+    on_toggle_folder: FFolder,
+    on_select_file: FFile,
+) where
+    FFolder: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
+    FFile: Fn(&mut EventContext, &crate::presets::DirectoryFileEntry)
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    if tree.root_files.is_empty() && tree.folders.is_empty() {
+        return;
+    }
+    ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+        VStack::new(cx, move |cx| {
+            for entry in &tree.root_files {
+                let entry_c = entry.clone();
+                let on_file = on_select_file.clone();
+                bold_label(cx, &entry.name, "dropdown-item").on_press(move |cx| {
+                    on_file(cx, &entry_c);
+                });
+            }
+            for folder in &tree.folders {
+                let is_open = expanded_folder.as_deref() == Some(folder.name.as_str());
+                let arrow = if is_open { "▾" } else { "▸" };
+                let label = format!("{arrow} {} ({})", folder.name, folder.files.len());
+                let folder_name = folder.name.clone();
+                let on_toggle = on_toggle_folder.clone();
+                let row = bold_label(cx, &label, "dropdown-folder").on_press(move |cx| {
+                    on_toggle(cx, &folder_name);
+                });
+                if is_open {
+                    row.class("dropdown-folder-open");
+                    for entry in &folder.files {
+                        let entry_c = entry.clone();
+                        let on_file = on_select_file.clone();
+                        bold_label(cx, &entry.name, "dropdown-subitem").on_press(move |cx| {
+                            on_file(cx, &entry_c);
+                        });
+                    }
+                }
+            }
+        })
+        .class("dropdown-scroll-content");
+    })
+    .class("dropdown-scroll");
+}
+
 pub(super) fn build_wavetable_dropdown(
     cx: &mut Context,
     osc_idx: usize,
@@ -387,18 +443,25 @@ pub(super) fn build_wavetable_dropdown(
                     let g_dir = gui_context.clone();
                     Binding::new(cx, UiData::wavetables_dir_rev, move |cx, _| {
                         let cfg = crate::presets::JSynConfig::load();
-                        let entries = crate::presets::scan_wavetables(cfg.wavetables_dir.as_deref());
-                        for entry in entries {
-                            let bank_e = bank_dir.clone();
-                            let p_e = p_dir.clone();
-                            let g_e = g_dir.clone();
-                            let path_e = entry.path.clone();
-                            bold_label(cx, &entry.name, "dropdown-item").on_press(move |cx| {
+                        let tree =
+                            crate::presets::scan_wavetable_tree(cfg.wavetables_dir.as_deref());
+                        let expanded = UiData::expanded_wt_folder.get(cx);
+                        let bank_d = bank_dir.clone();
+                        let p_d = p_dir.clone();
+                        let g_d = g_dir.clone();
+                        build_directory_tree_items(
+                            cx,
+                            tree,
+                            expanded,
+                            |cx, folder_name| {
+                                cx.emit(UiEvent::ToggleWtFolder(folder_name.to_string()));
+                            },
+                            move |cx, entry| {
                                 cx.emit(PopupEvent::Close);
-                                let bank = bank_e.clone();
-                                let params = p_e.clone();
-                                let gui_context = g_e.clone();
-                                let path = path_e.clone();
+                                let bank = bank_d.clone();
+                                let params = p_d.clone();
+                                let gui_context = g_d.clone();
+                                let path = entry.path.clone();
                                 std::thread::spawn(move || {
                                     let _ = crate::presets::load_wavetable_file_for_osc(
                                         osc_idx,
@@ -408,8 +471,8 @@ pub(super) fn build_wavetable_dropdown(
                                         &bank,
                                     );
                                 });
-                            });
-                        }
+                            },
+                        );
                     });
                 },
             )

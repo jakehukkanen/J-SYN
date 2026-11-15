@@ -132,6 +132,8 @@ pub(crate) enum UiEvent {
     ClearPresetsDir,
     ClearWavetablesDir,
     RescanDirectories,
+    ToggleWtFolder(String),
+    TogglePresetFolder(String),
     SyncExternalState,
     ShowTooltip(TooltipState),
     HideTooltip,
@@ -154,6 +156,8 @@ pub(crate) struct UiData {
     pub current_preset_name: String,
     pub presets_dir_rev: u64,
     pub wavetables_dir_rev: u64,
+    pub expanded_preset_folder: Option<String>,
+    pub expanded_wt_folder: Option<String>,
     pub presets_dir_display: String,
     pub wavetables_dir_display: String,
     pub tooltip: TooltipState,
@@ -354,6 +358,7 @@ impl Model for UiData {
                 cfg.presets_dir = None;
                 let _ = cfg.save();
                 self.presets_dir_display = "(Not Set)".to_string();
+                self.expanded_preset_folder = None;
                 self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
                 meta.consume();
             }
@@ -362,6 +367,7 @@ impl Model for UiData {
                 cfg.wavetables_dir = None;
                 let _ = cfg.save();
                 self.wavetables_dir_display = "(Not Set)".to_string();
+                self.expanded_wt_folder = None;
                 self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
                 meta.consume();
             }
@@ -369,8 +375,28 @@ impl Model for UiData {
                 let cfg = crate::presets::JSynConfig::load();
                 self.presets_dir_display = format_dir_display(cfg.presets_dir.as_deref());
                 self.wavetables_dir_display = format_dir_display(cfg.wavetables_dir.as_deref());
+                self.expanded_preset_folder = None;
+                self.expanded_wt_folder = None;
                 self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
                 self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiEvent::ToggleWtFolder(folder) => {
+                if self.expanded_wt_folder.as_deref() == Some(folder.as_str()) {
+                    self.expanded_wt_folder = None;
+                } else {
+                    self.expanded_wt_folder = Some(folder.clone());
+                }
+                self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiEvent::TogglePresetFolder(folder) => {
+                if self.expanded_preset_folder.as_deref() == Some(folder.as_str()) {
+                    self.expanded_preset_folder = None;
+                } else {
+                    self.expanded_preset_folder = Some(folder.clone());
+                }
+                self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
                 meta.consume();
             }
             UiEvent::SyncExternalState => {
@@ -618,9 +644,9 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 move |cx| {
                     Binding::new(cx, UiData::presets_dir_rev, move |cx, _| {
                         let cfg = crate::presets::JSynConfig::load();
-                        let entries =
-                            crate::presets::scan_presets(cfg.presets_dir.as_deref());
-                        if entries.is_empty() {
+                        let tree =
+                            crate::presets::scan_preset_tree(cfg.presets_dir.as_deref());
+                        if tree.root_files.is_empty() && tree.folders.is_empty() {
                             bold_label(cx, "Set Presets Dir...", "dropdown-action-item").on_press(
                                 |cx| {
                                     cx.emit(PopupEvent::Close);
@@ -628,14 +654,22 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                                 },
                             );
                         } else {
-                            for entry in entries {
-                                let p = entry.path.clone();
-                                let n = entry.name.clone();
-                                bold_label(cx, &entry.name, "dropdown-item").on_press(move |cx| {
-                                    cx.emit(UiEvent::LoadPresetPath(p.clone(), n.clone()));
+                            let expanded = UiData::expanded_preset_folder.get(cx);
+                            controls::build_directory_tree_items(
+                                cx,
+                                tree,
+                                expanded,
+                                |cx, folder_name| {
+                                    cx.emit(UiEvent::TogglePresetFolder(folder_name.to_string()));
+                                },
+                                |cx, entry| {
+                                    cx.emit(UiEvent::LoadPresetPath(
+                                        entry.path.clone(),
+                                        entry.name.clone(),
+                                    ));
                                     cx.emit(PopupEvent::Close);
-                                });
-                            }
+                                },
+                            );
                         }
                     });
                 },
@@ -1069,6 +1103,8 @@ pub(crate) fn create(
             current_preset_name: "INIT".to_string(),
             presets_dir_rev: 0,
             wavetables_dir_rev: 0,
+            expanded_preset_folder: None,
+            expanded_wt_folder: None,
             presets_dir_display: format_dir_display(initial_cfg.presets_dir.as_deref()),
             wavetables_dir_display: format_dir_display(initial_cfg.wavetables_dir.as_deref()),
             tooltip: TooltipState::default(),

@@ -77,29 +77,118 @@ pub struct DirectoryFileEntry {
     pub path: PathBuf,
 }
 
-fn scan_extension(dir: Option<&str>, ext_lower: &str) -> Vec<DirectoryFileEntry> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryFolder {
+    /// Relative folder path from the configured root (e.g. `"Analog"` or `"Bass/Reese"`).
+    pub name: String,
+    pub files: Vec<DirectoryFileEntry>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DirectoryTree {
+    pub root_files: Vec<DirectoryFileEntry>,
+    pub folders: Vec<DirectoryFolder>,
+}
+
+fn is_hidden_name(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| s.starts_with('.'))
+}
+
+fn collect_tree_recursive(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    ext_lower: &str,
+    depth: usize,
+    out: &mut DirectoryTree,
+) {
+    if depth > 8 {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut files = Vec::new();
+    let mut subdirs = Vec::new();
+    for entry in rd.filter_map(|res| res.ok()) {
+        let path = entry.path();
+        if is_hidden_name(&path) {
+            continue;
+        }
+        if path.is_dir() {
+            subdirs.push(path);
+        } else if path.is_file() {
+            let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if ext.to_ascii_lowercase() != ext_lower {
+                continue;
+            }
+            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            files.push(DirectoryFileEntry {
+                name: name.to_string(),
+                path,
+            });
+        }
+    }
+    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    subdirs.sort_by(|a, b| {
+        a.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase()
+            .cmp(
+                &b.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_lowercase(),
+            )
+    });
+
+    if !files.is_empty() {
+        if depth == 0 {
+            out.root_files = files;
+        } else if let Ok(rel) = dir.strip_prefix(root) {
+            let folder_name = rel.to_string_lossy().replace('\\', "/");
+            out.folders.push(DirectoryFolder {
+                name: folder_name,
+                files,
+            });
+        }
+    }
+
+    for sub in subdirs {
+        collect_tree_recursive(root, &sub, ext_lower, depth + 1, out);
+    }
+}
+
+pub fn scan_directory_tree(dir: Option<&str>, ext_lower: &str) -> DirectoryTree {
     let Some(dir_str) = dir.filter(|s| !s.trim().is_empty()) else {
-        return Vec::new();
+        return DirectoryTree::default();
     };
-    let Ok(rd) = std::fs::read_dir(dir_str) else {
-        return Vec::new();
-    };
-    let mut entries: Vec<DirectoryFileEntry> = rd
-        .filter_map(|res| res.ok())
-        .filter_map(|entry| {
-            let path = entry.path();
-            if !path.is_file() {
-                return None;
-            }
-            let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-            if ext != ext_lower {
-                return None;
-            }
-            let name = path.file_stem()?.to_str()?.to_string();
-            Some(DirectoryFileEntry { name, path })
-        })
-        .collect();
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    let root = std::path::Path::new(dir_str);
+    let mut tree = DirectoryTree::default();
+    collect_tree_recursive(root, root, ext_lower, 0, &mut tree);
+    tree
+}
+
+pub fn scan_preset_tree(dir: Option<&str>) -> DirectoryTree {
+    scan_directory_tree(dir, "json")
+}
+
+pub fn scan_wavetable_tree(dir: Option<&str>) -> DirectoryTree {
+    scan_directory_tree(dir, "wav")
+}
+
+fn scan_extension(dir: Option<&str>, ext_lower: &str) -> Vec<DirectoryFileEntry> {
+    let tree = scan_directory_tree(dir, ext_lower);
+    let mut entries = tree.root_files;
+    for folder in tree.folders {
+        entries.extend(folder.files);
+    }
     entries
 }
 
@@ -107,6 +196,7 @@ pub fn scan_presets(dir: Option<&str>) -> Vec<DirectoryFileEntry> {
     scan_extension(dir, "json")
 }
 
+#[cfg(test)]
 pub fn scan_wavetables(dir: Option<&str>) -> Vec<DirectoryFileEntry> {
     scan_extension(dir, "wav")
 }
@@ -271,4 +361,52 @@ pub fn load_wavetable_file_for_osc(
     setter.set_parameter(&params.oscs[osc_idx].wt_select, WavetableChoice::Custom);
     setter.end_set_parameter(&params.oscs[osc_idx].wt_select);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_directory_tree_handles_subfolders_and_ignores_hidden_or_empty() {
+        let base = std::env::temp_dir().join(format!(
+            "jsyn_scan_tree_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("Analog")).unwrap();
+        std::fs::create_dir_all(base.join("Bass/Reese")).unwrap();
+        std::fs::create_dir_all(base.join("EmptyDir")).unwrap();
+        std::fs::create_dir_all(base.join(".hidden_dir")).unwrap();
+
+        std::fs::write(base.join("RootSaw.wav"), b"").unwrap();
+        std::fs::write(base.join(".Hidden.wav"), b"").unwrap();
+        std::fs::write(base.join("Analog/Juno.WAV"), b"").unwrap();
+        std::fs::write(base.join("Analog/Arp.wav"), b"").unwrap();
+        std::fs::write(base.join("Bass/Reese/Sub.wav"), b"").unwrap();
+        std::fs::write(base.join(".hidden_dir/Ignore.wav"), b"").unwrap();
+        std::fs::write(base.join("Analog/readme.txt"), b"").unwrap();
+
+        let tree = scan_wavetable_tree(base.to_str());
+        assert_eq!(tree.root_files.len(), 1);
+        assert_eq!(tree.root_files[0].name, "RootSaw");
+
+        assert_eq!(tree.folders.len(), 2);
+        assert_eq!(tree.folders[0].name, "Analog");
+        assert_eq!(
+            tree.folders[0]
+                .files
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Arp", "Juno"]
+        );
+        assert_eq!(tree.folders[1].name, "Bass/Reese");
+        assert_eq!(tree.folders[1].files[0].name, "Sub");
+
+        let flat = scan_wavetables(base.to_str());
+        assert_eq!(flat.len(), 4);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
