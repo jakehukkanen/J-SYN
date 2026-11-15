@@ -38,6 +38,7 @@ pub(crate) struct ModUiState {
     dragging_source: AtomicU8,
     hover_dest: AtomicU8,
     active_bottom_tab: AtomicU8,
+    active_modseq_subtab: AtomicU8,
     active_view_mode: AtomicU8,
     inspected_dest: AtomicU8,
     inspected_slot: AtomicU8,
@@ -56,6 +57,7 @@ impl ModUiState {
             dragging_source: AtomicU8::new(0),
             hover_dest: AtomicU8::new(UNSET_U8),
             active_bottom_tab: AtomicU8::new(bottom_tab_tag(BottomTab::VoiceEnv)),
+            active_modseq_subtab: AtomicU8::new(0),
             active_view_mode: AtomicU8::new(0),
             inspected_dest: AtomicU8::new(UNSET_U8),
             inspected_slot: AtomicU8::new(UNSET_U8),
@@ -132,6 +134,33 @@ impl ModUiState {
     pub fn set_active_tab(&self, tab: BottomTab) {
         self.active_bottom_tab
             .store(bottom_tab_tag(tab), Ordering::Relaxed);
+    }
+
+    pub fn set_modseq_subtab(&self, sub: ModSeqSubTab) {
+        let code = match sub {
+            ModSeqSubTab::MSeq(i) => (i as u8).min(3),
+            ModSeqSubTab::Env(i) => 4 + (i as u8).min(3),
+        };
+        self.active_modseq_subtab.store(code, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn is_source_tab_active(&self, src: ModMatrixSource) -> bool {
+        if self.active_bottom_tab.load(Ordering::Relaxed) != bottom_tab_tag(BottomTab::ModSeq) {
+            return false;
+        }
+        let code = self.active_modseq_subtab.load(Ordering::Relaxed);
+        match src {
+            ModMatrixSource::ModSeq1 => code == 0,
+            ModMatrixSource::ModSeq2 => code == 1,
+            ModMatrixSource::ModSeq3 => code == 2,
+            ModMatrixSource::ModSeq4 => code == 3,
+            ModMatrixSource::Env1 => code == 4,
+            ModMatrixSource::Env2 => code == 5,
+            ModMatrixSource::Env3 => code == 6,
+            ModMatrixSource::Env4 => code == 7,
+            _ => false,
+        }
     }
 
     #[inline]
@@ -610,6 +639,7 @@ impl View for ModSourcePill {
         let dpx = cx.scale_factor();
         let (r, g, b) = self.source.color_rgb();
         let is_dragging = self.mod_ui.dragging_source() == self.source;
+        let is_active_tab = self.mod_ui.is_source_tab_active(self.source);
         let is_hovered = self.hovered;
         let level = self.mod_ui.telemetry.source_level(self.source).clamp(0.0, 1.0);
 
@@ -617,6 +647,12 @@ impl View for ModSourcePill {
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 3.0 * dpx);
         let fill = if is_dragging {
             vg::Color::rgba(r, g, b, 90)
+        } else if is_active_tab {
+            vg::Color::rgb(
+                (54 + (r as u16 / 10)).min(255) as u8,
+                (46 + (g as u16 / 10)).min(255) as u8,
+                (40 + (b as u16 / 10)).min(255) as u8,
+            )
         } else if is_hovered {
             vg::Color::rgb(68, 56, 46)
         } else {
@@ -639,24 +675,25 @@ impl View for ModSourcePill {
         }
 
         // Left colored badge accent + subtle outline
+        let stripe_w = if is_active_tab { 3.0 * dpx } else { 2.2 * dpx };
         let mut stripe = vg::Path::new();
         stripe.rounded_rect(
             bounds.x + 1.5 * dpx,
             bounds.y + 3.0 * dpx,
-            2.2 * dpx,
+            stripe_w,
             bounds.h - 6.0 * dpx,
             1.0 * dpx,
         );
         canvas.fill_path(&stripe, &vg::Paint::color(vg::Color::rgb(r, g, b)));
 
-        let mut border = vg::Paint::color(if is_dragging {
+        let mut border = vg::Paint::color(if is_dragging || is_active_tab {
             vg::Color::rgb(r, g, b)
         } else if is_hovered {
             vg::Color::rgba(r, g, b, 195)
         } else {
             vg::Color::rgba(r, g, b, 90)
         });
-        border.set_line_width(1.0 * dpx);
+        border.set_line_width((if is_active_tab { 1.35 } else { 1.0 }) * dpx);
         canvas.stroke_path(&bg, &border);
     }
 }

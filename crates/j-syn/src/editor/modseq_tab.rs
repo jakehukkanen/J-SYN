@@ -1149,18 +1149,6 @@ impl View for AdsrPreviewScope {
     }
 }
 
-fn build_subtab_button(cx: &mut Context, sub: ModSeqSubTab, title: &'static str) {
-    Button::new(
-        cx,
-        move |cx| cx.emit(UiEvent::SelectModSeqSubTab(sub)),
-        move |cx| bold_label(cx, title, "subtab-btn-label").hoverable(false),
-    )
-    .class("subtab-btn")
-    .checked(UiData::modseq_subtab.map(move |cur| *cur == sub))
-    .width(Pixels(45.0))
-    .height(Pixels(18.0));
-}
-
 fn build_labeled_dropdown<E, P, FMap>(
     cx: &mut Context,
     title: &'static str,
@@ -1230,181 +1218,156 @@ pub(super) fn build_modseq_tab(
     mod_ui: Arc<ModUiState>,
 ) {
     VStack::new(cx, move |cx| {
-        // Top sub-selector bar (MSEQ 1..4 / ENV 1..4 + Performer stamps or MSEG actions)
-        HStack::new(cx, {
-            let params_top = params.clone();
-            let mod_ui_top = mod_ui.clone();
-            move |cx| {
-                build_subtab_button(cx, ModSeqSubTab::MSeq(0), "MSEQ 1");
-                build_subtab_button(cx, ModSeqSubTab::MSeq(1), "MSEQ 2");
-                build_subtab_button(cx, ModSeqSubTab::MSeq(2), "MSEQ 3");
-                build_subtab_button(cx, ModSeqSubTab::MSeq(3), "MSEQ 4");
-                build_subtab_button(cx, ModSeqSubTab::Env(0), "ENV 1");
-                build_subtab_button(cx, ModSeqSubTab::Env(1), "ENV 2");
-                build_subtab_button(cx, ModSeqSubTab::Env(2), "ENV 3");
-                build_subtab_button(cx, ModSeqSubTab::Env(3), "ENV 4");
+        let params_top = params.clone();
+        let mod_ui_top = mod_ui.clone();
+        Binding::new(cx, UiData::modseq_subtab, move |cx, sub| {
+            let p_inner = params_top.clone();
+            let u_inner = mod_ui_top.clone();
+            if let ModSeqSubTab::MSeq(seq_idx) = sub.get(cx) {
+                HStack::new(cx, move |cx| {
+                    let seq_num = seq_idx + 1;
+                    bold_label(cx, &format!("MS {seq_num}"), "module-title")
+                        .width(Auto)
+                        .height(Auto)
+                        .top(Stretch(1.0))
+                        .bottom(Stretch(1.0));
 
-                Element::new(cx).width(Stretch(1.0));
+                    Element::new(cx).width(Stretch(1.0));
 
-                let params_hdr = params_top.clone();
-                let ui_hdr = mod_ui_top.clone();
-                Binding::new(cx, UiData::modseq_subtab, move |cx, sub| {
-                    let p_inner = params_hdr.clone();
-                    let u_inner = ui_hdr.clone();
-                    match sub.get(cx) {
-                        ModSeqSubTab::MSeq(seq_idx) => {
-                            HStack::new(
-                                cx,
-                                ParamWidgetBase::build_view(
-                                    UiData::params,
-                                    move |pr| &pr.modseqs[seq_idx].mode,
-                                    move |cx, param_data| {
-                                        let is_mseg = param_data.make_lens(|p| {
-                                            p.unmodulated_plain_value() == ModSeqModeParam::Mseg
-                                        });
-                                        let p_m = p_inner.clone();
-                                        let u_m = u_inner.clone();
-                                        Binding::new(cx, is_mseg, move |cx, m| {
-                                            let p_mode = p_m.clone();
-                                            let u_mode = u_m.clone();
-                                            if m.get(cx) {
-                                                HStack::new(cx, move |cx| {
-                                                    bold_label(
-                                                        cx,
-                                                        "Double-click to add/delete nodes  •  Right-drag segment to bend",
-                                                        "mini-label",
-                                                    )
-                                                    .width(Auto)
-                                                    .height(Auto)
-                                                    .top(Stretch(1.0))
-                                                    .bottom(Stretch(1.0));
+                    let p_hdr = p_inner.clone();
+                    let u_hdr = u_inner.clone();
+                    HStack::new(
+                        cx,
+                        ParamWidgetBase::build_view(
+                            UiData::params,
+                            move |pr| &pr.modseqs[seq_idx].mode,
+                            move |cx, param_data| {
+                                let is_mseg = param_data.make_lens(|p| {
+                                    p.unmodulated_plain_value() == ModSeqModeParam::Mseg
+                                });
+                                let p_m = p_hdr.clone();
+                                let u_m = u_hdr.clone();
+                                Binding::new(cx, is_mseg, move |cx, m| {
+                                    let p_mode = p_m.clone();
+                                    let u_mode = u_m.clone();
+                                    if m.get(cx) {
+                                        HStack::new(cx, move |cx| {
+                                            bold_label(
+                                                cx,
+                                                "Double-click to add/delete nodes  •  Right-drag segment to bend",
+                                                "mini-label",
+                                            )
+                                            .width(Auto)
+                                            .height(Auto)
+                                            .top(Stretch(1.0))
+                                            .bottom(Stretch(1.0));
 
-                                                    LfoPresetBar::new(cx, seq_idx, p_mode.clone())
-                                                        .width(Pixels(306.0))
-                                                        .height(Pixels(18.0));
-
-                                                    let p_rst = p_mode;
-                                                    Button::new(
-                                                        cx,
-                                                        move |cx| {
-                                                            let mut bank =
-                                                                p_rst.modseq_steps.snapshot();
-                                                            bank.msegs[seq_idx] =
-                                                                j_syn_dsp::MsegCurve::default();
-                                                            p_rst.modseq_steps.store_value(bank);
-                                                            cx.emit(UiEvent::ModUiChanged);
-                                                            cx.needs_redraw();
-                                                        },
-                                                        |cx| {
-                                                            bold_label(cx, "RESET", "preset-btn-label")
-                                                                .child_space(Stretch(1.0))
-                                                                .hoverable(false)
-                                                        },
-                                                    )
-                                                    .class("preset-btn")
-                                                    .width(Pixels(44.0))
-                                                    .height(Pixels(18.0));
-                                                })
-                                                .col_between(Pixels(6.0))
-                                                .width(Auto)
+                                            LfoPresetBar::new(cx, seq_idx, p_mode.clone())
+                                                .width(Pixels(306.0))
                                                 .height(Pixels(18.0));
-                                            } else {
-                                                HStack::new(cx, move |cx| {
-                                                    bold_label(
-                                                        cx,
-                                                        "Drag grid to stamp  •  Right-click tile to fill",
-                                                        "mini-label",
-                                                    )
-                                                    .width(Auto)
-                                                    .height(Auto)
-                                                    .top(Stretch(1.0))
-                                                    .bottom(Stretch(1.0));
 
-                                                    let p_fill = p_mode.clone();
-                                                    let u_fill = u_mode;
-                                                    Button::new(
-                                                        cx,
-                                                        move |cx| {
-                                                            let shape = u_fill.active_stamp();
-                                                            let n = p_fill.modseqs[seq_idx]
-                                                                .num_steps
-                                                                .value()
-                                                                .clamp(2, MAX_MODSEQ_STEPS as i32)
-                                                                as usize;
-                                                            let mut bank =
-                                                                p_fill.modseq_steps.snapshot();
-                                                            for i in 0..n {
-                                                                bank.seqs[seq_idx][i] =
-                                                                    ModSeqStep::stamped(
-                                                                        shape, 1.0, 0.0,
-                                                                    );
-                                                            }
-                                                            p_fill.modseq_steps.store_value(bank);
-                                                            cx.needs_redraw();
-                                                        },
-                                                        |cx| {
-                                                            bold_label(cx, "FILL", "preset-btn-label")
-                                                                .child_space(Stretch(1.0))
-                                                                .hoverable(false)
-                                                        },
-                                                    )
-                                                    .class("preset-btn")
-                                                    .width(Pixels(38.0))
-                                                    .height(Pixels(18.0));
+                                            let p_rst = p_mode;
+                                            Button::new(
+                                                cx,
+                                                move |cx| {
+                                                    let mut bank = p_rst.modseq_steps.snapshot();
+                                                    bank.msegs[seq_idx] =
+                                                        j_syn_dsp::MsegCurve::default();
+                                                    p_rst.modseq_steps.store_value(bank);
+                                                    cx.emit(UiEvent::ModUiChanged);
+                                                    cx.needs_redraw();
+                                                },
+                                                |cx| {
+                                                    bold_label(cx, "RESET", "preset-btn-label")
+                                                        .child_space(Stretch(1.0))
+                                                        .hoverable(false)
+                                                },
+                                            )
+                                            .class("preset-btn")
+                                            .width(Pixels(44.0))
+                                            .height(Pixels(18.0));
+                                        })
+                                        .col_between(Pixels(6.0))
+                                        .width(Auto)
+                                        .height(Pixels(18.0));
+                                    } else {
+                                        HStack::new(cx, move |cx| {
+                                            bold_label(
+                                                cx,
+                                                "Drag grid to stamp  •  Right-click tile to fill",
+                                                "mini-label",
+                                            )
+                                            .width(Auto)
+                                            .height(Auto)
+                                            .top(Stretch(1.0))
+                                            .bottom(Stretch(1.0));
 
-                                                    let p_clr = p_mode;
-                                                    Button::new(
-                                                        cx,
-                                                        move |cx| {
-                                                            let mut bank =
-                                                                p_clr.modseq_steps.snapshot();
-                                                            for step in bank.seqs[seq_idx].iter_mut() {
-                                                                *step = ModSeqStep::default();
-                                                            }
-                                                            p_clr.modseq_steps.store_value(bank);
-                                                            cx.needs_redraw();
-                                                        },
-                                                        |cx| {
-                                                            bold_label(cx, "CLEAR", "preset-btn-label")
-                                                                .child_space(Stretch(1.0))
-                                                                .hoverable(false)
-                                                        },
-                                                    )
-                                                    .class("preset-btn")
-                                                    .width(Pixels(44.0))
-                                                    .height(Pixels(18.0));
-                                                })
-                                                .col_between(Pixels(5.0))
-                                                .width(Auto)
-                                                .height(Pixels(18.0));
-                                            }
-                                        });
-                                    },
-                                ),
-                            )
-                            .width(Auto)
-                            .height(Pixels(18.0));
-                        }
-                        ModSeqSubTab::Env(env_idx) => {
-                            let env_num = env_idx + 1;
-                            let hint = if env_idx == 0 {
-                                String::from("ENV 1 (AMP) ADSR  |  DRAG E1 PILL TO MODULATE")
-                            } else {
-                                format!("ENV {env_num} ADSR  |  DRAG E{env_num} PILL TO MODULATE")
-                            };
-                            bold_label(cx, &hint, "mini-label")
-                                .width(Auto)
-                                .height(Pixels(18.0))
-                                .child_top(Stretch(1.0))
-                                .child_bottom(Stretch(1.0));
-                        }
-                    }
-                });
+                                            let p_fill = p_mode.clone();
+                                            let u_fill = u_mode;
+                                            Button::new(
+                                                cx,
+                                                move |cx| {
+                                                    let shape = u_fill.active_stamp();
+                                                    let n = p_fill.modseqs[seq_idx]
+                                                        .num_steps
+                                                        .value()
+                                                        .clamp(2, MAX_MODSEQ_STEPS as i32)
+                                                        as usize;
+                                                    let mut bank = p_fill.modseq_steps.snapshot();
+                                                    for i in 0..n {
+                                                        bank.seqs[seq_idx][i] =
+                                                            ModSeqStep::stamped(shape, 1.0, 0.0);
+                                                    }
+                                                    p_fill.modseq_steps.store_value(bank);
+                                                    cx.needs_redraw();
+                                                },
+                                                |cx| {
+                                                    bold_label(cx, "FILL", "preset-btn-label")
+                                                        .child_space(Stretch(1.0))
+                                                        .hoverable(false)
+                                                },
+                                            )
+                                            .class("preset-btn")
+                                            .width(Pixels(38.0))
+                                            .height(Pixels(18.0));
+
+                                            let p_clr = p_mode;
+                                            Button::new(
+                                                cx,
+                                                move |cx| {
+                                                    let mut bank = p_clr.modseq_steps.snapshot();
+                                                    for step in bank.seqs[seq_idx].iter_mut() {
+                                                        *step = ModSeqStep::default();
+                                                    }
+                                                    p_clr.modseq_steps.store_value(bank);
+                                                    cx.needs_redraw();
+                                                },
+                                                |cx| {
+                                                    bold_label(cx, "CLEAR", "preset-btn-label")
+                                                        .child_space(Stretch(1.0))
+                                                        .hoverable(false)
+                                                },
+                                            )
+                                            .class("preset-btn")
+                                            .width(Pixels(44.0))
+                                            .height(Pixels(18.0));
+                                        })
+                                        .col_between(Pixels(5.0))
+                                        .width(Auto)
+                                        .height(Pixels(18.0));
+                                    }
+                                });
+                            },
+                        ),
+                    )
+                    .width(Auto)
+                    .height(Pixels(18.0));
+                })
+                .col_between(Pixels(4.0))
+                .width(Stretch(1.0))
+                .height(Pixels(20.0));
             }
-        })
-        .col_between(Pixels(3.0))
-        .width(Stretch(1.0))
-        .height(Pixels(20.0));
+        });
 
         // Main subtab body
         let params_body = params.clone();
@@ -1654,8 +1617,8 @@ pub(super) fn build_modseq_tab(
                                 "ATTACK",
                                 false,
                                 accent,
-                                30.0,
-                                68.0,
+                                38.0,
+                                72.0,
                             );
                             build_knob_cell_with_readout(
                                 cx,
@@ -1664,8 +1627,8 @@ pub(super) fn build_modseq_tab(
                                 "DECAY",
                                 false,
                                 accent,
-                                30.0,
-                                68.0,
+                                38.0,
+                                72.0,
                             );
                             build_knob_cell_with_readout(
                                 cx,
@@ -1674,8 +1637,8 @@ pub(super) fn build_modseq_tab(
                                 "SUSTAIN",
                                 false,
                                 GOLD_RGB,
-                                30.0,
-                                68.0,
+                                38.0,
+                                72.0,
                             );
                             build_knob_cell_with_readout(
                                 cx,
@@ -1684,8 +1647,8 @@ pub(super) fn build_modseq_tab(
                                 "RELEASE",
                                 false,
                                 CORAL_RGB,
-                                30.0,
-                                68.0,
+                                38.0,
+                                72.0,
                             );
                         })
                         .col_between(Pixels(14.0))

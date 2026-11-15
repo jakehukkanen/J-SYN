@@ -175,10 +175,19 @@ label {
 dropdown {
   background-color: #26201b;
   border-width: 1px;
-  border-color: #52463d;
+  border-color: #463c34;
+  outline-width: 0px;
+  outline-color: #463c34;
   border-radius: 3px;
   child-top: 0px;
   child-bottom: 0px;
+}
+
+dropdown:focus,
+dropdown:focus-within,
+dropdown:active {
+  border-color: #6b5d52;
+  outline-width: 0px;
 }
 
 dropdown:hover {
@@ -189,6 +198,8 @@ dropdown:hover {
 dropdown .title {
   width: 1s;
   height: 1s;
+  border-width: 0px;
+  outline-width: 0px;
   child-left: 5px;
   child-right: 5px;
   child-top: 0px;

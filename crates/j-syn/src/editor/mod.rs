@@ -151,6 +151,7 @@ impl Model for UiData {
             }
             UiEvent::SelectModSeqSubTab(sub) => {
                 self.modseq_subtab = *sub;
+                self.mod_ui.set_modseq_subtab(*sub);
                 self.tooltip.visible = false;
                 meta.consume();
             }
