@@ -35,6 +35,7 @@ mod insert_panel;
 mod macros_tab;
 mod matrix_tab;
 mod mod_bar;
+mod modseq_canvases;
 mod modseq_tab;
 mod noise_panel;
 mod osc_panel;
@@ -42,23 +43,21 @@ mod routing_tab;
 mod scope;
 mod settings_view;
 mod theme;
+mod voice_tab;
 mod widgets;
 
 use controls::{
-    bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_flex_knob_cell_mod,
-    build_flex_knob_cell_mod_dim, build_header_knob_cell, build_knob_cell, build_mini_pill_cell,
-    build_module_header, build_tab_button, build_ui_scale_dropdown, ArrowButton, ArrowDir,
-    CrossButton,
+    bold_label, build_dropdown_trigger_labels, build_header_knob_cell, build_tab_button,
+    build_ui_scale_dropdown, ArrowButton, ArrowDir, CrossButton,
 };
 use filter_panel::build_filter_panel;
 use insert_panel::build_insert_panel;
 use macros_tab::build_macros_tab;
-use mod_bar::{bottom_tab_tag, build_mod_source_bar, ModUiState};
+use mod_bar::{build_mod_source_bar, ModUiState};
 use modseq_tab::{build_modseq_tab, ModSeqSubTab};
 use noise_panel::build_noise_panel;
-use osc_panel::{build_osc_panel, osc_enabled_fn};
+use osc_panel::build_osc_panel;
 use routing_tab::build_routing_tab;
-use widgets::LedToggleSwitch;
 
 const BASE_WIDTH: u32 = 1160;
 const BASE_HEIGHT: u32 = 778;
@@ -140,6 +139,8 @@ pub(crate) enum UiEvent {
     ModUiChanged,
     ModValChanged,
     SetUiScale(u32),
+    SetGearRadius(f32),
+    CommitGearRadius,
     SelectTheme(String),
     SetMacroName(usize, String),
     InitPatch,
@@ -177,6 +178,7 @@ pub(crate) struct UiData {
     pub mod_ui_rev: u64,
     pub mod_val_rev: u64,
     pub ui_scale_pct: u32,
+    pub gear_radius: f32,
     pub theme_name: String,
     pub themes_rev: u64,
     #[lens(ignore)]
@@ -242,6 +244,16 @@ impl Model for UiData {
                 self.ui_scale_pct = *pct;
                 let mut cfg = crate::presets::JSynConfig::load();
                 cfg.ui_scale = *pct;
+                let _ = cfg.save();
+                meta.consume();
+            }
+            UiEvent::SetGearRadius(r) => {
+                self.gear_radius = r.clamp(0.10, 0.60);
+                meta.consume();
+            }
+            UiEvent::CommitGearRadius => {
+                let mut cfg = crate::presets::JSynConfig::load();
+                cfg.gear_radius = self.gear_radius.clamp(0.10, 0.60);
                 let _ = cfg.save();
                 meta.consume();
             }
@@ -574,6 +586,7 @@ struct GearIcon;
 impl GearIcon {
     fn new<'a>(cx: &'a mut Context) -> Handle<'a, Self> {
         Self.build(cx, |_| {})
+            .bind(UiData::gear_radius, |mut handle, _| handle.needs_redraw())
     }
 }
 
@@ -599,7 +612,8 @@ impl View for GearIcon {
 
         let cx_p = bounds.x + bounds.w * 0.5;
         let cy_p = bounds.y + bounds.h * 0.5;
-        let r_outer = bounds.w.min(bounds.h) * 0.50;
+        let radius_ratio = UiData::gear_radius.get(cx).clamp(0.10, 0.60);
+        let r_outer = bounds.w.min(bounds.h) * radius_ratio;
         let r_inner = r_outer * 0.68;
         let r_hole = r_outer * 0.31;
         let teeth = 6usize;
@@ -938,222 +952,12 @@ fn build_bottom_tabs(
         Binding::new(cx, UiData::active_tab, move |cx, active| {
             match active.get(cx) {
                 BottomTab::VoiceEnv => {
-                    HStack::new(cx, |cx| {
-                        VStack::new(cx, |cx| {
-                            build_module_header(cx, "KEYTRACKING", 18.0);
-
-                            HStack::new(cx, move |cx| {
-                                build_knob_cell(
-                                    cx,
-                                    UiData::params,
-                                    |p| &p.filters[0].keytrack,
-                                    "F1 KEYTRK",
-                                    false,
-                                    AMBER_RGB,
-                                    32.0,
-                                    62.0,
-                                );
-                                build_knob_cell(
-                                    cx,
-                                    UiData::params,
-                                    |p| &p.filters[1].keytrack,
-                                    "F2 KEYTRK",
-                                    false,
-                                    CORAL_RGB,
-                                    32.0,
-                                    62.0,
-                                );
-
-                                HStack::new(cx, |cx| {
-                                    LedToggleSwitch::new(
-                                        cx,
-                                        UiData::params,
-                                        |p| &p.oscs[0].keytrack,
-                                        "OSC 1",
-                                        "OSC 1",
-                                        AMBER_RGB,
-                                    )
-                                    .width(Stretch(1.0))
-                                    .height(Pixels(24.0));
-                                    LedToggleSwitch::new(
-                                        cx,
-                                        UiData::params,
-                                        |p| &p.oscs[1].keytrack,
-                                        "OSC 2",
-                                        "OSC 2",
-                                        GOLD_RGB,
-                                    )
-                                    .width(Stretch(1.0))
-                                    .height(Pixels(24.0));
-                                    LedToggleSwitch::new(
-                                        cx,
-                                        UiData::params,
-                                        |p| &p.oscs[2].keytrack,
-                                        "OSC 3",
-                                        "OSC 3",
-                                        CORAL_RGB,
-                                    )
-                                    .width(Stretch(1.0))
-                                    .height(Pixels(24.0));
-                                    LedToggleSwitch::new(
-                                        cx,
-                                        UiData::params,
-                                        |p| &p.oscs[3].keytrack,
-                                        "OSC 4",
-                                        "OSC 4",
-                                        AMBER_RGB,
-                                    )
-                                    .width(Stretch(1.0))
-                                    .height(Pixels(24.0));
-                                })
-                                .col_between(Pixels(6.0))
-                                .width(Stretch(1.0))
-                                .height(Pixels(24.0))
-                                .top(Stretch(1.0))
-                                .bottom(Stretch(1.0));
-                            })
-                            .col_between(Pixels(10.0))
-                            .child_left(Pixels(8.0))
-                            .child_right(Pixels(8.0))
-                            .child_top(Stretch(1.0))
-                            .child_bottom(Stretch(1.0))
-                            .width(Stretch(1.0))
-                            .height(Stretch(1.0));
-                        })
-                        .class("hardware-module")
-                        .class("drawer-module")
-                        .width(Stretch(1.38))
-                        .height(Stretch(1.0));
-
-                        VStack::new(cx, {
-                            let params_v = params.clone();
-                            let gui_v = gui_context.clone();
-                            let mod_ui_v = mod_ui.clone();
-                            move |cx| {
-                                build_module_header(cx, "VOICING", 18.0);
-                                HStack::new(cx, move |cx| {
-                                    VStack::new(cx, move |cx| {
-                                        bold_label(cx, "MODE", "mini-label")
-                                            .width(Stretch(1.0))
-                                            .height(Pixels(13.0))
-                                            .child_space(Stretch(1.0));
-                                        build_bool_dropdown(
-                                            cx,
-                                            params_v.clone(),
-                                            gui_v.clone(),
-                                            |p| &p.mono_legato,
-                                            "Poly",
-                                            "Mono",
-                                        )
-                                        .width(Stretch(1.0))
-                                        .height(Pixels(24.0));
-                                    })
-                                    .row_between(Pixels(2.0))
-                                    .width(Pixels(62.0))
-                                    .height(Auto)
-                                    .top(Stretch(1.0))
-                                    .bottom(Stretch(1.0));
-
-                                    build_mini_pill_cell(
-                                        cx,
-                                        UiData::params,
-                                        |p| &p.pitch_bend_range,
-                                        "PB RANGE",
-                                        24,
-                                        52.0,
-                                    );
-
-                                    LedToggleSwitch::new(
-                                        cx,
-                                        UiData::params,
-                                        |p| &p.mpe_enabled,
-                                        "MPE",
-                                        "MPE",
-                                        AMBER_RGB,
-                                    )
-                                    .width(Pixels(54.0))
-                                    .height(Pixels(22.0))
-                                    .top(Stretch(1.0))
-                                    .bottom(Stretch(1.0));
-
-                                    build_mini_pill_cell(
-                                        cx,
-                                        UiData::params,
-                                        |p| &p.mpe_pitch_bend_range,
-                                        "MPE PB",
-                                        48,
-                                        50.0,
-                                    );
-
-                                    build_flex_knob_cell_mod(
-                                        cx,
-                                        UiData::params,
-                                        |p| &p.glide_ms,
-                                        "GLIDE",
-                                        false,
-                                        GOLD_RGB,
-                                        32.0,
-                                        ModDestination::GlideMs,
-                                        mod_ui_v.clone(),
-                                        bottom_tab_tag(BottomTab::VoiceEnv),
-                                    );
-                                })
-                                .col_between(Pixels(6.0))
-                                .child_left(Pixels(6.0))
-                                .child_right(Pixels(6.0))
-                                .child_top(Stretch(1.0))
-                                .child_bottom(Stretch(1.0))
-                                .width(Stretch(1.0))
-                                .height(Stretch(1.0));
-                            }
-                        })
-                        .class("hardware-module")
-                        .class("drawer-module")
-                        .width(Stretch(1.04))
-                        .height(Stretch(1.0));
-
-                        VStack::new(cx, {
-                            let params = params.clone();
-                            let mod_ui = mod_ui.clone();
-                            move |cx| {
-                                build_module_header(cx, "OSCILLATOR PAN", 18.0);
-                                HStack::new(cx, move |cx| {
-                                    const PAN_LABELS: [&str; 4] =
-                                        ["OSC 1 PAN", "OSC 2 PAN", "OSC 3 PAN", "OSC 4 PAN"];
-                                    const PAN_ACCENTS: [(u8, u8, u8); 4] =
-                                        [AMBER_RGB, GOLD_RGB, CORAL_RGB, AMBER_RGB];
-                                    for idx in 0..4 {
-                                        build_flex_knob_cell_mod_dim(
-                                            cx,
-                                            UiData::params,
-                                            move |p| &p.oscs[idx].pan,
-                                            PAN_LABELS[idx],
-                                            true,
-                                            PAN_ACCENTS[idx],
-                                            32.0,
-                                            ModDestination::osc_pan(idx),
-                                            mod_ui.clone(),
-                                            bottom_tab_tag(BottomTab::VoiceEnv),
-                                            params.clone(),
-                                            osc_enabled_fn(idx),
-                                        );
-                                    }
-                                })
-                                .col_between(Pixels(8.0))
-                                .child_top(Stretch(1.0))
-                                .child_bottom(Stretch(1.0))
-                                .width(Stretch(1.0))
-                                .height(Stretch(1.0));
-                            }
-                        })
-                        .class("hardware-module")
-                        .class("drawer-module")
-                        .width(Stretch(0.88))
-                        .height(Stretch(1.0));
-                    })
-                    .col_between(Pixels(6.0))
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0));
+                    voice_tab::build_voice_tab(
+                        cx,
+                        params.clone(),
+                        gui_context.clone(),
+                        mod_ui_tabs.clone(),
+                    );
                 }
                 BottomTab::ModSeq => {
                     build_modseq_tab(cx, params.clone(), gui_context.clone(), mod_ui_tabs.clone());
@@ -1207,6 +1011,7 @@ pub(crate) fn create(
             mod_ui_rev: 0,
             mod_val_rev: 0,
             ui_scale_pct: initial_scale_pct,
+            gear_radius: initial_cfg.gear_radius.clamp(0.10, 0.60),
             theme_name: initial_theme.name.clone(),
             themes_rev: 0,
             active_theme: initial_theme,

@@ -19,7 +19,11 @@ fn default_ui_scale() -> u32 {
     100
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+fn default_gear_radius() -> f32 {
+    0.32
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JSynConfig {
     #[serde(default)]
     pub presets_dir: Option<String>,
@@ -29,6 +33,8 @@ pub struct JSynConfig {
     pub theme: String,
     #[serde(default = "default_ui_scale")]
     pub ui_scale: u32,
+    #[serde(default = "default_gear_radius")]
+    pub gear_radius: f32,
 }
 
 impl Default for JSynConfig {
@@ -38,6 +44,7 @@ impl Default for JSynConfig {
             wavetables_dir: None,
             theme: default_theme_name(),
             ui_scale: default_ui_scale(),
+            gear_radius: default_gear_radius(),
         }
     }
 }
