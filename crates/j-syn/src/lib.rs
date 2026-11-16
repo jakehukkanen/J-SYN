@@ -936,7 +936,7 @@ impl Default for ModSeqPluginParams {
 }
 
 impl ModSeqPluginParams {
-    pub fn to_dsp(&self) -> ModSeqParams {
+    pub fn to_dsp(&self, groove_swing: bool) -> ModSeqParams {
         ModSeqParams {
             mode: self.mode.value().into(),
             sync_mode: self.sync_mode.value().into(),
@@ -946,6 +946,7 @@ impl ModSeqPluginParams {
             num_steps: self.num_steps.value().clamp(2, 16) as usize,
             smooth: self.smooth.value(),
             rate_mod: 0.0,
+            groove_swing,
         }
     }
 }
@@ -972,6 +973,9 @@ pub struct JSynPluginParams {
 
     #[id = "master_limiter"]
     pub master_limiter: BoolParam,
+
+    #[id = "modseq_swing"]
+    pub modseq_swing: BoolParam,
 
     #[id = "hq_mode"]
     pub hq_mode: BoolParam,
@@ -1165,6 +1169,7 @@ impl Default for JSynPluginParams {
 
             dc_blocker: BoolParam::new("DC Blocker", true),
             master_limiter: BoolParam::new("Safety Limiter", false),
+            modseq_swing: BoolParam::new("ModSeq Groove Swing", false),
 
             hq_mode: BoolParam::new("HQ Mode", false),
             mono_legato: BoolParam::new("Mono Legato", false),
@@ -1350,12 +1355,15 @@ impl Plugin for JSynPlugin {
                 self.params.mod_envs[1].to_dsp(),
                 self.params.mod_envs[2].to_dsp(),
             ],
-            modseqs: [
-                self.params.modseqs[0].to_dsp(),
-                self.params.modseqs[1].to_dsp(),
-                self.params.modseqs[2].to_dsp(),
-                self.params.modseqs[3].to_dsp(),
-            ],
+            modseqs: {
+                let swing = self.params.modseq_swing.value();
+                [
+                    self.params.modseqs[0].to_dsp(swing),
+                    self.params.modseqs[1].to_dsp(swing),
+                    self.params.modseqs[2].to_dsp(swing),
+                    self.params.modseqs[3].to_dsp(swing),
+                ]
+            },
             modseq_steps,
             mod_matrix,
             macros: std::array::from_fn(|i| self.params.macros[i].value.value()),

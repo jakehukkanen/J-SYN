@@ -12,7 +12,7 @@ use super::controls::{
     bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_module_header,
 };
 use super::widgets::LedToggleSwitch;
-use super::{UiData, UiEvent, AMBER_RGB, CORAL_RGB};
+use super::{UiData, UiEvent, AMBER_RGB, CORAL_RGB, GOLD_RGB};
 
 pub(super) fn build_settings_view(
     cx: &mut Context,
@@ -146,6 +146,34 @@ pub(super) fn build_settings_view(
                     bold_label(
                         cx,
                         "Zero-latency brickwall safety limiter catching output peaks above -0.1 dBFS to protect ears and DAW buses.",
+                        "setting-desc",
+                    )
+                    .width(Stretch(1.0))
+                    .height(Auto)
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0));
+                })
+                .col_between(Pixels(14.0))
+                .width(Stretch(1.0))
+                .height(Pixels(34.0));
+
+                HStack::new(cx, |cx| {
+                    LedToggleSwitch::new(
+                        cx,
+                        UiData::params,
+                        |p| &p.modseq_swing,
+                        "MODSEQ SWING",
+                        "MODSEQ SWING",
+                        GOLD_RGB,
+                    )
+                    .width(Pixels(142.0))
+                    .height(Pixels(26.0))
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0));
+
+                    bold_label(
+                        cx,
+                        "Experimental: Applies alternating step-phase tension warping (groove swing) to MODSEQ sequences and keeps step tension on stamp. Off = straight step modulation.",
                         "setting-desc",
                     )
                     .width(Stretch(1.0))

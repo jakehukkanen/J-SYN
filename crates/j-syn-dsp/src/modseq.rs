@@ -352,30 +352,30 @@ impl Default for ModSeqStepBank {
         let mut s2 = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
         let mut s3 = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
 
-        // MODSEQ 1: Expressive 8-step rhythmic pluck/ramp
+        // MODSEQ 1: Expressive 8-step rhythmic pluck/ramp (zero swing tension by default)
         ModSeqShapePreset::RampDown.apply_to_sequence(&mut s0, 8);
         s0[0] = ModSeqStep {
             start_level: 1.0,
             end_level: 0.15,
-            tension: -0.4,
+            tension: 0.0,
             shape: ModSeqStepShape::Linear,
         };
         s0[2] = ModSeqStep {
             start_level: 0.75,
             end_level: 0.1,
-            tension: -0.35,
+            tension: 0.0,
             shape: ModSeqStepShape::Linear,
         };
         s0[4] = ModSeqStep {
             start_level: 0.9,
             end_level: 0.25,
-            tension: -0.3,
+            tension: 0.0,
             shape: ModSeqStepShape::Linear,
         };
         s0[6] = ModSeqStep {
             start_level: 0.65,
             end_level: 0.0,
-            tension: -0.5,
+            tension: 0.0,
             shape: ModSeqStepShape::Linear,
         };
 
@@ -623,6 +623,7 @@ pub struct ModSeqParams {
     pub num_steps: usize,
     pub smooth: f32,
     pub rate_mod: f32,
+    pub groove_swing: bool,
 }
 
 impl Default for ModSeqParams {
@@ -636,6 +637,7 @@ impl Default for ModSeqParams {
             num_steps: 8,
             smooth: 0.05,
             rate_mod: 0.0,
+            groove_swing: false,
         }
     }
 }
@@ -714,6 +716,29 @@ pub fn evaluate_step_shape(step: ModSeqStep, local_t: f32) -> f32 {
     }
 }
 
+/// Experimental alternating step-phase swing tension pattern (`[-0.40, 0.0, -0.35, 0.0, ...]`).
+const GROOVE_SWING_TENSIONS: [f32; 8] = [-0.40, 0.0, -0.35, 0.0, -0.30, 0.0, -0.50, 0.0];
+
+/// Evaluates the shaped Performer step curve with optional experimental alternating groove swing.
+#[inline]
+pub fn evaluate_modseq_curve_with_swing(
+    steps: &[ModSeqStep; MAX_MODSEQ_STEPS],
+    num_steps: usize,
+    phase: f32,
+    groove_swing: bool,
+) -> f32 {
+    let n = num_steps.clamp(2, MAX_MODSEQ_STEPS);
+    let scaled = phase.clamp(0.0, 0.999_999) * (n as f32);
+    let step_idx = (scaled.floor() as usize).min(n - 1);
+    let local_t = (scaled - (step_idx as f32)).clamp(0.0, 1.0);
+    let mut step = steps[step_idx];
+    if groove_swing {
+        let swing_t = GROOVE_SWING_TENSIONS[step_idx % GROOVE_SWING_TENSIONS.len()];
+        step.tension = (step.tension + swing_t).clamp(-1.0, 1.0);
+    }
+    evaluate_step_shape(step, local_t)
+}
+
 /// Evaluates the shaped Performer step curve at normalized cycle phase `phase` in `[0.0, 1.0)`.
 #[inline]
 pub fn evaluate_modseq_curve(
@@ -721,11 +746,7 @@ pub fn evaluate_modseq_curve(
     num_steps: usize,
     phase: f32,
 ) -> f32 {
-    let n = num_steps.clamp(2, MAX_MODSEQ_STEPS);
-    let scaled = phase.clamp(0.0, 0.999_999) * (n as f32);
-    let step_idx = (scaled.floor() as usize).min(n - 1);
-    let local_t = (scaled - (step_idx as f32)).clamp(0.0, 1.0);
-    evaluate_step_shape(steps[step_idx], local_t)
+    evaluate_modseq_curve_with_swing(steps, num_steps, phase, false)
 }
 
 /// Evaluates a continuous multi-segment `MSEG` curve at normalized phase in `[0.0, 1.0]`.
@@ -833,7 +854,12 @@ impl ModSeqState {
         }
 
         let raw = match params.mode {
-            ModSeqMode::Performer => evaluate_modseq_curve(steps, params.num_steps, self.phase),
+            ModSeqMode::Performer => evaluate_modseq_curve_with_swing(
+                steps,
+                params.num_steps,
+                self.phase,
+                params.groove_swing,
+            ),
             ModSeqMode::Mseg => evaluate_mseg_curve(mseg, self.phase),
         };
         let smooth = params.smooth.clamp(0.0, 1.0);

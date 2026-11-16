@@ -1189,9 +1189,10 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
 #[test]
 fn test_modseq_stamps_and_mseg_curve() {
     use j_syn_dsp::{
-        evaluate_modseq_curve, evaluate_mseg_curve, evaluate_step_shape, LfoPreset,
-        ModDestination, ModMatrixSource, ModSeqMode, ModSeqStep, ModSeqStepShape,
-        ModSeqSyncMode, ModSlot, MsegCurve, MsegNode, MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
+        evaluate_modseq_curve, evaluate_modseq_curve_with_swing, evaluate_mseg_curve,
+        evaluate_step_shape, LfoPreset, ModDestination, ModMatrixSource, ModSeqMode, ModSeqStep,
+        ModSeqStepShape, ModSeqSyncMode, ModSlot, MsegCurve, MsegNode, MAX_MODSEQ_STEPS,
+        MAX_MSEG_NODES,
     };
 
     // 1. Verify all 18 MODSEQ palette curves (single-cycle + 2x/3x subdivisions) evaluate cleanly
@@ -1225,6 +1226,23 @@ fn test_modseq_stamps_and_mseg_curve() {
     {
         steps[idx] = ModSeqStep::stamped(shape, 0.8, 0.0);
     }
+
+    // Default straight evaluation vs experimental alternating groove swing
+    let arches = [ModSeqStep::stamped(ModSeqStepShape::SineArchUp, 1.0, 0.0); MAX_MODSEQ_STEPS];
+    // Centered at t = 0.5 of step 0 and step 1 (1.0 - centered)
+    let p0_straight = evaluate_modseq_curve(&arches, 8, (0.5) / 8.0);
+    let p1_straight = evaluate_modseq_curve(&arches, 8, (1.5) / 8.0);
+    assert!((p0_straight - 1.0).abs() < 1e-4 && (p1_straight - 1.0).abs() < 1e-4);
+    let p0_early = evaluate_modseq_curve(&arches, 8, (0.28) / 8.0);
+    let p1_early = evaluate_modseq_curve(&arches, 8, (1.28) / 8.0);
+    assert!((p0_early - p1_early).abs() < 1e-4);
+    // Experimental swing warps even steps early while odd steps stay centered
+    let p0_swing_early = evaluate_modseq_curve_with_swing(&arches, 8, (0.28) / 8.0, true);
+    let p1_swing_early = evaluate_modseq_curve_with_swing(&arches, 8, (1.28) / 8.0, true);
+    assert!(
+        p0_swing_early > p1_swing_early + 0.15,
+        "Experimental groove swing should shift step 0 peak early relative to step 1"
+    );
     // Step 0 = Flat (0.8), Step 7 = SineArchUp (~0 at start, ~0.8 at mid), Step 10 = Pulse (0.8 first half, 0.0 second half)
     assert!((evaluate_modseq_curve(&steps, 16, 0.5 / 16.0) - 0.8).abs() < 1e-4);
     assert!(evaluate_modseq_curve(&steps, 16, 7.01 / 16.0) < 0.06);

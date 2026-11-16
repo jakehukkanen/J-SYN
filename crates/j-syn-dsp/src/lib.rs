@@ -33,11 +33,12 @@ pub use mod_matrix::{
 };
 pub use filter::{cutoff_hz_to_norm, cutoff_norm_to_hz};
 pub use modseq::{
-    evaluate_modseq_curve, evaluate_mseg_curve, evaluate_step_shape, modseq_division_label,
-    modseq_free_norm_to_hz, modseq_rate_hz, LfoPreset, ModSeqMode, ModSeqParams, ModSeqPlayMode,
-    ModSeqRetrig, ModSeqShapePreset, ModSeqState, ModSeqStep, ModSeqStepBank, ModSeqStepShape,
-    ModSeqSyncMode, MsegCurve, MsegNode, MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
-    MODSEQ_DOTTED_DIVS, MODSEQ_STRAIGHT_DIVS, MODSEQ_TRIPLET_DIVS,
+    evaluate_modseq_curve, evaluate_modseq_curve_with_swing, evaluate_mseg_curve,
+    evaluate_step_shape, modseq_division_label, modseq_free_norm_to_hz, modseq_rate_hz,
+    LfoPreset, ModSeqMode, ModSeqParams, ModSeqPlayMode, ModSeqRetrig, ModSeqShapePreset,
+    ModSeqState, ModSeqStep, ModSeqStepBank, ModSeqStepShape, ModSeqSyncMode, MsegCurve,
+    MsegNode, MAX_MODSEQ_STEPS, MAX_MSEG_NODES, MODSEQ_DOTTED_DIVS, MODSEQ_STRAIGHT_DIVS,
+    MODSEQ_TRIPLET_DIVS,
 };
 pub use noise::{NoiseParams, NoiseState, NoiseType};
 pub use oscillator::{

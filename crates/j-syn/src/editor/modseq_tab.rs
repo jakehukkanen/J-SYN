@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::{ModDestination, ModMatrixSource};
 use j_syn_dsp::{
-    evaluate_adsr_preview, evaluate_modseq_curve, evaluate_mseg_curve, evaluate_step_shape,
-    AdsrParams, LfoPreset, ModSeqStep, ModSeqStepShape, MsegNode, MAX_MODSEQ_STEPS,
-    MAX_MSEG_NODES,
+    evaluate_adsr_preview, evaluate_modseq_curve_with_swing, evaluate_mseg_curve,
+    evaluate_step_shape, AdsrParams, LfoPreset, ModSeqStep, ModSeqStepShape, MsegNode,
+    MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
 };
 use nih_plug::prelude::{FloatParam, GuiContext, Param};
 use nih_plug_vizia::vizia::prelude::*;
@@ -190,9 +190,12 @@ impl ModSeqCurveCanvas {
                     .clamp(2, MAX_MODSEQ_STEPS as i32) as usize;
                 let (hovered_step, level) = self.cursor_step_and_level(bounds, x, y, num_steps);
                 let shape = self.mod_ui.active_stamp();
-                let keep_tension = bank.seqs[self.seq_idx][hovered_step].tension;
-                bank.seqs[self.seq_idx][hovered_step] =
-                    ModSeqStep::stamped(shape, level, keep_tension);
+                let tension = if self.params.modseq_swing.value() {
+                    bank.seqs[self.seq_idx][hovered_step].tension
+                } else {
+                    0.0
+                };
+                bank.seqs[self.seq_idx][hovered_step] = ModSeqStep::stamped(shape, level, tension);
             }
             CanvasDragMode::EndLevel { step_idx } => {
                 let num_steps = self.params.modseqs[self.seq_idx]
@@ -571,10 +574,11 @@ impl View for ModSeqCurveCanvas {
         }
 
         // Filled + stroked continuous curve
+        let groove_swing = self.params.modseq_swing.value();
         let samples = if is_mseg {
             128
         } else {
-            (num_steps * 12).max(64)
+            (num_steps * 24).max(128)
         };
         let mut fill_path = vg::Path::new();
         let mut stroke_path = vg::Path::new();
@@ -584,7 +588,7 @@ impl View for ModSeqCurveCanvas {
             let val = if is_mseg {
                 evaluate_mseg_curve(mseg, t)
             } else {
-                evaluate_modseq_curve(steps, num_steps, t)
+                evaluate_modseq_curve_with_swing(steps, num_steps, t, groove_swing)
             };
             let px = x0 + (i as f32 / samples as f32) * w;
             let py = y0 + (1.0 - val) * h;
@@ -667,7 +671,7 @@ impl View for ModSeqCurveCanvas {
         let cur_val = if is_mseg {
             evaluate_mseg_curve(mseg, phase.min(0.999_999))
         } else {
-            evaluate_modseq_curve(steps, num_steps, phase.min(0.999_999))
+            evaluate_modseq_curve_with_swing(steps, num_steps, phase.min(0.999_999), groove_swing)
         };
         let mut ph_dot = vg::Path::new();
         ph_dot.circle(ph_x, y0 + (1.0 - cur_val) * h, 3.0 * dpx);
