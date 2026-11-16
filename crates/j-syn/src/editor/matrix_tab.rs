@@ -6,8 +6,8 @@ use j_syn_dsp::mod_matrix::{ModMatrixSource, ModSlot, ALL_MOD_DESTINATIONS};
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
-    bold_label, build_dropdown_trigger_labels, build_module_header, ArrowDir, VectorArrow,
-    VectorCross,
+    bold_label, build_dropdown_trigger_labels, build_module_header, ArrowButton, ArrowDir,
+    CrossButton,
 };
 use super::mod_bar::ModUiState;
 use super::{UiData, UiEvent};
@@ -428,27 +428,29 @@ fn build_matrix_row(
         .bottom(Stretch(1.0));
 
         HStack::new(cx, move |cx| {
-            Button::new(
+            ArrowButton::new(
                 cx,
                 move |cx| {
                     ui_up.move_active_slot(slot_idx, -1);
                     cx.emit(UiEvent::ModUiChanged);
                 },
-                |cx| VectorArrow::new(cx, ArrowDir::Up, "matrix-btn-text"),
+                ArrowDir::Up,
             )
             .class("matrix-btn")
+            .class("matrix-btn-text")
             .width(Pixels(20.0))
             .height(Pixels(20.0));
 
-            Button::new(
+            ArrowButton::new(
                 cx,
                 move |cx| {
                     ui_dn.move_active_slot(slot_idx, 1);
                     cx.emit(UiEvent::ModUiChanged);
                 },
-                |cx| VectorArrow::new(cx, ArrowDir::Down, "matrix-btn-text"),
+                ArrowDir::Down,
             )
             .class("matrix-btn")
+            .class("matrix-btn-text")
             .width(Pixels(20.0))
             .height(Pixels(20.0));
         })
@@ -458,15 +460,12 @@ fn build_matrix_row(
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
 
-        Button::new(
-            cx,
-            move |cx| {
-                ui_del.remove_slot_at(slot_idx);
-                cx.emit(UiEvent::ModUiChanged);
-            },
-            |cx| VectorCross::new(cx, "matrix-btn-text"),
-        )
+        CrossButton::new(cx, move |cx| {
+            ui_del.remove_slot_at(slot_idx);
+            cx.emit(UiEvent::ModUiChanged);
+        })
         .class("matrix-del-btn")
+        .class("matrix-btn-text")
         .width(Pixels(26.0))
         .height(Pixels(20.0))
         .top(Stretch(1.0))

@@ -10,7 +10,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown, build_flex_knob_cell_mod_dim,
     build_pitch_pill_cell, build_stacked_pill_cell, build_stacked_pill_cell_mod,
-    build_wavetable_dropdown, step_wavetable, ArrowDir, ScrollDropdown, VectorArrow,
+    build_wavetable_dropdown, step_wavetable, ArrowButton, ArrowDir, ScrollDropdown,
 };
 use super::mod_bar::ModUiState;
 use super::scope::WavetableScope;
@@ -140,12 +140,13 @@ pub(super) fn build_osc_panel(
             HStack::new(cx, move |cx| {
                 let p_prev = p_wt.clone();
                 let g_prev = gui_wt.clone();
-                Button::new(
+                ArrowButton::new(
                     cx,
                     move |_| step_wavetable(&p_prev, &g_prev, osc_idx, -1),
-                    move |cx| VectorArrow::new(cx, ArrowDir::Left, "wt-step-label"),
+                    ArrowDir::Left,
                 )
                 .class("wt-step-btn")
+                .class("wt-step-label")
                 .width(Pixels(18.0))
                 .height(Pixels(20.0));
 
@@ -155,12 +156,13 @@ pub(super) fn build_osc_panel(
 
                 let p_next = p_wt;
                 let g_next = gui_wt;
-                Button::new(
+                ArrowButton::new(
                     cx,
                     move |_| step_wavetable(&p_next, &g_next, osc_idx, 1),
-                    move |cx| VectorArrow::new(cx, ArrowDir::Right, "wt-step-label"),
+                    ArrowDir::Right,
                 )
                 .class("wt-step-btn")
+                .class("wt-step-label")
                 .width(Pixels(18.0))
                 .height(Pixels(20.0));
             })
@@ -288,7 +290,7 @@ pub(super) fn build_osc_panel(
                 let p_ord = p_bot.clone();
                 let g_ord = g_bot.clone();
                 let p_ord_lbl = p_bot.clone();
-                Button::new(
+                ArrowButton::reactive(
                     cx,
                     move |_| {
                         let cur = p_ord.oscs[osc_idx].mod_order.value();
@@ -302,19 +304,14 @@ pub(super) fn build_osc_panel(
                         setter.set_parameter(param, next);
                         setter.end_set_parameter(param);
                     },
-                    move |cx| {
-                        VectorArrow::reactive(
-                            cx,
-                            UiData::params,
-                            move |_| match p_ord_lbl.oscs[osc_idx].mod_order.value() {
-                                ModOrderParam::WarpThenPm => ArrowDir::Right,
-                                ModOrderParam::PmThenWarp => ArrowDir::Left,
-                            },
-                            "wt-step-label",
-                        )
+                    UiData::params,
+                    move |_| match p_ord_lbl.oscs[osc_idx].mod_order.value() {
+                        ModOrderParam::WarpThenPm => ArrowDir::Right,
+                        ModOrderParam::PmThenWarp => ArrowDir::Left,
                     },
                 )
                 .class("wt-step-btn")
+                .class("wt-step-label")
                 .width(Pixels(20.0))
                 .height(Pixels(18.0));
 

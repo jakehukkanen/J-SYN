@@ -47,8 +47,8 @@ mod widgets;
 use controls::{
     bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_flex_knob_cell_mod,
     build_flex_knob_cell_mod_dim, build_header_knob_cell, build_knob_cell, build_mini_pill_cell,
-    build_module_header, build_tab_button, build_ui_scale_dropdown, ArrowDir, VectorArrow,
-    VectorCross,
+    build_module_header, build_tab_button, build_ui_scale_dropdown, ArrowButton, ArrowDir,
+    CrossButton,
 };
 use filter_panel::build_filter_panel;
 use insert_panel::build_insert_panel;
@@ -705,14 +705,11 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
 
         // Preset management bar: < [Preset v] > INIT SAVE LOAD
         HStack::new(cx, |cx| {
-            Button::new(
-                cx,
-                |cx| cx.emit(UiEvent::StepPreset(-1)),
-                |cx| VectorArrow::new(cx, ArrowDir::Left, "preset-btn-label"),
-            )
-            .class("preset-btn")
-            .width(Pixels(20.0))
-            .height(Pixels(22.0));
+            ArrowButton::new(cx, |cx| cx.emit(UiEvent::StepPreset(-1)), ArrowDir::Left)
+                .class("preset-btn")
+                .class("preset-btn-label")
+                .width(Pixels(20.0))
+                .height(Pixels(22.0));
 
             Dropdown::new(
                 cx,
@@ -762,14 +759,11 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             .width(Pixels(160.0))
             .height(Pixels(22.0));
 
-            Button::new(
-                cx,
-                |cx| cx.emit(UiEvent::StepPreset(1)),
-                |cx| VectorArrow::new(cx, ArrowDir::Right, "preset-btn-label"),
-            )
-            .class("preset-btn")
-            .width(Pixels(20.0))
-            .height(Pixels(22.0));
+            ArrowButton::new(cx, |cx| cx.emit(UiEvent::StepPreset(1)), ArrowDir::Right)
+                .class("preset-btn")
+                .class("preset-btn-label")
+                .width(Pixels(20.0))
+                .height(Pixels(22.0));
 
             Button::new(
                 cx,
@@ -1453,20 +1447,17 @@ pub(crate) fn create(
                             .checked(slot.bipolar)
                             .width(Pixels(30.0))
                             .height(Pixels(18.0));
-                            Button::new(
-                                cx,
-                                move |cx| {
-                                    ui_rem.remove_slot_at(slot_idx);
-                                    cx.emit(UiEvent::ModUiChanged);
-                                    if ui_rem.all_slots_for_dest(dest).is_empty() {
-                                        cx.emit(UiEvent::HideModContextMenu);
-                                    } else {
-                                        cx.emit(UiEvent::ModMenuRefresh);
-                                    }
-                                },
-                                |cx| VectorCross::new(cx, "mod-context-btn-text"),
-                            )
+                            CrossButton::new(cx, move |cx| {
+                                ui_rem.remove_slot_at(slot_idx);
+                                cx.emit(UiEvent::ModUiChanged);
+                                if ui_rem.all_slots_for_dest(dest).is_empty() {
+                                    cx.emit(UiEvent::HideModContextMenu);
+                                } else {
+                                    cx.emit(UiEvent::ModMenuRefresh);
+                                }
+                            })
                             .class("mod-context-btn")
+                            .class("mod-context-btn-text")
                             .width(Pixels(20.0))
                             .height(Pixels(18.0));
                         })

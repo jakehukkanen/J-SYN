@@ -12,7 +12,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown,
     build_enum_dropdown_with_override, build_inline_pill_cell, build_prefixed_enum_dropdown,
-    ArrowDir, ScrollDropdown, VectorArrow,
+    ArrowButton, ArrowDir, ScrollDropdown,
 };
 use super::fx_scopes::{fx_accent_rgb, FxSlotVisualizer};
 use super::mod_bar::{ModUiState, FX_VIEW_TAG, MAIN_FX_A_TAG, MAIN_FX_B_TAG};
@@ -551,7 +551,7 @@ fn build_fx_slot_header(
             let p_up = params.clone();
             let g_up = gui_context.clone();
             let m_up = mod_ui.clone();
-            Button::new(
+            ArrowButton::new(
                 cx,
                 move |cx| {
                     if slot_idx > 0 {
@@ -559,9 +559,10 @@ fn build_fx_slot_header(
                         cx.emit(UiEvent::ModUiChanged);
                     }
                 },
-                |cx| VectorArrow::new(cx, ArrowDir::Up, "fx-move-label"),
+                ArrowDir::Up,
             )
             .class("fx-move-btn")
+            .class("fx-move-label")
             .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 0))
             .width(Pixels(16.0))
             .height(Pixels(17.0));
@@ -569,7 +570,7 @@ fn build_fx_slot_header(
             let p_dn = params.clone();
             let g_dn = gui_context.clone();
             let m_dn = mod_ui.clone();
-            Button::new(
+            ArrowButton::new(
                 cx,
                 move |cx| {
                     if slot_idx < 7 {
@@ -577,9 +578,10 @@ fn build_fx_slot_header(
                         cx.emit(UiEvent::ModUiChanged);
                     }
                 },
-                |cx| VectorArrow::new(cx, ArrowDir::Down, "fx-move-label"),
+                ArrowDir::Down,
             )
             .class("fx-move-btn")
+            .class("fx-move-label")
             .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 7))
             .width(Pixels(16.0))
             .height(Pixels(17.0));

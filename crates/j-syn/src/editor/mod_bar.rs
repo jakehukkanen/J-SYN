@@ -12,7 +12,7 @@ use j_syn_dsp::modseq::ModSeqStepShape;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 
-use super::controls::{bold_label, VectorCross};
+use super::controls::{bold_label, CrossButton};
 use super::modseq_tab::ModSeqSubTab;
 use super::{BottomTab, UiData, UiEvent};
 use crate::JSynPluginParams;
@@ -1001,15 +1001,12 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                     .width(Pixels(30.0))
                     .height(Pixels(18.0));
 
-                    Button::new(
-                        cx,
-                        move |cx| {
-                            ui_rem.remove_inspected_slot();
-                            cx.emit(UiEvent::ModUiChanged);
-                        },
-                        |cx| VectorCross::new(cx, "mod-insp-btn-text"),
-                    )
+                    CrossButton::new(cx, move |cx| {
+                        ui_rem.remove_inspected_slot();
+                        cx.emit(UiEvent::ModUiChanged);
+                    })
                     .class("mod-insp-del")
+                    .class("mod-insp-btn-text")
                     .width(Pixels(18.0))
                     .height(Pixels(18.0));
                 })

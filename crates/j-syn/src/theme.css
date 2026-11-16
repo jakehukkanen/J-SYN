@@ -1095,6 +1095,7 @@ led-toggle:checked .switch-label {
 .fx-move-btn.fx-move-disabled {
   background-color: #1f1a16;
   border-color: #312a24;
+  color: #5b5046;
 }
 
 .fx-move-label {
@@ -1129,6 +1130,7 @@ led-toggle:checked .switch-label {
 .hardware-module.module-disabled .wt-step-btn {
   background-color: #1c1814;
   border-color: #362f28;
+  color: #5f554c;
 }
 
 .hardware-module.module-disabled .wt-step-label {
