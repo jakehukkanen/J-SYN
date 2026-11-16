@@ -11,6 +11,7 @@ pub mod modseq;
 pub mod noise;
 pub mod oscillator;
 pub mod oversample;
+pub mod serde_lenient;
 pub mod voice;
 pub mod wavetable;
 

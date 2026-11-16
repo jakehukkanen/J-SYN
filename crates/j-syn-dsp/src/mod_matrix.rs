@@ -957,26 +957,81 @@ impl ModDestination {
 
 /// Single modulation routing slot inside the fixed 32-slot matrix.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
 pub struct ModSlot {
     pub source: ModMatrixSource,
     pub destination: ModDestination,
     pub depth: f32,
     pub bipolar: bool,
     pub enabled: bool,
-    #[serde(default)]
     pub bypassed: bool,
-    #[serde(default)]
     pub aux_source: ModMatrixSource,
-    #[serde(default)]
     pub curve: f32,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct ModSlotWire {
+    #[serde(deserialize_with = "crate::serde_lenient::known_variant")]
+    source: Option<ModMatrixSource>,
+    #[serde(deserialize_with = "crate::serde_lenient::known_variant")]
+    destination: Option<ModDestination>,
+    depth: f32,
+    bipolar: bool,
+    enabled: bool,
+    bypassed: bool,
+    #[serde(deserialize_with = "crate::serde_lenient::known_variant")]
+    aux_source: Option<ModMatrixSource>,
+    curve: f32,
+}
+
+impl<'de> Deserialize<'de> for ModSlot {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let Some(w) = Option::<ModSlotWire>::deserialize(deserializer)? else {
+            return Ok(Self::default());
+        };
+        let (source, destination, mut enabled) = match (w.source, w.destination) {
+            (Some(src), Some(dst)) => (src, dst, w.enabled),
+            (Some(src), None) => (src, ModDestination::default(), false),
+            (None, dst) => (ModMatrixSource::None, dst.unwrap_or_default(), false),
+        };
+        if source == ModMatrixSource::None {
+            enabled = false;
+        }
+        Ok(Self {
+            source,
+            destination,
+            depth: crate::serde_lenient::finite_clamped(w.depth, 0.0, -1.0, 1.0),
+            bipolar: w.bipolar,
+            enabled,
+            bypassed: w.bypassed,
+            aux_source: w.aux_source.unwrap_or(ModMatrixSource::None),
+            curve: crate::serde_lenient::finite_clamped(w.curve, 0.0, -1.0, 3.0),
+        })
+    }
 }
 
 /// Pre-allocated fixed-size 32-slot modulation matrix (`Copy`, lock-free swap & persistence).
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct ModMatrixState {
     pub slots: [ModSlot; NUM_MOD_SLOTS],
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct ModMatrixStateWire {
+    #[serde(deserialize_with = "crate::serde_lenient::fixed_array")]
+    slots: [ModSlot; NUM_MOD_SLOTS],
+}
+
+impl<'de> Deserialize<'de> for ModMatrixState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let Some(w) = Option::<ModMatrixStateWire>::deserialize(deserializer)? else {
+            return Ok(Self::default());
+        };
+        Ok(Self { slots: w.slots })
+    }
 }
 
 impl Default for ModMatrixState {

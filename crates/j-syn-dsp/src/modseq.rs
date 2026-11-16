@@ -226,13 +226,48 @@ impl LfoPreset {
 
 /// Single step segment in a `MODSEQ` Performer curve (`0.0..=1.0` levels, `-1.0..=1.0` tension).
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct ModSeqStep {
     pub start_level: f32,
     pub end_level: f32,
     pub tension: f32,
-    #[serde(default)]
     pub shape: ModSeqStepShape,
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+struct ModSeqStepWire {
+    start_level: f32,
+    end_level: f32,
+    tension: f32,
+    #[serde(deserialize_with = "crate::serde_lenient::known_variant")]
+    shape: Option<ModSeqStepShape>,
+}
+
+impl Default for ModSeqStepWire {
+    fn default() -> Self {
+        let d = ModSeqStep::default();
+        Self {
+            start_level: d.start_level,
+            end_level: d.end_level,
+            tension: d.tension,
+            shape: Some(d.shape),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ModSeqStep {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let Some(w) = Option::<ModSeqStepWire>::deserialize(deserializer)? else {
+            return Ok(Self::default());
+        };
+        Ok(Self {
+            start_level: crate::serde_lenient::finite_clamped(w.start_level, 0.5, 0.0, 1.0),
+            end_level: crate::serde_lenient::finite_clamped(w.end_level, 0.5, 0.0, 1.0),
+            tension: crate::serde_lenient::finite_clamped(w.tension, 0.0, -1.0, 1.0),
+            shape: w.shape.unwrap_or(ModSeqStepShape::Linear),
+        })
+    }
 }
 
 impl Default for ModSeqStep {
@@ -271,11 +306,32 @@ impl ModSeqStep {
 
 /// Movable breakpoint node in a continuous `MSEG` envelope (`time_x`, `level_y`, `tension`).
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct MsegNode {
     pub time_x: f32,
     pub level_y: f32,
     pub tension: f32,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct MsegNodeWire {
+    time_x: f32,
+    level_y: f32,
+    tension: f32,
+}
+
+impl<'de> Deserialize<'de> for MsegNode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let Some(w) = Option::<MsegNodeWire>::deserialize(deserializer)? else {
+            return Ok(Self::default());
+        };
+        Ok(Self {
+            time_x: crate::serde_lenient::finite_clamped(w.time_x, 0.0, 0.0, 1.0),
+            level_y: crate::serde_lenient::finite_clamped(w.level_y, 0.0, 0.0, 1.0),
+            tension: crate::serde_lenient::finite_clamped(w.tension, 0.0, -1.0, 1.0),
+        })
+    }
 }
 
 impl Default for MsegNode {
@@ -290,10 +346,51 @@ impl Default for MsegNode {
 
 /// Fixed-size zero-allocation multi-segment envelope (`2..=16` nodes).
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct MsegCurve {
     pub nodes: [MsegNode; MAX_MSEG_NODES],
     pub num_nodes: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+struct MsegCurveWire {
+    #[serde(deserialize_with = "crate::serde_lenient::fixed_array")]
+    nodes: [MsegNode; MAX_MSEG_NODES],
+    num_nodes: usize,
+}
+
+impl Default for MsegCurveWire {
+    fn default() -> Self {
+        let d = MsegCurve::default();
+        Self {
+            nodes: d.nodes,
+            num_nodes: d.num_nodes,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MsegCurve {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let Some(mut w) = Option::<MsegCurveWire>::deserialize(deserializer)? else {
+            return Ok(Self::default());
+        };
+        if w.num_nodes < 2 {
+            return Ok(Self::default());
+        }
+        let n = w.num_nodes.clamp(2, MAX_MSEG_NODES);
+        w.nodes[0].time_x = 0.0;
+        let mut prev_t = 0.0_f32;
+        for node in &mut w.nodes[..n] {
+            node.time_x = node.time_x.clamp(prev_t, 1.0);
+            prev_t = node.time_x;
+        }
+        w.nodes[n - 1].time_x = 1.0;
+        Ok(Self {
+            nodes: w.nodes,
+            num_nodes: n,
+        })
+    }
 }
 
 impl Default for MsegCurve {
@@ -326,23 +423,55 @@ impl Default for MsegCurve {
     }
 }
 
-#[inline]
-fn default_msegs() -> [MsegCurve; 4] {
-    [
-        MsegCurve::default(),
-        MsegCurve::default(),
-        MsegCurve::default(),
-        MsegCurve::default(),
-    ]
-}
-
 /// Fixed-size persistence/ArcSwap container holding Performer steps and MSEG curves for all 4 `MODSEQ` engines.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct ModSeqStepBank {
     pub seqs: [[ModSeqStep; MAX_MODSEQ_STEPS]; 4],
-    #[serde(default = "default_msegs")]
     pub msegs: [MsegCurve; 4],
+}
+
+#[derive(Deserialize)]
+#[serde(transparent)]
+struct ModSeqRowWire(
+    #[serde(deserialize_with = "crate::serde_lenient::fixed_array")] [ModSeqStep; MAX_MODSEQ_STEPS],
+);
+
+impl Default for ModSeqRowWire {
+    fn default() -> Self {
+        Self([ModSeqStep::default(); MAX_MODSEQ_STEPS])
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default)]
+struct ModSeqStepBankWire {
+    #[serde(deserialize_with = "crate::serde_lenient::fixed_array")]
+    seqs: [ModSeqRowWire; 4],
+    #[serde(deserialize_with = "crate::serde_lenient::fixed_array")]
+    msegs: [MsegCurve; 4],
+}
+
+impl Default for ModSeqStepBankWire {
+    fn default() -> Self {
+        let d = ModSeqStepBank::default();
+        Self {
+            seqs: std::array::from_fn(|i| ModSeqRowWire(d.seqs[i])),
+            msegs: d.msegs,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ModSeqStepBank {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let Some(w) = Option::<ModSeqStepBankWire>::deserialize(deserializer)? else {
+            return Ok(Self::default());
+        };
+        Ok(Self {
+            seqs: std::array::from_fn(|i| w.seqs[i].0),
+            msegs: w.msegs,
+        })
+    }
 }
 
 impl Default for ModSeqStepBank {
@@ -388,7 +517,7 @@ impl Default for ModSeqStepBank {
 
         Self {
             seqs: [s0, s1, s2, s3],
-            msegs: default_msegs(),
+            msegs: std::array::from_fn(|_| MsegCurve::default()),
         }
     }
 }

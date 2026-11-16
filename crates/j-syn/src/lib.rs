@@ -1,7 +1,6 @@
 //! `j-syn`: Zero-allocation 64-voice polyphonic wavetable synthesizer (VST3 + CLAP).
 
 use std::num::NonZeroU32;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use j_syn_dsp::{
@@ -40,10 +39,11 @@ impl JSynPlugin {
         for (idx, path_str) in paths.into_iter().enumerate() {
             if !path_str.is_empty() && self.params.oscs[idx].wt_select.value() == WavetableChoice::Custom {
                 let bank = self.wavetable_bank.clone();
-                let path = PathBuf::from(path_str);
                 std::thread::spawn(move || {
-                    if let Ok(wt) = Wavetable::load_from_wav(&path) {
-                        bank.swap_custom(idx, Arc::new(wt));
+                    if let Some(resolved) = crate::presets::resolve_wavetable_path(&path_str) {
+                        if let Ok(wt) = Wavetable::load_from_wav(&resolved) {
+                            bank.swap_custom(idx, Arc::new(wt));
+                        }
                     }
                 });
             }
@@ -478,8 +478,11 @@ mod tests {
         let patch = crate::presets::JSynPatch::capture("Test Patch", &params);
         let json = serde_json::to_string(&patch).unwrap();
         let decoded: crate::presets::JSynPatch = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.version, crate::presets::CURRENT_PATCH_VERSION);
         assert_eq!(decoded.name, "Test Patch");
         assert_eq!(decoded.macro_names[0], "WOBBLE");
+        assert!(decoded.plain_params.contains_key("glide_ms"));
+        assert!(decoded.enum_names.contains_key("fx_type_1"));
         assert_eq!(decoded.mod_matrix.slots[0].aux_source, j_syn_dsp::ModMatrixSource::ModWheel);
         assert!((decoded.mod_matrix.slots[0].curve - 0.35).abs() < 1e-6);
         assert!(decoded.params.contains_key("dc_blocker"));
