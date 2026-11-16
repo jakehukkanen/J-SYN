@@ -842,7 +842,7 @@ impl ModMatrixState {
     }
 }
 
-pub const FX_SCOPE_LEN: usize = 128;
+pub const FX_SCOPE_LEN: usize = 256;
 
 /// Lock-free atomic ring buffer storing downsampled pre/post peak waveforms & activity for an FX slot.
 pub struct FxScopeRing {

@@ -16,7 +16,7 @@ const CHORUS_BUF_LEN: usize = 4096;
 const MAX_DELAY_SAMPLES: usize = 96_000;
 const REVERB_COMB_LEN: usize = 4096;
 const REVERB_AP_LEN: usize = 1024;
-const SCOPE_DECIM: usize = 64;
+const SCOPE_HZ: f32 = 150.0;
 
 use crate::filter::{cutoff_norm_to_hz, FilterMode, FilterParams, FilterSlope, FilterSvfCore};
 
@@ -1143,6 +1143,7 @@ pub struct FxRackState {
     stages: Box<[[StereoFxStage; MAX_FX_STACK]]>,
     last_slot_types: [Option<FxType>; NUM_FX_SLOTS],
     scope_accum: [(f32, f32, f32, usize); NUM_FX_SLOTS],
+    scope_samples_per_col: usize,
 }
 
 impl FxRackState {
@@ -1156,11 +1157,13 @@ impl FxRackState {
             stages: stages_vec.into_boxed_slice(),
             last_slot_types: [None; NUM_FX_SLOTS],
             scope_accum: [(0.0, 0.0, 0.0, 0); NUM_FX_SLOTS],
+            scope_samples_per_col: (sr / SCOPE_HZ).round().max(1.0) as usize,
         }
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let sr = sample_rate.max(1_000.0);
+        self.scope_samples_per_col = (sr / SCOPE_HZ).round().max(1.0) as usize;
         for slot in self.stages.iter_mut() {
             for stage in slot.iter_mut() {
                 stage.set_sample_rate(sr);
@@ -1266,7 +1269,7 @@ impl FxRackState {
                 *acc_post = acc_post.max(post_peak);
                 *acc_act = acc_act.max(slot_activity);
                 *cnt += 1;
-                if *cnt >= SCOPE_DECIM {
+                if *cnt >= self.scope_samples_per_col {
                     tel.fx_scopes[slot_idx].push(*acc_pre, *acc_post, *acc_act);
                     *acc_pre = 0.0;
                     *acc_post = 0.0;
