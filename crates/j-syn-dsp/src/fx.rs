@@ -31,10 +31,11 @@ pub enum FxType {
     Reverb = 5,
     JSatClipper = 6,
     Filter = 7,
+    Phaser = 8,
 }
 
 impl FxType {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Off,
         Self::Ott,
         Self::Distortion,
@@ -43,6 +44,7 @@ impl FxType {
         Self::Reverb,
         Self::JSatClipper,
         Self::Filter,
+        Self::Phaser,
     ];
 
     #[inline]
@@ -55,6 +57,7 @@ impl FxType {
             5 => Self::Reverb,
             6 => Self::JSatClipper,
             7 => Self::Filter,
+            8 => Self::Phaser,
             _ => Self::Off,
         }
     }
@@ -69,6 +72,7 @@ impl FxType {
             Self::Reverb => "Reverb",
             Self::JSatClipper => "Clipper",
             Self::Filter => "Filter",
+            Self::Phaser => "Phaser",
         }
     }
 
@@ -82,6 +86,7 @@ impl FxType {
             Self::Reverb => "REVERB",
             Self::JSatClipper => "J-SAT",
             Self::Filter => "FILTER",
+            Self::Phaser => "PHASER",
         }
     }
 }
@@ -124,6 +129,8 @@ impl FxSlotParams {
             FxType::JSatClipper => [0.00, 1.00, 0.00, 1.00],
             // Filter: Cutoff ~2.5 kHz (0.65), Res 25%, Type LP 12 (0.0), Mix 100%
             FxType::Filter => [0.65, 0.25, 0.00, 1.00],
+            // Phaser: Rate ~0.21 Hz (0.30), Depth 70%, Feedback 50%, Mix 100%
+            FxType::Phaser => [0.30, 0.70, 0.50, 1.00],
         }
     }
 
@@ -647,6 +654,91 @@ impl ChorusStereo {
     }
 }
 
+const PHASER_STAGES: usize = 6;
+
+/// 6-stage stereo all-pass Phaser with quadrature LFO sweep and soft-limited resonant feedback.
+struct PhaserStereo {
+    ap_z: [[f32; PHASER_STAGES]; 2],
+    fb_state: [f32; 2],
+    lfo_phase: f32,
+    sample_rate: f32,
+    idle_samples: u32,
+}
+
+impl PhaserStereo {
+    fn new(sample_rate: f32) -> Self {
+        Self {
+            ap_z: [[0.0; PHASER_STAGES]; 2],
+            fb_state: [0.0; 2],
+            lfo_phase: 0.0,
+            sample_rate: sample_rate.max(1_000.0),
+            idle_samples: 1024,
+        }
+    }
+
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate.max(1_000.0);
+    }
+
+    fn reset(&mut self) {
+        self.ap_z = [[0.0; PHASER_STAGES]; 2];
+        self.fb_state = [0.0; 2];
+        self.lfo_phase = 0.0;
+        self.idle_samples = 1024;
+    }
+
+    #[inline]
+    fn phase_to_allpass_coeff(&self, norm: f32) -> f32 {
+        // Exponentially swept notch center frequency (~180 Hz .. ~4.6 kHz)
+        let fc = (180.0 * 25.5_f32.powf(norm.clamp(0.0, 1.0))).min(self.sample_rate * 0.42);
+        let t = (std::f32::consts::PI * fc / self.sample_rate).clamp(0.005, 1.4).tan();
+        (t - 1.0) / (t + 1.0)
+    }
+
+    #[inline]
+    fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+        if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 4096 {
+            self.ap_z = [[0.0; PHASER_STAGES]; 2];
+            self.fb_state = [0.0; 2];
+            return (0.0, 0.0, 0.0);
+        }
+
+        let rate_hz = 0.05 * 120.0_f32.powf(p[0].clamp(0.0, 1.0));
+        let depth = p[1].clamp(0.0, 1.0);
+        let fb_gain = p[2].clamp(0.0, 1.0) * 0.88;
+        let mix = p[3].clamp(0.0, 1.0);
+
+        self.lfo_phase = (self.lfo_phase + rate_hz / self.sample_rate).fract();
+        let lfo_l = 0.5 + 0.5 * (self.lfo_phase * std::f32::consts::TAU).sin();
+        let lfo_r = 0.5
+            + 0.5 * (self.lfo_phase * std::f32::consts::TAU + std::f32::consts::FRAC_PI_2).sin();
+
+        let sweep_l = 0.5 + (lfo_l - 0.5) * depth;
+        let sweep_r = 0.5 + (lfo_r - 0.5) * depth;
+        let coeffs = [
+            self.phase_to_allpass_coeff(sweep_l),
+            self.phase_to_allpass_coeff(sweep_r),
+        ];
+
+        let mut out = [0.0_f32; 2];
+        for (ch, &x) in [in_l, in_r].iter().enumerate() {
+            let a = coeffs[ch];
+            let mut u = flush_denormal(x + fb_gain * self.fb_state[ch]);
+            for z in &mut self.ap_z[ch] {
+                let y = a * u + *z;
+                *z = flush_denormal(u - a * y);
+                u = y;
+            }
+            self.fb_state[ch] = flush_denormal(fast_tanh(u * 0.85) * 1.15);
+            let phased = 0.5 * (x + u);
+            out[ch] = flush_denormal(x + (phased - x) * mix);
+        }
+
+        let activity = (0.5 * (lfo_l + lfo_r) * depth * mix).clamp(0.0, 1.0);
+        (out[0], out[1], activity)
+    }
+}
+
 pub const DELAY_SYNC_LABELS: [&str; 8] = ["1/16", "1/8T", "1/8", "1/8D", "1/4", "1/4D", "1/2", "1/1"];
 const DELAY_SYNC_BEATS: [f32; 8] = [0.25, 1.0 / 3.0, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0];
 
@@ -1082,6 +1174,7 @@ struct StereoFxStage {
     reverb: ReverbStereo,
     clipper: JSatClipperStereo,
     filter: FxFilterStereo,
+    phaser: PhaserStereo,
 }
 
 impl StereoFxStage {
@@ -1094,6 +1187,7 @@ impl StereoFxStage {
             reverb: ReverbStereo::new(sample_rate),
             clipper: JSatClipperStereo::new(),
             filter: FxFilterStereo::new(sample_rate),
+            phaser: PhaserStereo::new(sample_rate),
         }
     }
 
@@ -1104,6 +1198,7 @@ impl StereoFxStage {
         self.delay.set_sample_rate(sample_rate);
         self.reverb.set_sample_rate(sample_rate);
         self.filter.set_sample_rate(sample_rate);
+        self.phaser.set_sample_rate(sample_rate);
     }
 
     fn reset(&mut self) {
@@ -1114,6 +1209,7 @@ impl StereoFxStage {
         self.reverb.reset();
         self.clipper.reset();
         self.filter.reset();
+        self.phaser.reset();
     }
 
     #[inline]
@@ -1134,6 +1230,7 @@ impl StereoFxStage {
             FxType::Reverb => self.reverb.process(in_l, in_r, p),
             FxType::JSatClipper => self.clipper.process(in_l, in_r, p),
             FxType::Filter => self.filter.process(in_l, in_r, p),
+            FxType::Phaser => self.phaser.process(in_l, in_r, p),
         }
     }
 }

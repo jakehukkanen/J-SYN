@@ -24,6 +24,7 @@ const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("OTT", FxTypeParam::Ott),
     ("Distortion", FxTypeParam::Distortion),
     ("Chorus", FxTypeParam::Chorus),
+    ("Phaser", FxTypeParam::Phaser),
     ("Delay", FxTypeParam::Delay),
     ("Reverb", FxTypeParam::Reverb),
     ("Clipper", FxTypeParam::JSatClipper),
@@ -88,6 +89,7 @@ fn fx_accent_rgb(fx_ty: FxTypeParam) -> (u8, u8, u8) {
         FxTypeParam::Reverb => (195, 145, 245),
         FxTypeParam::JSatClipper => (245, 86, 86),
         FxTypeParam::Filter => (112, 224, 154),
+        FxTypeParam::Phaser => (116, 208, 255),
     }
 }
 
@@ -137,6 +139,12 @@ pub(super) fn fx_param_label(fx_ty: FxTypeParam, param_idx: usize) -> &'static s
             2 => "TYPE",
             _ => "MIX",
         },
+        FxTypeParam::Phaser => match param_idx {
+            0 => "RATE",
+            1 => "DEPTH",
+            2 => "FEEDBK",
+            _ => "MIX",
+        },
     }
 }
 
@@ -183,6 +191,10 @@ pub(super) fn format_fx_param_value(fx_ty: FxTypeParam, param_idx: usize, norm: 
                 }
             }
             2 => FxRackState::format_filter_type(n).to_string(),
+            _ => format!("{:.0}%", n * 100.0),
+        },
+        FxTypeParam::Phaser => match param_idx {
+            0 => format!("{:.2} Hz", 0.05 * 120.0_f32.powf(n)),
             _ => format!("{:.0}%", n * 100.0),
         },
     }
@@ -666,6 +678,7 @@ fn paint_time_fx_scope(
     let slot = &params.fx_slots[slot_idx];
     let p1 = slot.p1.value().clamp(0.0, 1.0);
     let p2 = slot.p2.value().clamp(0.0, 1.0);
+    let p3 = slot.p3.value().clamp(0.0, 1.0);
 
     // Structural FX envelope (Delay taps, Reverb decay tail, Chorus dual LFO)
     match fx_ty {
@@ -711,6 +724,26 @@ fn paint_time_fx_scope(
             let mut lp = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 115 } else { 40 }));
             lp.set_line_width(1.2 * dpx);
             canvas.stroke_path(&lfo, &lp);
+        }
+        FxTypeParam::Phaser => {
+            let mid_y = iy + ih * 0.45;
+            let shift = 0.25 + p2 * 0.45;
+            let amp = (0.28 + p3 * 0.32) * ih;
+            let mut notch_curve = vg::Path::new();
+            for i in 0..48 {
+                let t = i as f32 / 47.0;
+                let phase = (t * 3.0 + shift) * std::f32::consts::PI;
+                let dip = 1.0 - phase.sin().powi(4);
+                let y = mid_y + (0.6 - dip) * amp;
+                if i == 0 {
+                    notch_curve.move_to(ix + t * iw, y);
+                } else {
+                    notch_curve.line_to(ix + t * iw, y);
+                }
+            }
+            let mut np = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 130 } else { 45 }));
+            np.set_line_width(1.25 * dpx);
+            canvas.stroke_path(&notch_curve, &np);
         }
         _ => {}
     }
@@ -793,7 +826,10 @@ impl View for FxSlotVisualizer {
             FxTypeParam::Distortion => {
                 paint_distortion_scope(canvas, bounds, dpx, self.slot_idx, &self.params, &self.mod_ui);
             }
-            FxTypeParam::Delay | FxTypeParam::Chorus | FxTypeParam::Reverb => {
+            FxTypeParam::Delay
+            | FxTypeParam::Chorus
+            | FxTypeParam::Reverb
+            | FxTypeParam::Phaser => {
                 paint_time_fx_scope(canvas, bounds, dpx, self.slot_idx, fx_ty, &self.params, &self.mod_ui);
             }
             FxTypeParam::Off => {}

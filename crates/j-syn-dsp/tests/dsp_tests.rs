@@ -1847,3 +1847,202 @@ fn mod_matrix_aux_source_curve_and_master_safety_stages() {
     let (pk_l, pk_r, rms_l, rms_r, _, _) = eng.telemetry().master_meters();
     assert!(pk_l > 0.0 && pk_r > 0.0 && rms_l > 0.0 && rms_r > 0.0);
 }
+
+#[test]
+fn filter_bandreject_peakpeak_notchnotch_and_combo_slopes() {
+    use j_syn_dsp::{
+        evaluate_filter_response_db, FilterMode, FilterParams, FilterSlope, SynthEngine,
+        SynthParams, WavetableBank,
+    };
+
+    for m in [
+        FilterMode::Scream,
+        FilterMode::Daft,
+        FilterMode::Comb,
+        FilterMode::Bandreject,
+    ] {
+        assert!(m.has_fixed_12db_slope(), "{m:?} should report fixed 12 dB slope");
+    }
+    for m in [
+        FilterMode::Lp,
+        FilterMode::Bp,
+        FilterMode::Hp,
+        FilterMode::Notch,
+        FilterMode::Peak,
+        FilterMode::HpPeak,
+        FilterMode::HpNotch,
+        FilterMode::LpNotch,
+        FilterMode::LpPeak,
+        FilterMode::PeakPeak,
+        FilterMode::NotchNotch,
+    ] {
+        assert!(!m.has_fixed_12db_slope(), "{m:?} should allow variable slope");
+    }
+    assert!(FilterMode::PeakPeak.is_multi());
+    assert!(FilterMode::NotchNotch.is_multi());
+
+    // Bandreject dips at cutoff and widens rejected band as resonance increases
+    let br_narrow = FilterParams {
+        enabled: true,
+        mode: FilterMode::Bandreject,
+        cutoff_hz: 1_000.0,
+        resonance: 0.1,
+        aux: 1.0,
+        ..FilterParams::default()
+    };
+    let br_wide = FilterParams {
+        resonance: 0.9,
+        ..br_narrow
+    };
+    assert!(
+        evaluate_filter_response_db(&br_narrow, 1_000.0)
+            < evaluate_filter_response_db(&br_narrow, 100.0) - 8.0
+    );
+    assert!(
+        evaluate_filter_response_db(&br_wide, 600.0)
+            < evaluate_filter_response_db(&br_narrow, 600.0) - 2.0
+    );
+
+    // Peak+Peak boosts both peaks; Notch+Notch attenuates both notches (cutoff & freq2)
+    let pp = FilterParams {
+        enabled: true,
+        mode: FilterMode::PeakPeak,
+        slope: FilterSlope::Db24,
+        cutoff_hz: 400.0,
+        resonance: 0.7,
+        aux: 0.72,
+        ..FilterParams::default()
+    };
+    let nn = FilterParams {
+        mode: FilterMode::NotchNotch,
+        ..pp
+    };
+    let freq2 = j_syn_dsp::filter::aux_to_freq2_hz(pp.aux);
+    assert!(evaluate_filter_response_db(&pp, 400.0) > 4.0);
+    assert!(evaluate_filter_response_db(&pp, freq2) > 4.0);
+    assert!(evaluate_filter_response_db(&nn, 400.0) < -10.0);
+    assert!(evaluate_filter_response_db(&nn, freq2) < -10.0);
+
+    // Combo filter modes are affected by FilterSlope in response and audio
+    for mode in [
+        FilterMode::HpPeak,
+        FilterMode::HpNotch,
+        FilterMode::LpNotch,
+        FilterMode::LpPeak,
+    ] {
+        let stop_hz = match mode {
+            FilterMode::HpPeak | FilterMode::HpNotch => 350.0,
+            _ => 2_800.0,
+        };
+        let db12 = evaluate_filter_response_db(
+            &FilterParams {
+                enabled: true,
+                mode,
+                slope: FilterSlope::Db12,
+                cutoff_hz: 1_000.0,
+                resonance: 0.4,
+                aux: 0.65,
+                ..FilterParams::default()
+            },
+            stop_hz,
+        );
+        let db48 = evaluate_filter_response_db(
+            &FilterParams {
+                enabled: true,
+                mode,
+                slope: FilterSlope::Db48,
+                cutoff_hz: 1_000.0,
+                resonance: 0.4,
+                aux: 0.65,
+                ..FilterParams::default()
+            },
+            stop_hz,
+        );
+        assert!(
+            db48 < db12 - 12.0,
+            "Expected combo {mode:?} 48dB to attenuate stopband more than 12dB: db12={db12}, db48={db48}"
+        );
+    }
+
+    let bank = WavetableBank::new();
+    for mode in [
+        FilterMode::Bandreject,
+        FilterMode::PeakPeak,
+        FilterMode::NotchNotch,
+    ] {
+        for slope in [
+            FilterSlope::Db6,
+            FilterSlope::Db12,
+            FilterSlope::Db24,
+            FilterSlope::Db36,
+            FilterSlope::Db48,
+        ] {
+            let mut p = SynthParams::default();
+            p.oscs[0].wt_pos = 0.75;
+            p.filters[0] = FilterParams {
+                enabled: true,
+                mode,
+                slope,
+                cutoff_hz: 900.0,
+                resonance: 0.65,
+                drive: 0.4,
+                keytrack: 0.0,
+                aux: 0.65,
+            };
+            let mut eng = SynthEngine::new(48_000.0);
+            eng.note_on(0, 57, 0.9, None, &p);
+            let mut peak = 0.0_f32;
+            for _ in 0..2048 {
+                let (l, r) = eng.process_sample(&p, &bank);
+                assert!(l.is_finite() && r.is_finite() && l.abs() < 8.0 && r.abs() < 8.0);
+                peak = peak.max(l.abs()).max(r.abs());
+            }
+            assert!(peak > 0.005, "Filter {mode:?} {slope:?} produced silence");
+        }
+    }
+}
+
+#[test]
+fn fx_phaser_processes_stereo_and_idle_recovery() {
+    use j_syn_dsp::{
+        FxRackState, FxSlotParams, FxType, ModUiTelemetry, NUM_FX_SLOTS, NUM_MOD_DESTS,
+    };
+
+    let mut rack = FxRackState::new(48_000.0);
+    let mut slots = [FxSlotParams::default(); NUM_FX_SLOTS];
+    slots[0] = FxSlotParams {
+        fx_type: FxType::Phaser,
+        enabled: true,
+        stack: 1,
+        params: [0.65, 0.85, 0.65, 1.0],
+    };
+    let deltas = [0.0_f32; NUM_MOD_DESTS];
+    let tel = ModUiTelemetry::new();
+
+    let mut stereo_diff = 0.0_f32;
+    let mut out_peak = 0.0_f32;
+    for i in 0..4096 {
+        let phase = ((i as f32) * 180.0 / 48_000.0).fract();
+        let x = (phase * 2.0 - 1.0) * 0.4;
+        let (l, r) = rack.process_sample(x, x, &slots, &deltas, 120.0, Some(&tel));
+        assert!(l.is_finite() && r.is_finite() && l.abs() < 4.0 && r.abs() < 4.0);
+        out_peak = out_peak.max(l.abs()).max(r.abs());
+        stereo_diff = stereo_diff.max((l - r).abs());
+    }
+    assert!(out_peak > 0.05, "Phaser output too quiet: {out_peak}");
+    assert!(stereo_diff > 0.01, "Quadrature phaser should create stereo movement: {stereo_diff}");
+
+    let mut tail_peak = 0.0_f32;
+    for _ in 0..8192 {
+        let (l, r) = rack.process_sample(0.0, 0.0, &slots, &deltas, 120.0, None);
+        assert!(l.is_finite() && r.is_finite());
+        tail_peak = tail_peak.max(l.abs()).max(r.abs());
+    }
+    // Check final tail block settles cleanly to zero
+    let mut end_peak = 0.0_f32;
+    for _ in 0..512 {
+        let (l, r) = rack.process_sample(0.0, 0.0, &slots, &deltas, 120.0, None);
+        end_peak = end_peak.max(l.abs()).max(r.abs());
+    }
+    assert!(end_peak < 1e-6 && tail_peak < 2.0, "Phaser idle decay failed: end_peak={end_peak}");
+}

@@ -105,12 +105,15 @@ impl View for ScrollDropdown {
     }
 }
 
-pub(super) fn build_enum_dropdown<'a, E, P, FMap>(
+type EnumLabelOverride = Arc<dyn Fn(&Arc<JSynPluginParams>) -> Option<&'static str> + Send + Sync>;
+
+fn build_enum_dropdown_inner<'a, E, P, FMap>(
     cx: &'a mut Context,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
     params_to_param: FMap,
     items: &'static [(&'static str, E)],
+    fixed_override: Option<EnumLabelOverride>,
 ) -> Handle<'a, ScrollDropdown>
 where
     E: Enum + Copy + PartialEq + Send + Sync + 'static,
@@ -119,11 +122,22 @@ where
 {
     let p_scroll = params.clone();
     let g_scroll = gui_context.clone();
-    ScrollDropdown::new(
+    let ov_scroll = fixed_override.clone();
+    let ov_trigger = fixed_override.clone();
+    let ov_dd_disabled = fixed_override.clone();
+    let ov_disabled = fixed_override.clone();
+    let ov_class = fixed_override;
+
+    let handle = ScrollDropdown::new(
         cx,
         move |cx, delta| {
             if items.is_empty() {
                 return;
+            }
+            if let Some(ref ov) = ov_scroll {
+                if ov(&p_scroll).is_some() {
+                    return;
+                }
             }
             let param = params_to_param(&p_scroll);
             let cur = param.unmodulated_plain_value();
@@ -138,19 +152,22 @@ where
             }
         },
         move |cx| {
-            Dropdown::new(
+            let dd = Dropdown::new(
                 cx,
                 move |cx| {
-                    let text_lens = ParamWidgetBase::make_lens(
-                        UiData::params,
-                        params_to_param,
-                        |param| {
-                            param.normalized_value_to_string(
-                                param.modulated_normalized_value(),
-                                true,
-                            )
-                        },
-                    );
+                    let ov_t = ov_trigger.clone();
+                    let text_lens = UiData::params.map(move |params| {
+                        if let Some(ref ov) = ov_t {
+                            if let Some(fixed) = ov(params) {
+                                return fixed.to_string();
+                            }
+                        }
+                        let param = params_to_param(params);
+                        param.normalized_value_to_string(
+                            param.modulated_normalized_value(),
+                            true,
+                        )
+                    });
                     HStack::new(cx, move |cx| {
                         build_dropdown_trigger_labels(cx, text_lens);
                     })
@@ -175,8 +192,63 @@ where
                         });
                     }
                 },
-            )
+            );
+            if let Some(ov) = ov_dd_disabled {
+                dd.disabled(UiData::params.map(move |params| ov(params).is_some()))
+            } else {
+                dd
+            }
         },
+    );
+
+    if let (Some(ov_d), Some(ov_c)) = (ov_disabled, ov_class) {
+        handle
+            .disabled(UiData::params.map(move |params| ov_d(params).is_some()))
+            .toggle_class(
+                "dropdown-disabled",
+                UiData::params.map(move |params| ov_c(params).is_some()),
+            )
+    } else {
+        handle
+    }
+}
+
+pub(super) fn build_enum_dropdown<'a, E, P, FMap>(
+    cx: &'a mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    params_to_param: FMap,
+    items: &'static [(&'static str, E)],
+) -> Handle<'a, ScrollDropdown>
+where
+    E: Enum + Copy + PartialEq + Send + Sync + 'static,
+    P: Param<Plain = E> + 'static,
+    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
+{
+    build_enum_dropdown_inner(cx, params, gui_context, params_to_param, items, None)
+}
+
+pub(super) fn build_enum_dropdown_with_override<'a, E, P, FMap, FOverride>(
+    cx: &'a mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    params_to_param: FMap,
+    items: &'static [(&'static str, E)],
+    override_fn: FOverride,
+) -> Handle<'a, ScrollDropdown>
+where
+    E: Enum + Copy + PartialEq + Send + Sync + 'static,
+    P: Param<Plain = E> + 'static,
+    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
+    FOverride: Fn(&Arc<JSynPluginParams>) -> Option<&'static str> + Send + Sync + 'static,
+{
+    build_enum_dropdown_inner(
+        cx,
+        params,
+        gui_context,
+        params_to_param,
+        items,
+        Some(Arc::new(override_fn)),
     )
 }
 

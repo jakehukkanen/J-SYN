@@ -118,12 +118,45 @@ fn handle_mod_depth_move(
     true
 }
 
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)]
+fn set_macos_cursor(row_resize: bool) {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let cursor: *mut Object = if row_resize {
+            msg_send![class!(NSCursor), resizeUpDownCursor]
+        } else {
+            msg_send![class!(NSCursor), arrowCursor]
+        };
+        if !cursor.is_null() {
+            let _: () = msg_send![cursor, set];
+        }
+    }
+}
+
+fn update_mod_collar_cursor(cx: &mut EventContext, active: bool, cursor_active: &mut bool) {
+    if active {
+        cx.emit(WindowEvent::SetCursor(CursorIcon::RowResize));
+        #[cfg(target_os = "macos")]
+        set_macos_cursor(true);
+        *cursor_active = true;
+    } else if *cursor_active {
+        cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
+        #[cfg(target_os = "macos")]
+        set_macos_cursor(false);
+        *cursor_active = false;
+    }
+}
+
 /// Skeuomorphic 3D rotary knob widget rendered via `femtovg` (`vizia::vg`).
 pub struct RotaryKnob {
     param_base: ParamWidgetBase,
     drag_active: bool,
     drag_state: Option<DragState>,
     mod_depth_drag: Option<ModDepthDrag>,
+    collar_cursor_active: bool,
     scrolled_lines: f32,
     hovered: bool,
     bipolar: bool,
@@ -256,6 +289,7 @@ impl RotaryKnob {
             drag_active: false,
             drag_state: None,
             mod_depth_drag: None,
+            collar_cursor_active: false,
             scrolled_lines: 0.0,
             hovered: false,
             bipolar,
@@ -317,7 +351,7 @@ impl RotaryKnob {
         let max_r = (bounds.w.min(bounds.h) * 0.5) - 2.0 * dpx;
         let mod_ring_r = max_r * 0.99;
         let arc_r = (max_r * 0.81).min(mod_ring_r - 3.6 * dpx);
-        (x - center_x).hypot(y - center_y) > (arc_r + 0.6 * dpx)
+        (x - center_x).hypot(y - center_y) > (arc_r + 0.4 * dpx)
     }
 
     fn reset_to_default(&mut self, cx: &mut EventContext) {
@@ -331,6 +365,9 @@ impl RotaryKnob {
             if was_param_drag {
                 self.param_base.end_set_parameter(cx);
             }
+            let on_collar =
+                self.hovered && self.is_on_mod_collar(cx, cx.mouse().cursorx, cx.mouse().cursory);
+            update_mod_collar_cursor(cx, on_collar, &mut self.collar_cursor_active);
         }
         let target = self.param_base.default_normalized_value();
         self.param_base.begin_set_parameter(cx);
@@ -361,19 +398,17 @@ impl View for RotaryKnob {
         event.map(|window_event, meta| match window_event {
             WindowEvent::MouseOver => {
                 self.hovered = true;
-                let cursor = if self.is_on_mod_collar(cx, cx.mouse().cursorx, cx.mouse().cursory) {
-                    CursorIcon::RowResize
-                } else {
-                    CursorIcon::Default
-                };
-                cx.emit(WindowEvent::SetCursor(cursor));
+                let on_collar = !self.drag_active
+                    && (self.mod_depth_drag.is_some()
+                        || self.is_on_mod_collar(cx, cx.mouse().cursorx, cx.mouse().cursory));
+                update_mod_collar_cursor(cx, on_collar, &mut self.collar_cursor_active);
                 self.emit_tooltip(cx);
                 cx.needs_redraw();
             }
             WindowEvent::MouseOut => {
                 self.hovered = false;
                 if !self.drag_active && self.mod_depth_drag.is_none() {
-                    cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
+                    update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
                     cx.emit(UiEvent::HideTooltip);
                 }
                 cx.needs_redraw();
@@ -399,7 +434,7 @@ impl View for RotaryKnob {
                             cx.capture();
                             cx.focus();
                             cx.set_active(true);
-                            cx.emit(WindowEvent::SetCursor(CursorIcon::RowResize));
+                            update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
                             cx.emit(UiEvent::ModUiChanged);
                             self.emit_tooltip(cx);
                             cx.needs_redraw();
@@ -409,6 +444,7 @@ impl View for RotaryKnob {
                     }
                 }
                 self.drag_active = true;
+                update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
                 cx.capture();
                 cx.focus();
                 cx.set_active(true);
@@ -457,20 +493,16 @@ impl View for RotaryKnob {
                     self.mod_depth_drag = None;
                     cx.release();
                     cx.set_active(false);
+                    let mx = cx.mouse().cursorx;
+                    let my = cx.mouse().cursory;
+                    let bounds = cx.bounds();
+                    let inside = (bounds.x..=(bounds.x + bounds.w)).contains(&mx)
+                        && (bounds.y..=(bounds.y + bounds.h)).contains(&my);
+                    let on_collar = self.hovered && inside && self.is_on_mod_collar(cx, mx, my);
+                    update_mod_collar_cursor(cx, on_collar, &mut self.collar_cursor_active);
                     if self.hovered {
-                        let cursor = if self.is_on_mod_collar(
-                            cx,
-                            cx.mouse().cursorx,
-                            cx.mouse().cursory,
-                        ) {
-                            CursorIcon::RowResize
-                        } else {
-                            CursorIcon::Default
-                        };
-                        cx.emit(WindowEvent::SetCursor(cursor));
                         self.emit_tooltip(cx);
                     } else {
-                        cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
                         cx.emit(UiEvent::HideTooltip);
                     }
                     cx.needs_redraw();
@@ -482,8 +514,13 @@ impl View for RotaryKnob {
                     cx.set_active(false);
                     self.param_base.end_set_parameter(cx);
                     if self.hovered {
+                        let mx = cx.mouse().cursorx;
+                        let my = cx.mouse().cursory;
+                        let on_collar = self.is_on_mod_collar(cx, mx, my);
+                        update_mod_collar_cursor(cx, on_collar, &mut self.collar_cursor_active);
                         self.emit_tooltip(cx);
                     } else {
+                        update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
                         cx.emit(UiEvent::HideTooltip);
                     }
                     cx.needs_redraw();
@@ -492,7 +529,7 @@ impl View for RotaryKnob {
             }
             WindowEvent::MouseMove(x, y) => {
                 if handle_mod_depth_move(&mut self.mod_depth_drag, &self.mod_binding, cx, *y) {
-                    cx.emit(WindowEvent::SetCursor(CursorIcon::RowResize));
+                    update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
                     self.emit_tooltip(cx);
                     meta.consume();
                     return;
@@ -520,12 +557,8 @@ impl View for RotaryKnob {
                     cx.needs_redraw();
                     meta.consume();
                 } else if self.hovered {
-                    let cursor = if self.is_on_mod_collar(cx, *x, *y) {
-                        CursorIcon::RowResize
-                    } else {
-                        CursorIcon::Default
-                    };
-                    cx.emit(WindowEvent::SetCursor(cursor));
+                    let on_collar = self.is_on_mod_collar(cx, *x, *y);
+                    update_mod_collar_cursor(cx, on_collar, &mut self.collar_cursor_active);
                 }
             }
             WindowEvent::MouseScroll(_scroll_x, scroll_y) => {
@@ -1135,6 +1168,7 @@ pub struct ParamStepPill {
     start_y: f32,
     start_val: f32,
     mod_depth_drag: Option<ModDepthDrag>,
+    collar_cursor_active: bool,
     mod_binding: Option<ModTargetBinding>,
 }
 
@@ -1232,6 +1266,7 @@ impl ParamStepPill {
             if was_drag {
                 self.param_base.end_set_parameter(cx);
             }
+            update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
         }
         let def = self.param_base.default_normalized_value();
         self.param_base.begin_set_parameter(cx);
@@ -1274,6 +1309,7 @@ impl ParamStepPill {
             start_y: 0.0,
             start_val: 0.0,
             mod_depth_drag: None,
+            collar_cursor_active: false,
             mod_binding,
         }
         .build(cx, move |cx| {
@@ -1363,6 +1399,7 @@ impl View for ParamStepPill {
                             });
                             mb.mod_ui.focus_slot(mb.dest, slot_idx);
                             cx.capture();
+                            update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
                             cx.emit(UiEvent::ModUiChanged);
                             self.emit_tooltip(cx);
                             cx.needs_redraw();
@@ -1433,6 +1470,7 @@ impl View for ParamStepPill {
                 if self.mod_depth_drag.is_some() {
                     self.mod_depth_drag = None;
                     cx.release();
+                    update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
                     if self.hovered {
                         self.emit_tooltip(cx);
                     } else {
@@ -1465,6 +1503,7 @@ impl View for ParamStepPill {
             }
             WindowEvent::MouseMove(_x, y) => {
                 if handle_mod_depth_move(&mut self.mod_depth_drag, &self.mod_binding, cx, *y) {
+                    update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
                     self.emit_tooltip(cx);
                     meta.consume();
                     return;
@@ -1603,6 +1642,7 @@ pub struct PitchDragBox {
     last_mode: u8,
     scrolled_lines: f32,
     mod_depth_drag: Option<ModDepthDrag>,
+    collar_cursor_active: bool,
     mod_binding: Option<ModTargetBinding>,
 }
 
@@ -1630,6 +1670,7 @@ impl PitchDragBox {
             last_mode: 0,
             scrolled_lines: 0.0,
             mod_depth_drag: None,
+            collar_cursor_active: false,
             mod_binding: Some(ModTargetBinding {
                 dest,
                 mod_ui,
@@ -1695,6 +1736,7 @@ impl PitchDragBox {
             if was_drag {
                 self.param_base.end_set_parameter(cx);
             }
+            update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
         }
         let def = self.param_base.default_normalized_value();
         self.param_base.begin_set_parameter(cx);
@@ -1784,6 +1826,7 @@ impl View for PitchDragBox {
                 if self.mod_depth_drag.is_some() {
                     self.mod_depth_drag = None;
                     cx.release();
+                    update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
                     if self.hovered {
                         self.emit_tooltip(cx);
                     } else {
@@ -1806,6 +1849,7 @@ impl View for PitchDragBox {
             }
             WindowEvent::MouseMove(_x, y) => {
                 if handle_mod_depth_move(&mut self.mod_depth_drag, &self.mod_binding, cx, *y) {
+                    update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
                     self.emit_tooltip(cx);
                     meta.consume();
                     return;

@@ -10,7 +10,9 @@ use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::RawParamEvent;
 
-use super::controls::{bold_label, build_enum_dropdown, build_flex_knob_cell_mod_dim};
+use super::controls::{
+    bold_label, build_enum_dropdown, build_enum_dropdown_with_override, build_flex_knob_cell_mod_dim,
+};
 use super::mod_bar::ModUiState;
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
 use super::UiData;
@@ -39,6 +41,9 @@ const FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
     ("LP", FilterModeParam::Lp),
     ("BP", FilterModeParam::Bp),
     ("HP", FilterModeParam::Hp),
+    ("Notch", FilterModeParam::Notch),
+    ("Bandreject", FilterModeParam::Bandreject),
+    ("Peak", FilterModeParam::Peak),
     ("Scream", FilterModeParam::Scream),
     ("Daft", FilterModeParam::Daft),
     ("Comb", FilterModeParam::Comb),
@@ -46,8 +51,8 @@ const FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
     ("HP + Notch", FilterModeParam::HpNotch),
     ("LP + Notch", FilterModeParam::LpNotch),
     ("LP + Peak", FilterModeParam::LpPeak),
-    ("Notch", FilterModeParam::Notch),
-    ("Peak", FilterModeParam::Peak),
+    ("Peak + Peak", FilterModeParam::PeakPeak),
+    ("Notch + Notch", FilterModeParam::NotchNotch),
 ];
 
 const FILTER_SLOPE_ITEMS: &[(&str, FilterSlopeParam)] = &[
@@ -59,13 +64,17 @@ const FILTER_SLOPE_ITEMS: &[(&str, FilterSlopeParam)] = &[
 ];
 
 #[inline]
+fn is_multi_mode_param(mode: FilterModeParam) -> bool {
+    j_syn_dsp::FilterMode::from(mode).is_multi()
+}
+
+#[inline]
 fn aux_label_for_mode(mode: FilterModeParam) -> &'static str {
+    if is_multi_mode_param(mode) {
+        return "FREQ 2";
+    }
     match mode {
         FilterModeParam::Scream => "SCREAM",
-        FilterModeParam::HpPeak
-        | FilterModeParam::HpNotch
-        | FilterModeParam::LpNotch
-        | FilterModeParam::LpPeak => "FREQ 2",
         FilterModeParam::Comb => "DAMP",
         _ => "MIX",
     }
@@ -418,13 +427,7 @@ fn build_filter_aux_knob_cell(
             0,
             Arc::new(move |norm, _mod_offset| {
                 let mode = p_tt.filters[filter_idx].mode.value();
-                if matches!(
-                    mode,
-                    FilterModeParam::HpPeak
-                        | FilterModeParam::HpNotch
-                        | FilterModeParam::LpNotch
-                        | FilterModeParam::LpPeak
-                ) {
+                if is_multi_mode_param(mode) {
                     let hz = j_syn_dsp::filter::aux_to_freq2_hz(norm);
                     format_freq_hz(hz)
                 } else {
@@ -488,12 +491,16 @@ pub(super) fn build_filter_panel(
                 .width(Stretch(1.0))
                 .height(Pixels(20.0));
 
-                build_enum_dropdown(
+                build_enum_dropdown_with_override(
                     cx,
                     params.clone(),
                     gui_context.clone(),
                     move |p| &p.filters[filter_idx].slope,
                     FILTER_SLOPE_ITEMS,
+                    move |p| {
+                        let mode = j_syn_dsp::FilterMode::from(p.filters[filter_idx].mode.value());
+                        mode.has_fixed_12db_slope().then_some("12 dB")
+                    },
                 )
                 .width(Pixels(60.0))
                 .height(Pixels(20.0));

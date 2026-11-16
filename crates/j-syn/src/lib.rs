@@ -200,6 +200,12 @@ pub enum FilterModeParam {
     Notch,
     #[name = "Peak"]
     Peak,
+    #[name = "Bandreject"]
+    Bandreject,
+    #[name = "Peak + Peak"]
+    PeakPeak,
+    #[name = "Notch + Notch"]
+    NotchNotch,
 }
 
 impl From<FilterModeParam> for FilterMode {
@@ -217,6 +223,9 @@ impl From<FilterModeParam> for FilterMode {
             FilterModeParam::LpPeak => FilterMode::LpPeak,
             FilterModeParam::Notch => FilterMode::Notch,
             FilterModeParam::Peak => FilterMode::Peak,
+            FilterModeParam::Bandreject => FilterMode::Bandreject,
+            FilterModeParam::PeakPeak => FilterMode::PeakPeak,
+            FilterModeParam::NotchNotch => FilterMode::NotchNotch,
         }
     }
 }
@@ -1068,6 +1077,8 @@ pub enum FxTypeParam {
     JSatClipper,
     #[name = "Filter"]
     Filter,
+    #[name = "Phaser"]
+    Phaser,
 }
 
 impl From<j_syn_dsp::FxType> for FxTypeParam {
@@ -1081,6 +1092,7 @@ impl From<j_syn_dsp::FxType> for FxTypeParam {
             j_syn_dsp::FxType::Reverb => Self::Reverb,
             j_syn_dsp::FxType::JSatClipper => Self::JSatClipper,
             j_syn_dsp::FxType::Filter => Self::Filter,
+            j_syn_dsp::FxType::Phaser => Self::Phaser,
         }
     }
 }
@@ -1096,6 +1108,7 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
             FxTypeParam::Reverb => Self::Reverb,
             FxTypeParam::JSatClipper => Self::JSatClipper,
             FxTypeParam::Filter => Self::Filter,
+            FxTypeParam::Phaser => Self::Phaser,
         }
     }
 }

@@ -813,9 +813,15 @@ led-toggle:checked .switch-label {
   color: #84786c;
 }
 
-.insert-pos-row.slot-disabled dropdown {
+.insert-pos-row.slot-disabled dropdown,
+.dropdown-disabled dropdown,
+.dropdown-disabled dropdown:hover {
   background-color: #1c1814;
   border-color: #39312a;
+}
+
+.dropdown-disabled .compact-pill-text {
+  color: #84786c;
 }
 
 .inline-pill.pill-dimmed .inline-pill-label {
