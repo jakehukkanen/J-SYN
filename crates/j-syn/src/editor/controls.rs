@@ -353,148 +353,137 @@ pub(super) fn build_wavetable_dropdown(
     bank: Arc<WavetableBank>,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
-) -> Handle<'_, ScrollDropdown> {
+) -> Handle<'_, HStack> {
     let dialog_open = Arc::new(AtomicBool::new(false));
-    let p_scroll = params.clone();
-    let g_scroll = gui_context.clone();
 
-    ScrollDropdown::new(
-        cx,
-        move |_cx, delta| {
-            let cur = p_scroll.oscs[osc_idx].wt_select.value();
-            let pos = WT_ITEMS.iter().position(|&(_, v)| v == cur).unwrap_or(0);
-            let next = (pos as isize + delta).clamp(0, WT_ITEMS.len() as isize - 1) as usize;
-            if next != pos {
-                set_wavetable_choice(&p_scroll, &g_scroll, osc_idx, WT_ITEMS[next].1);
-            }
-        },
-        move |cx| {
-            let p_trigger = params.clone();
-            Dropdown::new(
-                cx,
-                move |cx| {
-                    let p_label = p_trigger.clone();
-                    let text_lens = ParamWidgetBase::make_lens(
-                        UiData::params,
-                        move |p| &p.oscs[osc_idx].wt_select,
-                        move |param| {
-                            if param.value() == WavetableChoice::Custom {
-                                if let Ok(guard) = p_label.wavetable_paths.lock() {
-                                    let path_str = guard[osc_idx].trim();
-                                    if !path_str.is_empty() {
-                                        if let Some(stem) = std::path::Path::new(path_str)
-                                            .file_stem()
-                                            .and_then(|s| s.to_str())
-                                        {
-                                            if !stem.is_empty() {
-                                                return stem.to_string();
-                                            }
+    HStack::new(cx, move |cx| {
+        let p_trigger = params.clone();
+        Dropdown::new(
+            cx,
+            move |cx| {
+                let p_label = p_trigger.clone();
+                let text_lens = ParamWidgetBase::make_lens(
+                    UiData::params,
+                    move |p| &p.oscs[osc_idx].wt_select,
+                    move |param| {
+                        if param.value() == WavetableChoice::Custom {
+                            if let Ok(guard) = p_label.wavetable_paths.lock() {
+                                let path_str = guard[osc_idx].trim();
+                                if !path_str.is_empty() {
+                                    if let Some(stem) = std::path::Path::new(path_str)
+                                        .file_stem()
+                                        .and_then(|s| s.to_str())
+                                    {
+                                        if !stem.is_empty() {
+                                            return stem.to_string();
                                         }
                                     }
                                 }
                             }
-                            param.normalized_value_to_string(
-                                param.modulated_normalized_value(),
-                                true,
-                            )
-                        },
-                    );
-                    HStack::new(cx, move |cx| {
-                        build_dropdown_trigger_labels(cx, text_lens);
-                    })
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0))
-                    .child_top(Pixels(0.0))
-                    .child_bottom(Pixels(0.0))
-                    .overflow(Overflow::Hidden)
-                },
-                move |cx| {
-                    for &(label, val) in WT_ITEMS {
-                        let p_ref = params.clone();
-                        let gui_ctx = gui_context.clone();
-                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                            let setter = ParamSetter::new(gui_ctx.as_ref());
-                            let param = &p_ref.oscs[osc_idx].wt_select;
-                            setter.begin_set_parameter(param);
-                            setter.set_parameter(param, val);
-                            setter.end_set_parameter(param);
-                            cx.emit(PopupEvent::Close);
-                        });
-                    }
-
-                    let bank_ref = bank.clone();
+                        }
+                        param.normalized_value_to_string(
+                            param.modulated_normalized_value(),
+                            true,
+                        )
+                    },
+                );
+                HStack::new(cx, move |cx| {
+                    build_dropdown_trigger_labels(cx, text_lens);
+                })
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .child_top(Pixels(0.0))
+                .child_bottom(Pixels(0.0))
+                .overflow(Overflow::Hidden)
+            },
+            move |cx| {
+                for &(label, val) in WT_ITEMS {
                     let p_ref = params.clone();
                     let gui_ctx = gui_context.clone();
-                    let dialog_flag_ref = dialog_open.clone();
-                    bold_label(cx, "Load .WAV...", "dropdown-action-item").on_press(move |cx| {
+                    bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                        let setter = ParamSetter::new(gui_ctx.as_ref());
+                        let param = &p_ref.oscs[osc_idx].wt_select;
+                        setter.begin_set_parameter(param);
+                        setter.set_parameter(param, val);
+                        setter.end_set_parameter(param);
                         cx.emit(PopupEvent::Close);
-                        if !dialog_flag_ref.swap(true, Ordering::AcqRel) {
-                            let bank = bank_ref.clone();
-                            let params = p_ref.clone();
-                            let gui_context = gui_ctx.clone();
-                            let dialog_flag = dialog_flag_ref.clone();
-                            let start_dir = crate::presets::JSynConfig::load().wavetables_dir;
+                    });
+                }
 
+                let bank_ref = bank.clone();
+                let p_ref = params.clone();
+                let gui_ctx = gui_context.clone();
+                let dialog_flag_ref = dialog_open.clone();
+                bold_label(cx, "Load .WAV...", "dropdown-action-item").on_press(move |cx| {
+                    cx.emit(PopupEvent::Close);
+                    if !dialog_flag_ref.swap(true, Ordering::AcqRel) {
+                        let bank = bank_ref.clone();
+                        let params = p_ref.clone();
+                        let gui_context = gui_ctx.clone();
+                        let dialog_flag = dialog_flag_ref.clone();
+                        let start_dir = crate::presets::JSynConfig::load().wavetables_dir;
+
+                        std::thread::spawn(move || {
+                            let mut dlg =
+                                rfd::FileDialog::new().add_filter("WAV Audio", &["wav", "WAV"]);
+                            if let Some(dir) = start_dir.filter(|s| !s.trim().is_empty()) {
+                                dlg = dlg.set_directory(dir);
+                            }
+                            if let Some(path) = dlg.pick_file() {
+                                let _ = crate::presets::load_wavetable_file_for_osc(
+                                    osc_idx,
+                                    &path,
+                                    &params,
+                                    &gui_context,
+                                    &bank,
+                                );
+                            }
+                            dialog_flag.store(false, Ordering::Release);
+                        });
+                    }
+                });
+
+                let bank_dir = bank.clone();
+                let p_dir = params.clone();
+                let g_dir = gui_context.clone();
+                Binding::new(cx, UiData::wavetables_dir_rev, move |cx, _| {
+                    let cfg = crate::presets::JSynConfig::load();
+                    let tree =
+                        crate::presets::scan_wavetable_tree(cfg.wavetables_dir.as_deref());
+                    let expanded = UiData::expanded_wt_folder.get(cx);
+                    let bank_d = bank_dir.clone();
+                    let p_d = p_dir.clone();
+                    let g_d = g_dir.clone();
+                    build_directory_tree_items(
+                        cx,
+                        tree,
+                        expanded,
+                        |cx, folder_name| {
+                            cx.emit(UiEvent::ToggleWtFolder(folder_name.to_string()));
+                        },
+                        move |cx, entry| {
+                            cx.emit(PopupEvent::Close);
+                            let bank = bank_d.clone();
+                            let params = p_d.clone();
+                            let gui_context = g_d.clone();
+                            let path = entry.path.clone();
                             std::thread::spawn(move || {
-                                let mut dlg = rfd::FileDialog::new()
-                                    .add_filter("WAV Audio", &["wav", "WAV"]);
-                                if let Some(dir) = start_dir.filter(|s| !s.trim().is_empty()) {
-                                    dlg = dlg.set_directory(dir);
-                                }
-                                if let Some(path) = dlg.pick_file() {
-                                    let _ = crate::presets::load_wavetable_file_for_osc(
-                                        osc_idx,
-                                        &path,
-                                        &params,
-                                        &gui_context,
-                                        &bank,
-                                    );
-                                }
-                                dialog_flag.store(false, Ordering::Release);
+                                let _ = crate::presets::load_wavetable_file_for_osc(
+                                    osc_idx,
+                                    &path,
+                                    &params,
+                                    &gui_context,
+                                    &bank,
+                                );
                             });
-                        }
-                    });
-
-                    let bank_dir = bank.clone();
-                    let p_dir = params.clone();
-                    let g_dir = gui_context.clone();
-                    Binding::new(cx, UiData::wavetables_dir_rev, move |cx, _| {
-                        let cfg = crate::presets::JSynConfig::load();
-                        let tree =
-                            crate::presets::scan_wavetable_tree(cfg.wavetables_dir.as_deref());
-                        let expanded = UiData::expanded_wt_folder.get(cx);
-                        let bank_d = bank_dir.clone();
-                        let p_d = p_dir.clone();
-                        let g_d = g_dir.clone();
-                        build_directory_tree_items(
-                            cx,
-                            tree,
-                            expanded,
-                            |cx, folder_name| {
-                                cx.emit(UiEvent::ToggleWtFolder(folder_name.to_string()));
-                            },
-                            move |cx, entry| {
-                                cx.emit(PopupEvent::Close);
-                                let bank = bank_d.clone();
-                                let params = p_d.clone();
-                                let gui_context = g_d.clone();
-                                let path = entry.path.clone();
-                                std::thread::spawn(move || {
-                                    let _ = crate::presets::load_wavetable_file_for_osc(
-                                        osc_idx,
-                                        &path,
-                                        &params,
-                                        &gui_context,
-                                        &bank,
-                                    );
-                                });
-                            },
-                        );
-                    });
-                },
-            )
-        },
-    )
+                        },
+                    );
+                });
+            },
+        )
+        .width(Stretch(1.0))
+        .height(Stretch(1.0));
+    })
 }
 
 pub(super) fn build_ui_scale_dropdown(cx: &mut Context) {

@@ -1201,6 +1201,19 @@ pub(crate) fn create(
         let mod_ui_for_ui = mod_ui.clone();
 
         VStack::new(cx, move |cx| {
+            // Prevent Spacebar (e.g. DAW transport play/stop) from triggering focused buttons.
+            cx.add_listener(|_view: &mut VStack, _cx, event| {
+                event.map(|window_event, meta| match window_event {
+                    WindowEvent::KeyDown(Code::Space, _)
+                    | WindowEvent::KeyUp(Code::Space, _)
+                    | WindowEvent::Press { mouse: false }
+                    | WindowEvent::PressDown { mouse: false } => {
+                        meta.consume();
+                    }
+                    _ => {}
+                });
+            });
+
             build_header_bar(cx, mod_ui_for_ui.clone());
 
             // Main chassis: 3-Column Rack or MATRIX Overview + 4-Tab Bottom Drawer
