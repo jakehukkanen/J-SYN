@@ -33,6 +33,7 @@ mod fx_rack;
 mod fx_scopes;
 mod insert_panel;
 mod macros_tab;
+mod matrix_tab;
 mod mod_bar;
 mod modseq_tab;
 mod noise_panel;
@@ -51,7 +52,7 @@ use controls::{
 use filter_panel::build_filter_panel;
 use insert_panel::build_insert_panel;
 use macros_tab::build_macros_tab;
-use mod_bar::{bottom_tab_tag, build_matrix_view, build_mod_source_bar, ModUiState};
+use mod_bar::{bottom_tab_tag, build_mod_source_bar, ModUiState};
 use modseq_tab::{build_modseq_tab, ModSeqSubTab};
 use noise_panel::build_noise_panel;
 use osc_panel::{build_osc_panel, osc_enabled_fn};
@@ -1274,7 +1275,7 @@ pub(crate) fn create(
                                 );
                             }
                             MainViewMode::Matrix => {
-                                build_matrix_view(cx, mod_ui_m.clone());
+                                matrix_tab::build_matrix_view(cx, mod_ui_m.clone());
                             }
                             MainViewMode::Settings => {
                                 settings_view::build_settings_view(

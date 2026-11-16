@@ -57,46 +57,6 @@ fn slot_enabled_for_bus(p: &JSynPluginParams, bus_idx: usize, slot_idx: usize) -
     p.fx_bus_slots(bus_idx)[slot_idx].enabled.value()
 }
 
-macro_rules! bus_slot_enabled_fns {
-    ($($fn_name:ident : $bus:expr, $slot:expr);* $(;)?) => {
-        $(
-            #[inline]
-            fn $fn_name(p: &JSynPluginParams) -> bool {
-                slot_enabled_for_bus(p, $bus, $slot)
-            }
-        )*
-    };
-}
-
-bus_slot_enabled_fns!(
-    bus_a_0: 0, 0; bus_a_1: 0, 1; bus_a_2: 0, 2; bus_a_3: 0, 3;
-    bus_a_4: 0, 4; bus_a_5: 0, 5; bus_a_6: 0, 6; bus_a_7: 0, 7;
-    bus_b_0: 1, 0; bus_b_1: 1, 1; bus_b_2: 1, 2; bus_b_3: 1, 3;
-    bus_b_4: 1, 4; bus_b_5: 1, 5; bus_b_6: 1, 6; bus_b_7: 1, 7;
-);
-
-#[inline]
-fn fx_slot_enabled_fn(bus_idx: usize, slot_idx: usize) -> fn(&JSynPluginParams) -> bool {
-    match (bus_idx & 1, slot_idx & 7) {
-        (0, 0) => bus_a_0,
-        (0, 1) => bus_a_1,
-        (0, 2) => bus_a_2,
-        (0, 3) => bus_a_3,
-        (0, 4) => bus_a_4,
-        (0, 5) => bus_a_5,
-        (0, 6) => bus_a_6,
-        (0, _) => bus_a_7,
-        (_, 0) => bus_b_0,
-        (_, 1) => bus_b_1,
-        (_, 2) => bus_b_2,
-        (_, 3) => bus_b_3,
-        (_, 4) => bus_b_4,
-        (_, 5) => bus_b_5,
-        (_, 6) => bus_b_6,
-        _ => bus_b_7,
-    }
-}
-
 #[inline]
 fn main_bus_tag(bus_idx: usize) -> u8 {
     if bus_idx == 0 {
@@ -760,6 +720,19 @@ fn build_fx_scope_zstack(
     .height(Stretch(1.0));
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FxKnobViewKey {
+    fx_type: FxTypeParam,
+    is_scream: bool,
+    is_eq: bool,
+}
+
+impl Data for FxKnobViewKey {
+    fn same(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
 fn build_fx_knob_row(
     cx: &mut Context,
     bus_idx: usize,
@@ -769,7 +742,6 @@ fn build_fx_knob_row(
     knob_sz: f32,
     tab_tag: u8,
 ) {
-    let dim_fn = fx_slot_enabled_fn(bus_idx, slot_idx);
     HStack::new(cx, move |cx| {
         for p_idx in 0..4 {
             let p_dim = params.clone();
@@ -780,25 +752,23 @@ fn build_fx_knob_row(
                 cx,
                 UiData::mod_ui_rev.map(move |_| {
                     let s = &p_key.fx_bus_slots(bus_idx)[slot_idx];
-                    let is_scream = s.filter_mode.value() == FilterModeParam::Scream;
-                    let is_eq = FxType::from(s.fx_type.value()).has_eq_subtab()
-                        && mod_key.fx_eq_subtab(bus_idx, slot_idx);
-                    ((s.fx_type.value() as usize) << 2)
-                        | ((is_scream as usize) << 1)
-                        | (is_eq as usize)
+                    let fx_type = s.fx_type.value();
+                    FxKnobViewKey {
+                        fx_type,
+                        is_scream: s.filter_mode.value() == FilterModeParam::Scream,
+                        is_eq: FxType::from(fx_type).has_eq_subtab()
+                            && mod_key.fx_eq_subtab(bus_idx, slot_idx),
+                    }
                 }),
                 move |cx, key_lens| {
-                    let packed = key_lens.get(cx);
-                    let fx_ty = FxTypeParam::from(FxType::from_index(packed >> 2));
-                    let is_scream = (packed & 2) != 0;
-                    let is_eq = (packed & 1) != 0;
-                    let param_slot = if is_eq { 4 + p_idx } else { p_idx };
-                    let title = fx_slot_param_label(fx_ty, is_eq, is_scream, p_idx);
-                    let accent = fx_accent_rgb(fx_ty);
+                    let key = key_lens.get(cx);
+                    let param_slot = if key.is_eq { 4 + p_idx } else { p_idx };
+                    let title = fx_slot_param_label(key.fx_type, key.is_eq, key.is_scream, p_idx);
+                    let accent = fx_accent_rgb(key.fx_type);
                     let p_cell = p_dim.clone();
                     let mod_cell = mod_ui.clone();
                     let formatter = Arc::new(move |norm: f32, _off: Option<f32>| {
-                        format_fx_slot_param_value(fx_ty, is_eq, p_idx, norm)
+                        format_fx_slot_param_value(key.fx_type, key.is_eq, p_idx, norm)
                     });
                     VStack::new(cx, move |cx| {
                         bold_label(cx, title, "knob-title")
@@ -817,7 +787,7 @@ fn build_fx_knob_row(
                             tab_tag,
                             formatter,
                         )
-                        .enabled_by(p_cell, dim_fn)
+                        .enabled_by(p_cell, move |p| slot_enabled_for_bus(p, bus_idx, slot_idx))
                         .width(Pixels(knob_sz))
                         .height(Pixels(knob_sz))
                         .left(Stretch(1.0))

@@ -20,25 +20,7 @@ const COMB_BASE: [usize; 4] = [1116, 1277, 1422, 1617];
 const AP_BASE: [usize; 2] = [556, 441];
 const STEREO_SPREAD: usize = 29;
 
-#[inline]
-fn flush_denormal(x: f32) -> f32 {
-    if x.is_finite() && x.abs() >= 1e-24 {
-        x
-    } else {
-        0.0
-    }
-}
-
-#[inline]
-fn track_idle(idle_samples: &mut u32, in_l: f32, in_r: f32) -> bool {
-    if in_l.abs() < 1e-8 && in_r.abs() < 1e-8 {
-        *idle_samples = idle_samples.saturating_add(1);
-        true
-    } else {
-        *idle_samples = 0;
-        false
-    }
-}
+use super::{flush_denormal, track_idle};
 
 /// Maps normalized `0.0..=1.0` to `20 Hz .. 2000 Hz`.
 #[inline]

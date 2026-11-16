@@ -33,6 +33,95 @@ pub(super) fn fx_accent_rgb(fx_ty: FxTypeParam) -> (u8, u8, u8) {
     }
 }
 
+struct ScopeFrame {
+    bounds: BoundingBox,
+    dpx: f32,
+    radius: f32,
+    enabled: bool,
+    ix: f32,
+    iy: f32,
+    iw: f32,
+    ih: f32,
+    bottom: f32,
+}
+
+impl ScopeFrame {
+    #[inline]
+    fn begin(
+        canvas: &mut Canvas,
+        bounds: BoundingBox,
+        dpx: f32,
+        pad_x_dp: f32,
+        pad_y_dp: f32,
+        enabled: bool,
+        pal: &ThemePalette,
+    ) -> Self {
+        let radius = 3.5 * dpx;
+        paint_scope_bg(canvas, bounds, radius, pal, enabled);
+        let pad_x = pad_x_dp * dpx;
+        let pad_y = pad_y_dp * dpx;
+        let ix = bounds.x + pad_x;
+        let iy = bounds.y + pad_y;
+        let iw = (bounds.w - 2.0 * pad_x).max(1.0);
+        let ih = (bounds.h - 2.0 * pad_y).max(1.0);
+        Self {
+            bounds,
+            dpx,
+            radius,
+            enabled,
+            ix,
+            iy,
+            iw,
+            ih,
+            bottom: iy + ih,
+        }
+    }
+
+    #[inline]
+    fn end(&self, canvas: &mut Canvas, pal: &ThemePalette) {
+        paint_scope_border(canvas, self.bounds, self.dpx, self.radius, pal, self.enabled);
+    }
+}
+
+#[inline]
+fn read_scope_snapshot(
+    mod_ui: &ModUiState,
+    bus_idx: usize,
+    slot_idx: usize,
+) -> ([f32; FX_SCOPE_LEN], [f32; FX_SCOPE_LEN], f32) {
+    let mut pre = [0.0_f32; FX_SCOPE_LEN];
+    let mut post = [0.0_f32; FX_SCOPE_LEN];
+    let act = mod_ui
+        .telemetry
+        .fx_scope(bus_idx, slot_idx)
+        .read_snapshot(&mut pre, &mut post);
+    (pre, post, act)
+}
+
+#[inline]
+fn slot_eff_params(
+    slot: &crate::FxSlotPluginParams,
+    mod_ui: &ModUiState,
+    bus_idx: usize,
+    slot_idx: usize,
+) -> [f32; 4] {
+    let tel = &mod_ui.telemetry;
+    [
+        (slot.p1.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 0)))
+        .clamp(0.0, 1.0),
+        (slot.p2.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 1)))
+        .clamp(0.0, 1.0),
+        (slot.p3.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 2)))
+        .clamp(0.0, 1.0),
+        (slot.p4.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 3)))
+        .clamp(0.0, 1.0),
+    ]
+}
+
 #[inline]
 #[allow(clippy::too_many_arguments)]
 fn paint_clipper_scope(
@@ -47,33 +136,13 @@ fn paint_clipper_scope(
 ) {
     let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
     let enabled = slot.enabled.value();
-    let radius = 3.5 * dpx;
-    paint_scope_bg(canvas, bounds, radius, pal, enabled);
+    let f = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 3.0, enabled, pal);
+    let (ix, iy, iw, ih, bottom) = (f.ix, f.iy, f.iw, f.ih, f.bottom);
 
-    let pad_x = 4.0 * dpx;
-    let pad_y = 3.0 * dpx;
-    let ix = bounds.x + pad_x;
-    let iy = bounds.y + pad_y;
-    let iw = (bounds.w - 2.0 * pad_x).max(1.0);
-    let ih = (bounds.h - 2.0 * pad_y).max(1.0);
-    let bottom = iy + ih;
-
-    let mut pre = [0.0_f32; FX_SCOPE_LEN];
-    let mut post = [0.0_f32; FX_SCOPE_LEN];
-    let gr_act = mod_ui
-        .telemetry
-        .fx_scope(bus_idx, slot_idx)
-        .read_snapshot(&mut pre, &mut post);
-
-    let tel = &mod_ui.telemetry;
-    let drive_norm = (slot.p1.value()
-        + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 0)))
-    .clamp(0.0, 1.0);
-    let ceil_norm = (slot.p2.value()
-        + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 1)))
-    .clamp(0.0, 1.0);
-    let drive_lin = 10.0_f32.powf((drive_norm * 24.0) * 0.05);
-    let ceil_db = -18.0 + ceil_norm * 18.0;
+    let (pre, post, gr_act) = read_scope_snapshot(mod_ui, bus_idx, slot_idx);
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
+    let drive_lin = 10.0_f32.powf((eff[0] * 24.0) * 0.05);
+    let ceil_db = -18.0 + eff[1] * 18.0;
     let ceil_lin = 10.0_f32.powf(ceil_db * 0.05).clamp(0.05, 1.0);
     let y_scale = 1.25_f32;
 
@@ -193,7 +262,7 @@ fn paint_clipper_scope(
         );
     }
 
-    paint_scope_border(canvas, bounds, dpx, radius, pal, enabled);
+    f.end(canvas, pal);
 }
 
 #[inline]
@@ -210,31 +279,8 @@ fn paint_filter_scope(
 ) {
     let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
     let enabled = slot.enabled.value();
-    let radius = 3.5 * dpx;
-    paint_scope_bg(canvas, bounds, radius, pal, enabled);
-
-    let pad_x = 4.0 * dpx;
-    let pad_y = 3.0 * dpx;
-    let ix = bounds.x + pad_x;
-    let iy = bounds.y + pad_y;
-    let iw = (bounds.w - 2.0 * pad_x).max(1.0);
-    let ih = (bounds.h - 2.0 * pad_y).max(1.0);
-
-    let tel = &mod_ui.telemetry;
-    let eff = [
-        (slot.p1.value()
-            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 0)))
-        .clamp(0.0, 1.0),
-        (slot.p2.value()
-            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 1)))
-        .clamp(0.0, 1.0),
-        (slot.p3.value()
-            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 2)))
-        .clamp(0.0, 1.0),
-        (slot.p4.value()
-            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 3)))
-        .clamp(0.0, 1.0),
-    ];
+    let f = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 3.0, enabled, pal);
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
     let mode: j_syn_dsp::FilterMode = slot.filter_mode.value().into();
     let slope: j_syn_dsp::FxFilterSlope = slot.filter_slope.value().into();
     let fp = FxRackState::filter_params_from_fx(mode, slope, eff);
@@ -243,10 +289,10 @@ fn paint_filter_scope(
     const DB_MAX: f32 = 18.0;
     paint_filter_freq_grid(
         canvas,
-        ix,
-        iy,
-        iw,
-        ih,
+        f.ix,
+        f.iy,
+        f.iw,
+        f.ih,
         dpx,
         pal,
         enabled,
@@ -258,10 +304,10 @@ fn paint_filter_scope(
         canvas,
         enabled,
         fp.cutoff_hz,
-        ix,
-        iy,
-        iw,
-        ih,
+        f.ix,
+        f.iy,
+        f.iw,
+        f.ih,
         DB_MIN,
         DB_MAX,
         72,
@@ -272,7 +318,7 @@ fn paint_filter_scope(
         |freq_hz| filter_response_db_from_slot(mode, slope, eff, freq_hz),
     );
 
-    paint_scope_border(canvas, bounds, dpx, radius, pal, enabled);
+    f.end(canvas, pal);
 }
 
 #[inline]
@@ -289,34 +335,20 @@ fn paint_diopser_scope(
 ) {
     let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
     let enabled = slot.enabled.value();
-    let radius = 3.5 * dpx;
-    paint_scope_bg(canvas, bounds, radius, pal, enabled);
+    let f = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 3.0, enabled, pal);
 
-    let pad_x = 4.0 * dpx;
-    let pad_y = 3.0 * dpx;
-    let ix = bounds.x + pad_x;
-    let iy = bounds.y + pad_y;
-    let iw = (bounds.w - 2.0 * pad_x).max(1.0);
-    let ih = (bounds.h - 2.0 * pad_y).max(1.0);
-    let bottom = iy + ih;
+    paint_filter_freq_grid(canvas, f.ix, f.iy, f.iw, f.ih, dpx, pal, enabled, &[], 0.0, 1.0);
 
-    paint_filter_freq_grid(canvas, ix, iy, iw, ih, dpx, pal, enabled, &[], 0.0, 1.0);
-
-    let mut pre = [0.0_f32; FX_SCOPE_LEN];
-    let mut post = [0.0_f32; FX_SCOPE_LEN];
-    let _ = mod_ui
-        .telemetry
-        .fx_scope(bus_idx, slot_idx)
-        .read_snapshot(&mut pre, &mut post);
+    let (_pre, post, _) = read_scope_snapshot(mod_ui, bus_idx, slot_idx);
 
     let accent = scope_trace_rgb(fx_accent_rgb(FxTypeParam::Diopser), pal, enabled);
     paint_filled_waveform_trace(
         canvas,
         &post,
-        ix,
-        iy,
-        iw,
-        ih,
+        f.ix,
+        f.iy,
+        f.iw,
+        f.ih,
         1.25,
         accent,
         if enabled { 34 } else { 10 },
@@ -325,34 +357,20 @@ fn paint_diopser_scope(
         1.0 * dpx,
     );
 
-    let tel = &mod_ui.telemetry;
-    let eff = [
-        (slot.p1.value()
-            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 0)))
-        .clamp(0.0, 1.0),
-        (slot.p2.value()
-            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 1)))
-        .clamp(0.0, 1.0),
-        (slot.p3.value()
-            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 2)))
-        .clamp(0.0, 1.0),
-        (slot.p4.value()
-            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 3)))
-        .clamp(0.0, 1.0),
-    ];
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
     let stages_idx = slot.diopser_stages.value().to_index() as usize;
     let stack = slot.stack.value().clamp(1, 4) as u8;
 
     let mut curve = vg::Path::new();
     let mut fill = vg::Path::new();
-    fill.move_to(ix, bottom);
+    fill.move_to(f.ix, f.bottom);
     const PTS: usize = 64;
     for i in 0..PTS {
         let t = i as f32 / (PTS - 1) as f32;
         let freq_hz = 20.0 * 1000.0_f32.powf(t);
         let disp = evaluate_diopser_ripple(eff, stages_idx, stack, freq_hz);
-        let x = ix + t * iw;
-        let y = (bottom - disp * ih * 0.92).clamp(iy + 2.0 * dpx, bottom);
+        let x = f.ix + t * f.iw;
+        let y = (f.bottom - disp * f.ih * 0.92).clamp(f.iy + 2.0 * dpx, f.bottom);
         fill.line_to(x, y);
         if i == 0 {
             curve.move_to(x, y);
@@ -360,15 +378,15 @@ fn paint_diopser_scope(
             curve.line_to(x, y);
         }
     }
-    fill.line_to(ix + iw, bottom);
+    fill.line_to(f.ix + f.iw, f.bottom);
     fill.close();
 
     paint_vertical_gradient_fill(
         canvas,
         &fill,
-        ix,
-        iy,
-        bottom,
+        f.ix,
+        f.iy,
+        f.bottom,
         accent,
         if enabled { 88 } else { 22 },
         if enabled { 10 } else { 4 },
@@ -382,7 +400,7 @@ fn paint_diopser_scope(
     paint.set_line_width(1.6 * dpx);
     canvas.stroke_path(&curve, &paint);
 
-    paint_scope_border(canvas, bounds, dpx, radius, pal, enabled);
+    f.end(canvas, pal);
 }
 
 #[inline]

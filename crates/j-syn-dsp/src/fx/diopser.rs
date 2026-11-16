@@ -69,14 +69,7 @@ pub fn evaluate_diopser_ripple(p: [f32; 4], stages_idx: usize, stack: u8, freq_h
     ((weighted * 0.14).ln_1p() / (32.0_f32).ln_1p()).clamp(0.0, 1.0)
 }
 
-#[inline]
-fn flush_denormal(x: f32) -> f32 {
-    if x.is_finite() && x.abs() >= 1e-24 {
-        x
-    } else {
-        0.0
-    }
-}
+use super::flush_denormal;
 
 /// Pre-allocated stereo cascaded 2nd-order allpass bank (`MAX_DIOPSER_STAGES = 128`).
 pub(crate) struct DiopserStereo {
