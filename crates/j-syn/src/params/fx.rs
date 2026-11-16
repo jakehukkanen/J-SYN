@@ -100,6 +100,8 @@ pub enum FxTypeParam {
     Diopser,
     #[name = "Tube Res."]
     TubeResonator,
+    #[name = "Utility"]
+    Utility,
 }
 
 impl From<j_syn_dsp::FxType> for FxTypeParam {
@@ -116,6 +118,7 @@ impl From<j_syn_dsp::FxType> for FxTypeParam {
             j_syn_dsp::FxType::Phaser => Self::Phaser,
             j_syn_dsp::FxType::Diopser => Self::Diopser,
             j_syn_dsp::FxType::TubeResonator => Self::TubeResonator,
+            j_syn_dsp::FxType::Utility => Self::Utility,
         }
     }
 }
@@ -134,6 +137,7 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
             FxTypeParam::Phaser => Self::Phaser,
             FxTypeParam::Diopser => Self::Diopser,
             FxTypeParam::TubeResonator => Self::TubeResonator,
+            FxTypeParam::Utility => Self::Utility,
         }
     }
 }
@@ -253,6 +257,10 @@ pub struct FxSlotPluginParams {
     pub diopser_stages: EnumParam<DiopserStagesParam>,
     #[id = "fx_tr_flt"]
     pub tube_res_filter_enabled: BoolParam,
+    #[id = "fx_util_inv_l"]
+    pub utility_inv_l: BoolParam,
+    #[id = "fx_util_inv_r"]
+    pub utility_inv_r: BoolParam,
 }
 
 impl FxSlotPluginParams {
@@ -281,6 +289,8 @@ impl FxSlotPluginParams {
             filter_slope: EnumParam::new("Filter Slope", FxFilterSlopeParam::Db12),
             diopser_stages: EnumParam::new("Dispersion Stages", DiopserStagesParam::S32),
             tube_res_filter_enabled: BoolParam::new("Tube Res. Filter", init.tube_res_filter_enabled),
+            utility_inv_l: BoolParam::new("Utility Inv L", init.utility_inv_l),
+            utility_inv_r: BoolParam::new("Utility Inv R", init.utility_inv_r),
         }
     }
 
@@ -326,6 +336,8 @@ impl FxSlotPluginParams {
             filter_slope: self.filter_slope.value().into(),
             diopser_stages: self.diopser_stages.value().to_index(),
             tube_res_filter_enabled: self.tube_res_filter_enabled.value(),
+            utility_inv_l: self.utility_inv_l.value(),
+            utility_inv_r: self.utility_inv_r.value(),
         }
     }
 }

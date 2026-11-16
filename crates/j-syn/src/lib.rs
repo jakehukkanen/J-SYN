@@ -498,6 +498,8 @@ mod tests {
         assert!(decoded.params.contains_key("fx_flt_m_1"));
         assert!(decoded.params.contains_key("fx_diop_s_1"));
         assert!(decoded.params.contains_key("fx_tr_flt_1"));
+        assert!(decoded.params.contains_key("fx_util_inv_l_1"));
+        assert!(decoded.params.contains_key("fx_util_inv_r_1"));
         assert!(decoded.params.contains_key("f1_out_bus"));
         assert!(decoded.params.contains_key("f2_out_bus"));
         assert!(decoded.params.contains_key("fx_bus_topo"));

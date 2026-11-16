@@ -5,6 +5,7 @@ pub mod diopser;
 pub mod dynamics;
 pub mod modulation;
 pub mod tube_resonator;
+pub mod utility;
 
 use std::f64::consts::FRAC_1_SQRT_2;
 
@@ -21,6 +22,7 @@ use self::diopser::DiopserStereo;
 use self::dynamics::{DistortionStereo, JSatClipperStereo, OttStereo};
 use self::modulation::{ChorusStereo, DelayStereo, PhaserStereo, ReverbStereo};
 use self::tube_resonator::TubeResonatorStereo;
+use self::utility::UtilityStereo;
 
 pub use self::diopser::{
     diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, DIOPSER_STAGE_COUNTS,
@@ -32,6 +34,10 @@ pub use self::tube_resonator::{
     evaluate_tube_res_scope_response, format_tube_res_tune, tube_res_decay_ms,
     tube_res_flt_freq_hz, tube_res_flt_width_oct, tube_res_lfo_rate_hz, tube_res_tune_hz,
     tube_res_tune_midi,
+};
+pub use self::utility::{
+    format_utility_pan, utility_gain_db_from_norm, utility_pan_bipolar, utility_width_from_norm,
+    UTILITY_WIDTH_DEFAULT_NORM,
 };
 
 pub const NUM_FX_BUSES: usize = 2;
@@ -54,10 +60,11 @@ pub enum FxType {
     Phaser = 8,
     Diopser = 9,
     TubeResonator = 10,
+    Utility = 11,
 }
 
 impl FxType {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Off,
         Self::Ott,
         Self::Distortion,
@@ -69,6 +76,7 @@ impl FxType {
         Self::Phaser,
         Self::Diopser,
         Self::TubeResonator,
+        Self::Utility,
     ];
 
     #[inline]
@@ -84,6 +92,7 @@ impl FxType {
             8 => Self::Phaser,
             9 => Self::Diopser,
             10 => Self::TubeResonator,
+            11 => Self::Utility,
             _ => Self::Off,
         }
     }
@@ -101,6 +110,7 @@ impl FxType {
             Self::Phaser => "Phaser",
             Self::Diopser => "Dispersion",
             Self::TubeResonator => "Tube Res.",
+            Self::Utility => "Utility",
         }
     }
 
@@ -117,6 +127,7 @@ impl FxType {
             Self::Phaser => "PHASER",
             Self::Diopser => "DISP",
             Self::TubeResonator => "TUBE",
+            Self::Utility => "UTIL",
         }
     }
 
@@ -186,6 +197,10 @@ pub struct FxSlotParams {
     pub diopser_stages: u8,
     /// Enable the pre-resonator softening bandpass filter in `TUBE RES.` (default `true`).
     pub tube_res_filter_enabled: bool,
+    /// Invert left channel phase in `UTILITY` (default `false`).
+    pub utility_inv_l: bool,
+    /// Invert right channel phase in `UTILITY` (default `false`).
+    pub utility_inv_r: bool,
 }
 
 impl Default for FxSlotParams {
@@ -200,6 +215,8 @@ impl Default for FxSlotParams {
             filter_slope: FxFilterSlope::Db12,
             diopser_stages: 2,
             tube_res_filter_enabled: true,
+            utility_inv_l: false,
+            utility_inv_r: false,
         }
     }
 }
@@ -229,6 +246,8 @@ impl FxSlotParams {
             FxType::Diopser => [0.45, 0.50, 0.35, 1.00],
             // Tube Res.: Tune C1 (12/72), Flt Freq 67 Hz (0.2676), Flt Width 2.0 oct (1.5/8.5), Mix 100%
             FxType::TubeResonator => [12.0 / 72.0, 0.267_604, 1.5 / 8.5, 1.00],
+            // Utility: Width 100% (0.40), Pan C (0.50), Gain 0.0 dB (0.50), Mix 100%
+            FxType::Utility => [UTILITY_WIDTH_DEFAULT_NORM, 0.50, 0.50, 1.00],
         }
     }
 
@@ -260,6 +279,8 @@ impl FxSlotParams {
             filter_slope: FxFilterSlope::Db12,
             diopser_stages: 2,
             tube_res_filter_enabled: true,
+            utility_inv_l: false,
+            utility_inv_r: false,
         }
     }
 }
@@ -501,6 +522,7 @@ struct StereoFxStage {
     phaser: PhaserStereo,
     diopser: DiopserStereo,
     tube_res: TubeResonatorStereo,
+    utility: UtilityStereo,
 }
 
 impl StereoFxStage {
@@ -516,6 +538,7 @@ impl StereoFxStage {
             phaser: PhaserStereo::new(sample_rate),
             diopser: DiopserStereo::new(sample_rate),
             tube_res: TubeResonatorStereo::new(sample_rate),
+            utility: UtilityStereo::new(sample_rate),
         }
     }
 
@@ -529,6 +552,7 @@ impl StereoFxStage {
         self.phaser.set_sample_rate(sample_rate);
         self.diopser.set_sample_rate(sample_rate);
         self.tube_res.set_sample_rate(sample_rate);
+        self.utility.set_sample_rate(sample_rate);
     }
 
     fn reset(&mut self) {
@@ -542,6 +566,7 @@ impl StereoFxStage {
         self.phaser.reset();
         self.diopser.reset();
         self.tube_res.reset();
+        self.utility.reset();
     }
 
     #[inline]
@@ -574,6 +599,13 @@ impl StereoFxStage {
                 eq,
                 slot.tube_res_filter_enabled,
                 engine_mode == EngineMode::Vintage2007,
+            ),
+            FxType::Utility => self.utility.process(
+                in_l,
+                in_r,
+                p,
+                slot.utility_inv_l,
+                slot.utility_inv_r,
             ),
         }
     }

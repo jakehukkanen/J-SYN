@@ -34,6 +34,7 @@ pub struct RotaryKnob {
     value_formatter: Option<ValueFormatter>,
     enabled_state: Option<(Arc<crate::JSynPluginParams>, EnabledPredicate)>,
     snap_steps: Option<u32>,
+    default_override: Option<f32>,
 }
 
 pub trait KnobDimExt {
@@ -42,6 +43,8 @@ pub trait KnobDimExt {
         F: Fn(&crate::JSynPluginParams) -> bool + Send + Sync + 'static;
 
     fn snap_steps(self, steps: u32) -> Self;
+
+    fn default_norm(self, val: Option<f32>) -> Self;
 }
 
 impl KnobDimExt for Handle<'_, RotaryKnob> {
@@ -55,6 +58,10 @@ impl KnobDimExt for Handle<'_, RotaryKnob> {
 
     fn snap_steps(self, steps: u32) -> Self {
         self.modify(move |knob| knob.snap_steps = (steps > 0).then_some(steps))
+    }
+
+    fn default_norm(self, val: Option<f32>) -> Self {
+        self.modify(move |knob| knob.default_override = val.map(|v| v.clamp(0.0, 1.0)))
     }
 }
 
@@ -171,6 +178,7 @@ impl RotaryKnob {
             value_formatter,
             enabled_state: None,
             snap_steps: None,
+            default_override: None,
         }
         .build(
             cx,
@@ -243,7 +251,10 @@ impl RotaryKnob {
                 self.hovered && self.is_on_mod_collar(cx, cx.mouse().cursorx, cx.mouse().cursory);
             update_mod_collar_cursor(cx, on_collar, &mut self.collar_cursor_active);
         }
-        let target = self.param_base.default_normalized_value();
+        let target = self
+            .default_override
+            .unwrap_or_else(|| self.param_base.default_normalized_value())
+            .clamp(0.0, 1.0);
         self.param_base.begin_set_parameter(cx);
         self.param_base.set_normalized_value(cx, target);
         self.param_base.end_set_parameter(cx);

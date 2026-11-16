@@ -2709,3 +2709,98 @@ fn osc_pitch_ratio_hz_offset_and_modulation() {
         "Osc1Ratio modulation (+2.0 -> 3.0x) failed: zc1={zc1}, zc_mod={zc_mod}"
     );
 }
+
+#[test]
+fn fx_utility_width_pan_gain_phase_invert_and_modulation() {
+    use j_syn_dsp::{
+        format_utility_pan, utility_gain_db_from_norm, utility_width_from_norm, FxRackParams,
+        FxRackState, FxSlotParams, FxType, ModDestination, NUM_MOD_DESTS,
+        UTILITY_WIDTH_DEFAULT_NORM,
+    };
+
+    // 1. Curve math verification: Width (100% @ 0.40, 200% @ 0.68, 500% @ 1.00) & Gain (±20 dB ~65% span)
+    assert!((utility_width_from_norm(0.0)).abs() < 1e-6);
+    assert!((utility_width_from_norm(UTILITY_WIDTH_DEFAULT_NORM) - 1.0).abs() < 1e-4);
+    assert!((utility_width_from_norm(0.68) - 2.0).abs() < 1e-4);
+    assert!((utility_width_from_norm(1.0) - 5.0).abs() < 1e-4);
+
+    assert!((utility_gain_db_from_norm(0.5)).abs() < 1e-6);
+    assert!((utility_gain_db_from_norm(0.0) + 60.0).abs() < 1e-4);
+    assert!((utility_gain_db_from_norm(1.0) - 60.0).abs() < 1e-4);
+    assert!((utility_gain_db_from_norm(0.825) - 21.4).abs() < 0.25);
+
+    assert_eq!(format_utility_pan(0.0), "50L");
+    assert_eq!(format_utility_pan(0.5), "C");
+    assert_eq!(format_utility_pan(1.0), "50R");
+
+    let defs = FxSlotParams::default_params_for_type(FxType::Utility);
+    let mod_offsets = [0.0_f32; NUM_MOD_DESTS];
+
+    // 2. Unity passthrough at defaults (100% Width, C Pan, 0 dB Gain, 100% Mix, Inv L/R off)
+    let mut params = FxRackParams::default();
+    params.buses[0].slots[0] = FxSlotParams {
+        enabled: true,
+        fx_type: FxType::Utility,
+        stack: 1,
+        params: defs,
+        utility_inv_l: false,
+        utility_inv_r: false,
+        ..FxSlotParams::default()
+    };
+    let mut rack = FxRackState::new(48_000.0);
+    let (ul, ur) = rack.process_buses_sample(
+        (0.45, -0.25),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        &params,
+        &mod_offsets,
+        120.0,
+        None,
+    );
+    assert!((ul - 0.45).abs() < 1e-5 && (ur + 0.25).abs() < 1e-5);
+
+    // 3. Phase invert + 0% Width mono sum
+    params.buses[0].slots[0].utility_inv_l = true;
+    let mut rack_inv = FxRackState::new(48_000.0);
+    let (il, ir) = rack_inv.process_buses_sample(
+        (0.4, 0.4),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        &params,
+        &mod_offsets,
+        120.0,
+        None,
+    );
+    assert!((il + 0.4).abs() < 1e-5 && (ir - 0.4).abs() < 1e-5);
+
+    // 4. 0% Width collapses stereo to mono + 500% boosts Side
+    params.buses[0].slots[0].utility_inv_l = false;
+    params.buses[0].slots[0].params[0] = 0.0; // 0% Width
+    let mut rack_mono = FxRackState::new(48_000.0);
+    let (ml, mr) = rack_mono.process_buses_sample(
+        (0.6, -0.2),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        &params,
+        &mod_offsets,
+        120.0,
+        None,
+    );
+    assert!((ml - 0.2).abs() < 1e-5 && (mr - 0.2).abs() < 1e-5);
+
+    // 5. Gain +6 dB via mod matrix raises output level
+    params.buses[0].slots[0].params = defs;
+    let mut mod_gain = [0.0_f32; NUM_MOD_DESTS];
+    mod_gain[ModDestination::fx_bus_slot_param(0, 0, 2).index()] = 0.25; // +~6.9 dB
+    let mut rack_mod = FxRackState::new(48_000.0);
+    let (gl, gr) = rack_mod.process_buses_sample(
+        (0.1, 0.1),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        &params,
+        &mod_gain,
+        120.0,
+        None,
+    );
+    assert!(gl > 0.18 && (gl - gr).abs() < 1e-5 && gl.is_finite());
+}

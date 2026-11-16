@@ -7,7 +7,8 @@ use std::time::Instant;
 use j_syn_dsp::mod_matrix::{ModDestination, FX_SCOPE_LEN};
 use j_syn_dsp::{
     evaluate_diopser_ripple, evaluate_tube_res_scope_response, filter_response_db_from_slot,
-    tube_res_lfo_rate_hz, FxRackState,
+    tube_res_lfo_rate_hz, utility_gain_db_from_norm, utility_pan_bipolar,
+    utility_width_from_norm, FxRackState,
 };
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
@@ -35,6 +36,7 @@ pub(super) fn fx_accent_rgb(fx_ty: FxTypeParam) -> (u8, u8, u8) {
         FxTypeParam::Phaser => (116, 208, 255),
         FxTypeParam::Diopser => (92, 226, 210),
         FxTypeParam::TubeResonator => (255, 164, 88),
+        FxTypeParam::Utility => (108, 214, 255),
     }
 }
 
@@ -860,6 +862,133 @@ fn paint_time_fx_scope(
     paint_scope_border(canvas, bounds, dpx, radius, pal, enabled);
 }
 
+/// Renders Utility's live stereo-field Mid/Side trapezoid (`WIDTH` cone, `PAN` tilt, `GAIN` height,
+/// and `Ø L` / `Ø R` phase inversion indicators).
+#[allow(clippy::too_many_arguments)]
+fn paint_utility_scope(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    dpx: f32,
+    bus_idx: usize,
+    slot_idx: usize,
+    params: &JSynPluginParams,
+    mod_ui: &ModUiState,
+    pal: &ThemePalette,
+) {
+    let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
+    let enabled = slot.enabled.value();
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
+    let (_, post, _) = read_scope_snapshot(mod_ui, bus_idx, slot_idx);
+    let frame = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 4.0, enabled, pal);
+    let (ix, iy, iw, ih, bottom) = (frame.ix, frame.iy, frame.iw, frame.ih, frame.bottom);
+
+    let accent = scope_trace_rgb(fx_accent_rgb(FxTypeParam::Utility), pal, enabled);
+    let (ar, ag, ab) = accent;
+    let inv_rgb = scope_trace_rgb(theme::hex_to_rgb(&pal.accent_secondary), pal, enabled);
+    let (gr, gg, gb) = theme::hex_to_rgb(&pal.border_mid);
+
+    // Subtle live waveform behind stereo cone
+    paint_filled_waveform_trace(
+        canvas,
+        &post,
+        ix,
+        iy,
+        iw,
+        ih,
+        1.25,
+        (ar, ag, ab),
+        if enabled { 34 } else { 10 },
+        if enabled { 4 } else { 2 },
+        if enabled { 90 } else { 35 },
+        1.0 * dpx,
+    );
+
+    // Reference center vertical line & horizontal unity line
+    let cx_mid = ix + iw * 0.5;
+    let cy_mid = iy + ih * 0.52;
+    let mut axis = vg::Path::new();
+    axis.move_to(cx_mid, iy + 2.0 * dpx);
+    axis.line_to(cx_mid, bottom - 2.0 * dpx);
+    axis.move_to(ix + 6.0 * dpx, cy_mid);
+    axis.line_to(ix + iw - 6.0 * dpx, cy_mid);
+    let mut axis_paint = vg::Paint::color(vg::Color::rgba(gr, gg, gb, 95));
+    axis_paint.set_line_width(1.0 * dpx);
+    canvas.stroke_path(&axis, &axis_paint);
+
+    let width = utility_width_from_norm(eff[0]); // 0.0..=5.0
+    let pan = utility_pan_bipolar(eff[1]); // -1.0..=1.0
+    let gain_db = utility_gain_db_from_norm(eff[2]); // -60..=+60 dB
+
+    // Normalize width cleanly so 0% = 0, 100% = 0.22, 200% = 0.38, 500% = 0.47 * iw half-span
+    let spread_norm = if width <= 1.0 {
+        width * 0.20
+    } else if width <= 2.0 {
+        0.20 + (width - 1.0) * 0.14
+    } else {
+        0.34 + ((width - 2.0) / 3.0) * 0.13
+    };
+    let half_w = (spread_norm * iw).max(1.5 * dpx);
+    let gain_norm = ((gain_db + 60.0) / 120.0).clamp(0.0, 1.0);
+    let cone_h = (0.18 + gain_norm * 0.68) * ih;
+    let base_y = bottom - 3.0 * dpx;
+    let top_y = (base_y - cone_h).max(iy + 16.0 * dpx);
+
+    let pan_shift = pan * (iw * 0.24);
+    let top_cx = (cx_mid + pan_shift).clamp(ix + half_w * 0.35 + 3.0 * dpx, ix + iw - half_w * 0.35 - 3.0 * dpx);
+    let neck_w = (half_w * 0.22).max(2.0 * dpx);
+
+    // Tilt left/right top edges subtly with balance pan
+    let tilt = pan * (cone_h * 0.22);
+    let top_l_y = (top_y - tilt.min(0.0)).clamp(iy + 14.0 * dpx, base_y - 4.0 * dpx);
+    let top_r_y = (top_y + tilt.max(0.0)).clamp(iy + 14.0 * dpx, base_y - 4.0 * dpx);
+
+    let mut cone = vg::Path::new();
+    cone.move_to(cx_mid - neck_w, base_y);
+    cone.line_to(top_cx - half_w, top_l_y);
+    cone.line_to(top_cx + half_w, top_r_y);
+    cone.line_to(cx_mid + neck_w, base_y);
+    cone.close();
+
+    paint_vertical_gradient_fill(
+        canvas,
+        &cone,
+        ix,
+        iy,
+        bottom,
+        (ar, ag, ab),
+        if enabled { 72 } else { 22 },
+        if enabled { 14 } else { 5 },
+    );
+
+    let mut cone_stroke =
+        vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 225 } else { 100 }));
+    cone_stroke.set_line_width(1.5 * dpx);
+    cone_stroke.set_line_join(vg::LineJoin::Round);
+    canvas.stroke_path(&cone, &cone_stroke);
+
+    // Bottom L / R phase polarity indicator bars (highlight accent_secondary when inverted)
+    let inv_l = slot.utility_inv_l.value();
+    let inv_r = slot.utility_inv_r.value();
+    for (is_right, inv) in [(false, inv_l), (true, inv_r)] {
+        let bx = if is_right {
+            ix + iw - 12.0 * dpx
+        } else {
+            ix + 3.0 * dpx
+        };
+        let by = bottom - 5.0 * dpx;
+        let (pr, pg, pb, pa) = if inv {
+            (inv_rgb.0, inv_rgb.1, inv_rgb.2, if enabled { 235 } else { 110 })
+        } else {
+            (ar, ag, ab, if enabled { 110 } else { 45 })
+        };
+        let mut bar = vg::Path::new();
+        bar.rounded_rect(bx, by, 9.0 * dpx, 2.5 * dpx, 1.0 * dpx);
+        canvas.fill_path(&bar, &vg::Paint::color(vg::Color::rgba(pr, pg, pb, pa)));
+    }
+
+    frame.end(canvas, pal);
+}
+
 /// Multi-FX live waveform, filter curve, dispersion ripple, & activity visualizer.
 pub(super) struct FxSlotVisualizer {
     bus_idx: usize,
@@ -941,6 +1070,16 @@ impl View for FxSlotVisualizer {
                 &pal,
             ),
             FxTypeParam::TubeResonator => paint_tube_res_scope(
+                canvas,
+                bounds,
+                dpx,
+                self.bus_idx,
+                self.slot_idx,
+                &self.params,
+                &self.mod_ui,
+                &pal,
+            ),
+            FxTypeParam::Utility => paint_utility_scope(
                 canvas,
                 bounds,
                 dpx,

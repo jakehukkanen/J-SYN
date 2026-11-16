@@ -6,8 +6,9 @@ use std::sync::Arc;
 use j_syn_dsp::filter::cutoff_norm_to_hz;
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{
-    diopser_freq_hz, format_tube_res_tune, fx_high_cut_hz, fx_low_cut_hz, tube_res_decay_ms,
-    tube_res_flt_freq_hz, tube_res_flt_width_oct, tube_res_lfo_rate_hz, FxRackState, FxType,
+    diopser_freq_hz, format_tube_res_tune, format_utility_pan, fx_high_cut_hz, fx_low_cut_hz,
+    tube_res_decay_ms, tube_res_flt_freq_hz, tube_res_flt_width_oct, tube_res_lfo_rate_hz,
+    utility_gain_db_from_norm, utility_width_from_norm, FxRackState, FxType,
 };
 use nih_plug::prelude::{FloatParam, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
@@ -38,6 +39,7 @@ const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Filter", FxTypeParam::Filter),
     ("Dispersion", FxTypeParam::Diopser),
     ("Tube Res.", FxTypeParam::TubeResonator),
+    ("Utility", FxTypeParam::Utility),
 ];
 
 const FX_FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
@@ -196,6 +198,12 @@ fn fx_slot_param_label(
             2 => "FLT WDTH",
             _ => "MIX",
         },
+        FxTypeParam::Utility => match param_idx {
+            0 => "WIDTH",
+            1 => "PAN",
+            2 => "GAIN",
+            _ => "MIX",
+        },
     }
 }
 
@@ -288,6 +296,20 @@ fn format_fx_slot_param_value(
             2 => format!("{:.2} oct", tube_res_flt_width_oct(n)),
             _ => format!("{:.0}%", n * 100.0),
         },
+        FxTypeParam::Utility => match param_idx {
+            0 => format!("{:.0}%", utility_width_from_norm(n) * 100.0),
+            1 => format_utility_pan(n),
+            2 => {
+                let db = utility_gain_db_from_norm(n);
+                let clean = if db.abs() < 0.05 { 0.0 } else { db };
+                if clean == 0.0 {
+                    "0.0 dB".to_string()
+                } else {
+                    format!("{clean:+.1} dB")
+                }
+            }
+            _ => format!("{:.0}%", n * 100.0),
+        },
     }
 }
 
@@ -325,6 +347,8 @@ struct SlotSnapshot {
     flt_s: FxFilterSlopeParam,
     diop_s: DiopserStagesParam,
     tr_flt: bool,
+    util_inv_l: bool,
+    util_inv_r: bool,
 }
 
 /// Swaps all settings, EQ sub-tabs, and modulation assignments between two slots of `bus_idx`.
@@ -353,6 +377,8 @@ fn swap_fx_slots(
             flt_s: s.filter_slope.value(),
             diop_s: s.diopser_stages.value(),
             tr_flt: s.tube_res_filter_enabled.value(),
+            util_inv_l: s.utility_inv_l.value(),
+            util_inv_r: s.utility_inv_r.value(),
         }
     };
     let a = capture(slot_a);
@@ -399,6 +425,14 @@ fn swap_fx_slots(
         setter.begin_set_parameter(&s.tube_res_filter_enabled);
         setter.set_parameter(&s.tube_res_filter_enabled, snap.tr_flt);
         setter.end_set_parameter(&s.tube_res_filter_enabled);
+
+        setter.begin_set_parameter(&s.utility_inv_l);
+        setter.set_parameter(&s.utility_inv_l, snap.util_inv_l);
+        setter.end_set_parameter(&s.utility_inv_l);
+
+        setter.begin_set_parameter(&s.utility_inv_r);
+        setter.set_parameter(&s.utility_inv_r, snap.util_inv_r);
+        setter.end_set_parameter(&s.utility_inv_r);
     };
 
     write(slot_a, b);
@@ -438,6 +472,12 @@ fn set_fx_slot_type_with_defaults(
         setter.begin_set_parameter(&slot.tube_res_filter_enabled);
         setter.set_parameter(&slot.tube_res_filter_enabled, true);
         setter.end_set_parameter(&slot.tube_res_filter_enabled);
+        setter.begin_set_parameter(&slot.utility_inv_l);
+        setter.set_parameter(&slot.utility_inv_l, false);
+        setter.end_set_parameter(&slot.utility_inv_l);
+        setter.begin_set_parameter(&slot.utility_inv_r);
+        setter.set_parameter(&slot.utility_inv_r, false);
+        setter.end_set_parameter(&slot.utility_inv_r);
         mod_ui.set_fx_eq_subtab(bus_idx, slot_idx, false);
     }
 }
@@ -747,6 +787,37 @@ fn build_fx_scope_zstack(
                             .width(Pixels(38.0))
                             .height(Pixels(17.0));
                         }
+                        FxTypeParam::Utility => {
+                            let add_inv_pill = |cx: &mut Context,
+                                                label: &'static str,
+                                                pick: fn(&crate::FxSlotPluginParams) -> &nih_plug::prelude::BoolParam| {
+                                let p_u = p_ov.clone();
+                                let g_u = g_ov.clone();
+                                Button::new(
+                                    cx,
+                                    move |cx| {
+                                        let setter = ParamSetter::new(g_u.as_ref());
+                                        let p = pick(&p_u.fx_bus_slots(bus_idx)[slot_idx]);
+                                        let next = !p.value();
+                                        setter.begin_set_parameter(p);
+                                        setter.set_parameter(p, next);
+                                        setter.end_set_parameter(p);
+                                        cx.emit(UiEvent::ModUiChanged);
+                                    },
+                                    move |cx| bold_label(cx, label, "fx-subtab-lbl").hoverable(false),
+                                )
+                                .class("fx-scope-pill")
+                                .class("fx-scope-flt-btn")
+                                .toggle_class(
+                                    "fx-subtab-active",
+                                    UiData::params.map(move |p| pick(&p.fx_bus_slots(bus_idx)[slot_idx]).value()),
+                                )
+                                .width(Pixels(30.0))
+                                .height(Pixels(17.0));
+                            };
+                            add_inv_pill(cx, "Ø L", |s| &s.utility_inv_l);
+                            add_inv_pill(cx, "Ø R", |s| &s.utility_inv_r);
+                        }
                         _ => {}
                     }
 
@@ -864,6 +935,11 @@ fn build_fx_knob_row(
                     } else {
                         0
                     };
+                    let def_norm = if key.is_eq {
+                        j_syn_dsp::FxSlotParams::default_eq_params_for_type(key.fx_type.into())[p_idx]
+                    } else {
+                        j_syn_dsp::FxSlotParams::default_params_for_type(key.fx_type.into())[p_idx]
+                    };
                     let title = fx_slot_param_label(key.fx_type, key.is_eq, key.is_scream, p_idx);
                     let accent = fx_accent_rgb(key.fx_type);
                     let p_cell = p_dim.clone();
@@ -888,6 +964,7 @@ fn build_fx_knob_row(
                             tab_tag,
                             formatter,
                         )
+                        .default_norm(Some(def_norm))
                         .snap_steps(snap_steps)
                         .enabled_by(p_cell, move |p| slot_enabled_for_bus(p, bus_idx, slot_idx))
                         .width(Pixels(knob_sz))

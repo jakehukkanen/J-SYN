@@ -137,7 +137,9 @@ impl ModUiState {
                     | ((fx.filter_mode.value() as u64) << 9)
                     | ((fx.filter_slope.value() as u64) << 14)
                     | ((fx.diopser_stages.value() as u64) << 16)
-                    | ((fx.tube_res_filter_enabled.value() as u64) << 19);
+                    | ((fx.tube_res_filter_enabled.value() as u64) << 19)
+                    | ((fx.utility_inv_l.value() as u64) << 20)
+                    | ((fx.utility_inv_r.value() as u64) << 21);
                 Self::fnv1a_mix(&mut h, packed);
             }
         }
