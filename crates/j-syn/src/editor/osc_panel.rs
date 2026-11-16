@@ -55,20 +55,20 @@ pub(super) fn build_osc_panel(
 ) {
     const WARP_ITEMS: &[(&str, WarpModeParam)] = &[
         ("None", WarpModeParam::None),
-        ("Bend-", WarpModeParam::BendMinus),
-        ("Bend+", WarpModeParam::BendPlus),
-        ("Spectrum", WarpModeParam::Spectrum),
+        ("B-", WarpModeParam::BendMinus),
+        ("B+", WarpModeParam::BendPlus),
+        ("SP", WarpModeParam::Spectrum),
     ];
     const UNIFIED_MOD_ITEMS: &[(&str, ModSourceParam, ModTypeParam)] = &[
         ("Off", ModSourceParam::Off, ModTypeParam::Pm),
-        ("PM Osc 1", ModSourceParam::Osc1, ModTypeParam::Pm),
-        ("PM Osc 2", ModSourceParam::Osc2, ModTypeParam::Pm),
-        ("PM Osc 3", ModSourceParam::Osc3, ModTypeParam::Pm),
-        ("PM Osc 4", ModSourceParam::Osc4, ModTypeParam::Pm),
-        ("RM Osc 1", ModSourceParam::Osc1, ModTypeParam::Rm),
-        ("RM Osc 2", ModSourceParam::Osc2, ModTypeParam::Rm),
-        ("RM Osc 3", ModSourceParam::Osc3, ModTypeParam::Rm),
-        ("RM Osc 4", ModSourceParam::Osc4, ModTypeParam::Rm),
+        ("PM 1", ModSourceParam::Osc1, ModTypeParam::Pm),
+        ("PM 2", ModSourceParam::Osc2, ModTypeParam::Pm),
+        ("PM 3", ModSourceParam::Osc3, ModTypeParam::Pm),
+        ("PM 4", ModSourceParam::Osc4, ModTypeParam::Pm),
+        ("RM 1", ModSourceParam::Osc1, ModTypeParam::Rm),
+        ("RM 2", ModSourceParam::Osc2, ModTypeParam::Rm),
+        ("RM 3", ModSourceParam::Osc3, ModTypeParam::Rm),
+        ("RM 4", ModSourceParam::Osc4, ModTypeParam::Rm),
     ];
 
     let osc_label = match osc_idx {
@@ -273,7 +273,7 @@ pub(super) fn build_osc_panel(
             let p_bot = p_right;
             let g_bot = gui_right;
             HStack::new(cx, move |cx| {
-                Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
+                Element::new(cx).width(Stretch(0.90)).height(Pixels(18.0));
 
                 build_enum_dropdown(
                     cx,
@@ -305,8 +305,8 @@ pub(super) fn build_osc_panel(
                     move |cx| {
                         let arrow_lens = UiData::params.map(move |_| {
                             match p_ord_lbl.oscs[osc_idx].mod_order.value() {
-                                ModOrderParam::WarpThenPm => "->".to_string(),
-                                ModOrderParam::PmThenWarp => "<-".to_string(),
+                                ModOrderParam::WarpThenPm => ">".to_string(),
+                                ModOrderParam::PmThenWarp => "<".to_string(),
                             }
                         });
                         bold_label(cx, arrow_lens, "wt-step-label")
@@ -315,7 +315,7 @@ pub(super) fn build_osc_panel(
                     },
                 )
                 .class("wt-step-btn")
-                .width(Pixels(20.0))
+                .width(Pixels(22.0))
                 .height(Pixels(18.0));
 
                 let p_mod_trig = p_bot.clone();
@@ -338,10 +338,10 @@ pub(super) fn build_osc_panel(
                                     };
                                     match src {
                                         ModSourceParam::Off => "Off".to_string(),
-                                        ModSourceParam::Osc1 => format!("{prefix} Osc 1"),
-                                        ModSourceParam::Osc2 => format!("{prefix} Osc 2"),
-                                        ModSourceParam::Osc3 => format!("{prefix} Osc 3"),
-                                        ModSourceParam::Osc4 => format!("{prefix} Osc 4"),
+                                        ModSourceParam::Osc1 => format!("{prefix} 1"),
+                                        ModSourceParam::Osc2 => format!("{prefix} 2"),
+                                        ModSourceParam::Osc3 => format!("{prefix} 3"),
+                                        ModSourceParam::Osc4 => format!("{prefix} 4"),
                                     }
                                 }),
                             );
@@ -373,9 +373,9 @@ pub(super) fn build_osc_panel(
                 .width(Stretch(1.0))
                 .height(Pixels(18.0));
 
-                Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
+                Element::new(cx).width(Stretch(0.90)).height(Pixels(18.0));
             })
-            .col_between(Pixels(3.0))
+            .col_between(Pixels(2.0))
             .width(Stretch(1.0))
             .height(Pixels(18.0));
         })

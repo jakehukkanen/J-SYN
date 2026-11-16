@@ -113,11 +113,11 @@ impl From<ModOrderParam> for ModOrder {
 pub enum WarpModeParam {
     #[name = "None"]
     None,
-    #[name = "Bend-"]
+    #[name = "B-"]
     BendMinus,
-    #[name = "Bend+"]
+    #[name = "B+"]
     BendPlus,
-    #[name = "Spectrum"]
+    #[name = "SP"]
     Spectrum,
 }
 

@@ -963,8 +963,8 @@ fn build_bottom_tabs(
                                         cx,
                                         UiData::params,
                                         |p| &p.oscs[0].keytrack,
-                                        "OSC 1 KT",
-                                        "OSC 1 KT",
+                                        "OSC 1",
+                                        "OSC 1",
                                         AMBER_RGB,
                                     )
                                     .width(Stretch(1.0))
@@ -973,8 +973,8 @@ fn build_bottom_tabs(
                                         cx,
                                         UiData::params,
                                         |p| &p.oscs[1].keytrack,
-                                        "OSC 2 KT",
-                                        "OSC 2 KT",
+                                        "OSC 2",
+                                        "OSC 2",
                                         GOLD_RGB,
                                     )
                                     .width(Stretch(1.0))
@@ -983,8 +983,8 @@ fn build_bottom_tabs(
                                         cx,
                                         UiData::params,
                                         |p| &p.oscs[2].keytrack,
-                                        "OSC 3 KT",
-                                        "OSC 3 KT",
+                                        "OSC 3",
+                                        "OSC 3",
                                         CORAL_RGB,
                                     )
                                     .width(Stretch(1.0))
@@ -993,8 +993,8 @@ fn build_bottom_tabs(
                                         cx,
                                         UiData::params,
                                         |p| &p.oscs[3].keytrack,
-                                        "OSC 4 KT",
-                                        "OSC 4 KT",
+                                        "OSC 4",
+                                        "OSC 4",
                                         AMBER_RGB,
                                     )
                                     .width(Stretch(1.0))
@@ -1006,7 +1006,7 @@ fn build_bottom_tabs(
                                 .top(Stretch(1.0))
                                 .bottom(Stretch(1.0));
                             })
-                            .col_between(Pixels(12.0))
+                            .col_between(Pixels(10.0))
                             .child_left(Pixels(8.0))
                             .child_right(Pixels(8.0))
                             .child_top(Stretch(1.0))
@@ -1016,7 +1016,7 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(1.35))
+                        .width(Stretch(1.50))
                         .height(Stretch(1.0));
 
                         VStack::new(cx, {
@@ -1043,7 +1043,7 @@ fn build_bottom_tabs(
                                         .height(Pixels(24.0));
                                     })
                                     .row_between(Pixels(2.0))
-                                    .width(Pixels(78.0))
+                                    .width(Pixels(70.0))
                                     .height(Auto)
                                     .top(Stretch(1.0))
                                     .bottom(Stretch(1.0));
@@ -1054,7 +1054,7 @@ fn build_bottom_tabs(
                                         |p| &p.pitch_bend_range,
                                         "PB RANGE",
                                         24,
-                                        60.0,
+                                        52.0,
                                     );
 
                                     build_flex_knob_cell_mod(
@@ -1070,9 +1070,9 @@ fn build_bottom_tabs(
                                         bottom_tab_tag(BottomTab::VoiceEnv),
                                     );
                                 })
-                                .col_between(Pixels(10.0))
-                                .child_left(Pixels(8.0))
-                                .child_right(Pixels(8.0))
+                                .col_between(Pixels(6.0))
+                                .child_left(Pixels(6.0))
+                                .child_right(Pixels(6.0))
                                 .child_top(Stretch(1.0))
                                 .child_bottom(Stretch(1.0))
                                 .width(Stretch(1.0))
@@ -1081,7 +1081,7 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(0.95))
+                        .width(Stretch(0.85))
                         .height(Stretch(1.0));
 
                         VStack::new(cx, {
