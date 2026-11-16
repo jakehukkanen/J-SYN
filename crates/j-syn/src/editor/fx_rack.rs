@@ -701,6 +701,36 @@ fn build_fx_scope_zstack(
                 let g_ov = g_top.clone();
                 let m_ov = m_top.clone();
                 HStack::new(cx, move |cx| {
+                    let add_util_inv_pill =
+                        |cx: &mut Context,
+                         label: &'static str,
+                         pick: fn(&crate::FxSlotPluginParams) -> &nih_plug::prelude::BoolParam| {
+                            let p_u = p_ov.clone();
+                            let g_u = g_ov.clone();
+                            Button::new(
+                                cx,
+                                move |cx| {
+                                    let setter = ParamSetter::new(g_u.as_ref());
+                                    let p = pick(&p_u.fx_bus_slots(bus_idx)[slot_idx]);
+                                    let next = !p.value();
+                                    setter.begin_set_parameter(p);
+                                    setter.set_parameter(p, next);
+                                    setter.end_set_parameter(p);
+                                    cx.emit(UiEvent::ModUiChanged);
+                                },
+                                move |cx| bold_label(cx, label, "fx-subtab-lbl").hoverable(false),
+                            )
+                            .class("fx-scope-pill")
+                            .class("fx-scope-flt-btn")
+                            .toggle_class(
+                                "fx-subtab-active",
+                                UiData::params
+                                    .map(move |p| pick(&p.fx_bus_slots(bus_idx)[slot_idx]).value()),
+                            )
+                            .width(Pixels(30.0))
+                            .height(Pixels(17.0));
+                        };
+
                     match fx_ty {
                         FxTypeParam::Filter => {
                             build_enum_dropdown(
@@ -712,22 +742,6 @@ fn build_fx_scope_zstack(
                             )
                             .class("fx-scope-dd")
                             .width(Pixels(52.0))
-                            .height(Pixels(17.0));
-
-                            build_enum_dropdown_with_override(
-                                cx,
-                                p_ov.clone(),
-                                g_ov.clone(),
-                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].filter_slope,
-                                FX_FILTER_SLOPE_ITEMS,
-                                move |p| {
-                                    let mode: j_syn_dsp::FilterMode =
-                                        p.fx_bus_slots(bus_idx)[slot_idx].filter_mode.value().into();
-                                    mode.has_fixed_12db_slope().then_some("12")
-                                },
-                            )
-                            .class("fx-scope-dd")
-                            .width(Pixels(36.0))
                             .height(Pixels(17.0));
                         }
                         FxTypeParam::Diopser => {
@@ -788,40 +802,36 @@ fn build_fx_scope_zstack(
                             .height(Pixels(17.0));
                         }
                         FxTypeParam::Utility => {
-                            let add_inv_pill = |cx: &mut Context,
-                                                label: &'static str,
-                                                pick: fn(&crate::FxSlotPluginParams) -> &nih_plug::prelude::BoolParam| {
-                                let p_u = p_ov.clone();
-                                let g_u = g_ov.clone();
-                                Button::new(
-                                    cx,
-                                    move |cx| {
-                                        let setter = ParamSetter::new(g_u.as_ref());
-                                        let p = pick(&p_u.fx_bus_slots(bus_idx)[slot_idx]);
-                                        let next = !p.value();
-                                        setter.begin_set_parameter(p);
-                                        setter.set_parameter(p, next);
-                                        setter.end_set_parameter(p);
-                                        cx.emit(UiEvent::ModUiChanged);
-                                    },
-                                    move |cx| bold_label(cx, label, "fx-subtab-lbl").hoverable(false),
-                                )
-                                .class("fx-scope-pill")
-                                .class("fx-scope-flt-btn")
-                                .toggle_class(
-                                    "fx-subtab-active",
-                                    UiData::params.map(move |p| pick(&p.fx_bus_slots(bus_idx)[slot_idx]).value()),
-                                )
-                                .width(Pixels(30.0))
-                                .height(Pixels(17.0));
-                            };
-                            add_inv_pill(cx, "Ø L", |s| &s.utility_inv_l);
-                            add_inv_pill(cx, "Ø R", |s| &s.utility_inv_r);
+                            add_util_inv_pill(cx, "Ø L", |s| &s.utility_inv_l);
                         }
                         _ => {}
                     }
 
                     Element::new(cx).width(Stretch(1.0)).hoverable(false);
+
+                    match fx_ty {
+                        FxTypeParam::Filter => {
+                            build_enum_dropdown_with_override(
+                                cx,
+                                p_ov.clone(),
+                                g_ov.clone(),
+                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].filter_slope,
+                                FX_FILTER_SLOPE_ITEMS,
+                                move |p| {
+                                    let mode: j_syn_dsp::FilterMode =
+                                        p.fx_bus_slots(bus_idx)[slot_idx].filter_mode.value().into();
+                                    mode.has_fixed_12db_slope().then_some("12")
+                                },
+                            )
+                            .class("fx-scope-dd")
+                            .width(Pixels(36.0))
+                            .height(Pixels(17.0));
+                        }
+                        FxTypeParam::Utility => {
+                            add_util_inv_pill(cx, "Ø R", |s| &s.utility_inv_r);
+                        }
+                        _ => {}
+                    }
 
                     if let Some(sub_lbl) = FxType::from(fx_ty).subtab_label() {
                         let sub_w = if sub_lbl == "LFO" { 26.0 } else { 22.0 };
