@@ -51,7 +51,17 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
   - **Collar Handle:** Hover/drag the radial modulation arc around a knob (`RowResize` cursor) to adjust depth.
   - **Right-Click** any modulated control to open a quick menu to **Bypass (`ON`/`BYP`)**, toggle **Polarity (`UNI`/`BIP`)**, or **Remove (`x`)** each routing.
 - **`VOICE` Tab:** `F1/F2 KEYTRK`, `OSC 1`–`OSC 4` keytrack toggles, `VOICING` (`Poly`/`Mono`, `PB RANGE`, `GLIDE`), and `OSCILLATOR PAN`.
-- **`MODSEQ` Tab:** Switch between `MODSEQ` (16-step bar/shape stamping + `2×9` shape palette; right-click tile to fill) and `LFO` (breakpoint MSEG curve with `SNAP 1/16` and presets), or edit `ENV 1`–`ENV 4` ADSR envelopes.
+- **`MODSEQ` Tab:**
+  - **`MODSEQ` (Performer) Mode:**
+    - **Left-Drag on Grid:** Stamps the selected `2×9` palette shape at the cursor's vertical depth.
+    - **Right-Click a Palette Tile:** Fills the entire sequence with that shape (`FILL` fills with the currently highlighted tile).
+    - **`Opt/Alt + Left-Drag` or `Right-Drag` (Vertical on a Step):** Adjusts that step's curve **tension** (`-1.0..=1.0`, warping its timing/concavity).
+    - **`Shift + Left-Drag` (Vertical on a Step):** Adjusts the step's **end level** (linear ramp from start level to end level).
+  - **`LFO` (MSEG) Mode:**
+    - **Drag Breakpoint Nodes:** Move nodes (`Shift` or `SNAP 1/16` snaps `X` to `1/16` and `Y` to `1/8`).
+    - **Double-Click:** Add a new breakpoint node on empty canvas, or delete an interior node.
+    - **Drag Midpoint Handle / `Opt/Alt + Left-Drag` / `Right-Drag`:** Bend the enclosing segment's curve **tension**.
+  - **`ENV 1`–`ENV 4`:** Click `E1`–`E4` in the mod bar to edit ADSR envelopes with live curve preview.
 - **`ROUTING` Tab:** Filter send balances, `DIRECT` bypasses, `Serial`/`Parallel` filter routing, and feedback bus.
 - **`MACROS` Tab:** 8 macros (`M1`–`M8`) with click-to-rename custom labels reflected in the `MATRIX` and modulation menus.
 
@@ -63,6 +73,7 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
   - **Windows:** `%APPDATA%\j-syn\config.json`
   - **Linux:** `~/.config/j-syn/config.json`
 - Custom `.json` themes placed in `<config_dir>/themes/` are scanned on startup and via `Rescan` in the Settings view.
+- **Experimental (`MODSEQ SWING`):** Disabled by default for straight step modulation. When enabled in Settings, applies alternating step-phase tension warping (`-0.4 / 0.0 / ...`) to `MODSEQ` sequences and preserves per-step tension when stamping.
 
 ---
 
