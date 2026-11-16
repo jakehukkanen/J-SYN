@@ -2526,6 +2526,7 @@ fn fx_tube_resonator_tune_filter_dirty_lfo_and_idle() {
     assert!(format_tube_res_tune(defs[0] + 0.25 / 72.0).contains("+25c"));
     assert_eq!(format_tube_res_tune(1.0), "C6");
     assert!((eq_defs[0] - 0.5).abs() < 1e-6);
+    assert!((eq_defs[3] - 1.0).abs() < 1e-6, "Tube Res. damping must default to 100%");
 
     let mut base_params = FxRackParams::default();
     base_params.buses[0].slots[0] = FxSlotParams {

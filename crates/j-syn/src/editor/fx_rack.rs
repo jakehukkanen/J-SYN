@@ -122,7 +122,7 @@ fn fx_slot_param_label(
                 0 => "LFO AMT",
                 1 => "LFO SPD",
                 2 => "FEEDBK",
-                _ => "MIX",
+                _ => "DAMP",
             },
             _ => "--",
         };
@@ -855,13 +855,7 @@ fn build_fx_knob_row(
                 }),
                 move |cx, key_lens| {
                     let key = key_lens.get(cx);
-                    let param_slot = if !key.is_eq {
-                        p_idx
-                    } else if key.fx_type == FxTypeParam::TubeResonator && p_idx == 3 {
-                        3
-                    } else {
-                        4 + p_idx
-                    };
+                    let param_slot = if key.is_eq { 4 + p_idx } else { p_idx };
                     let snap_steps = if key.fx_type == FxTypeParam::TubeResonator
                         && !key.is_eq
                         && p_idx == 0

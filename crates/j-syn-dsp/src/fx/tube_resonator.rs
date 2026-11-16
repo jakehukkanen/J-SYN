@@ -328,6 +328,7 @@ impl WaveguideResonator {
         input: f64,
         tune_hz: f64,
         decay_s: f64,
+        damping_0_1: f64,
         sample_rate: f64,
     ) -> f64 {
         let f0 = (tune_hz * END_CORRECTION_RATIO).clamp(15.0, 5_000.0);
@@ -337,8 +338,14 @@ impl WaveguideResonator {
         let decay_clamped = decay_s.max(0.005);
         let g_decay = (-4.0 / (f0 * decay_clamped)).exp();
 
-        // Full retention (`damping = 1.0`) + open-tube polarity (`reflect = 1.0 -> +1`)
-        let lp_a = 0.22 * (sample_rate / 44_100.0).recip().clamp(0.1, 0.9);
+        // Loop high-frequency retention (`1.0` = 100% default retention, lower = darker tail)
+        let damping = damping_0_1.clamp(0.0, 1.0);
+        let lp_a = if damping >= 0.999 {
+            0.22 * (sample_rate / 44_100.0).recip().clamp(0.1, 0.9)
+        } else {
+            let lp_cutoff = 400.0 * (40.0_f64).powf(damping);
+            (-2.0 * PI * lp_cutoff / sample_rate).exp().clamp(0.0, 0.995)
+        };
         let loop_delay_comp = lp_a / (1.0 - lp_a);
 
         let delayed_full = self.read_cubic((period_samples - loop_delay_comp).max(2.0));
@@ -438,6 +445,7 @@ impl TubeResonatorStereo {
         let lfo_amt = eq[0].clamp(0.0, 1.0) as f64;
         let lfo_rate_hz = tube_res_lfo_rate_hz(eq[1]) as f64;
         let decay_s = (tube_res_decay_ms(eq[2]) as f64) * 0.001;
+        let damping = eq[3].clamp(0.0, 1.0) as f64;
 
         let lfo_still_running = lfo_amt > 1e-4;
         let idle_thresh = (sr * decay_s.max(0.25)) as u32;
@@ -469,8 +477,8 @@ impl TubeResonatorStereo {
         self.last_lfo_phase_rad = phase_rad;
 
         let inst_freq = base_tune_hz * lfo_mul;
-        let res_l = self.res_l.process_sample(exc_l, inst_freq, decay_s, sr);
-        let res_r = self.res_r.process_sample(exc_r, inst_freq, decay_s, sr);
+        let res_l = self.res_l.process_sample(exc_l, inst_freq, decay_s, damping, sr);
+        let res_r = self.res_r.process_sample(exc_r, inst_freq, decay_s, damping, sr);
 
         let mut wet_l = self.dc_l.process(res_l);
         let mut wet_r = self.dc_r.process(res_r);
