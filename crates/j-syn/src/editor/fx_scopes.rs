@@ -1,10 +1,14 @@
 //! Custom `femtovg` FX scope visualizers for all FX types (`Clipper`, `Filter`, `Diopser`,
 //! `OTT`, `Distortion`, `Delay`, `Reverb`, `Chorus`, `Phaser`), shared across `MAIN` and `FX`.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use j_syn_dsp::mod_matrix::{ModDestination, FX_SCOPE_LEN};
-use j_syn_dsp::{evaluate_diopser_ripple, filter_response_db_from_slot, FxRackState};
+use j_syn_dsp::{
+    evaluate_diopser_ripple, evaluate_tube_res_scope_response, filter_response_db_from_slot,
+    tube_res_lfo_rate_hz, FxRackState,
+};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::RawParamEvent;
@@ -30,6 +34,7 @@ pub(super) fn fx_accent_rgb(fx_ty: FxTypeParam) -> (u8, u8, u8) {
         FxTypeParam::Filter => (112, 224, 154),
         FxTypeParam::Phaser => (116, 208, 255),
         FxTypeParam::Diopser => (92, 226, 210),
+        FxTypeParam::TubeResonator => (255, 164, 88),
     }
 }
 
@@ -399,6 +404,126 @@ fn paint_diopser_scope(
     ));
     paint.set_line_width(1.6 * dpx);
     canvas.stroke_path(&curve, &paint);
+
+    f.end(canvas, pal);
+}
+
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn paint_tube_res_scope(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    dpx: f32,
+    bus_idx: usize,
+    slot_idx: usize,
+    params: &JSynPluginParams,
+    mod_ui: &ModUiState,
+    pal: &ThemePalette,
+) {
+    static START_EPOCH: OnceLock<Instant> = OnceLock::new();
+    let elapsed_s = START_EPOCH.get_or_init(Instant::now).elapsed().as_secs_f32();
+
+    let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
+    let enabled = slot.enabled.value();
+    let f = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 4.0, enabled, pal);
+
+    paint_filter_freq_grid(canvas, f.ix, f.iy, f.iw, f.ih, dpx, pal, enabled, &[], 0.0, 1.0);
+
+    let (_pre, post, _) = read_scope_snapshot(mod_ui, bus_idx, slot_idx);
+    let accent = scope_trace_rgb(fx_accent_rgb(FxTypeParam::TubeResonator), pal, enabled);
+    paint_filled_waveform_trace(
+        canvas,
+        &post,
+        f.ix,
+        f.iy,
+        f.iw,
+        f.ih,
+        1.25,
+        accent,
+        if enabled { 30 } else { 10 },
+        if enabled { 4 } else { 2 },
+        if enabled { 80 } else { 32 },
+        1.0 * dpx,
+    );
+
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
+    let tel = &mod_ui.telemetry;
+    let eff_eq = [
+        (slot.p5.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 4)))
+        .clamp(0.0, 1.0),
+        (slot.p6.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 5)))
+        .clamp(0.0, 1.0),
+        (slot.p7.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 6)))
+        .clamp(0.0, 1.0),
+        eff[3],
+    ];
+    let flt_on = slot.tube_res_filter_enabled.value();
+    let lfo_hz = tube_res_lfo_rate_hz(eff_eq[1]);
+    let dirty_lfo = !params.hq_mode.value();
+    let mut lfo_phase = (elapsed_s * lfo_hz * std::f32::consts::TAU).rem_euclid(std::f32::consts::TAU);
+    if dirty_lfo {
+        // Subtle 16-step visual hold when Dirty engine is active
+        lfo_phase = (lfo_phase * 2.5).floor() / 2.5;
+    }
+
+    let mut comb_curve = vg::Path::new();
+    let mut comb_fill = vg::Path::new();
+    let mut bp_curve = vg::Path::new();
+    comb_fill.move_to(f.ix, f.bottom);
+
+    const PTS: usize = 96;
+    for i in 0..PTS {
+        let t = i as f32 / (PTS - 1) as f32;
+        let freq_hz = 20.0 * 1000.0_f32.powf(t);
+        let (mag, bp_env) =
+            evaluate_tube_res_scope_response(eff, eff_eq, flt_on, lfo_phase, freq_hz);
+        let x = f.ix + t * f.iw;
+        let y = (f.bottom - mag * f.ih * 0.90).clamp(f.iy + 2.0 * dpx, f.bottom);
+        let y_bp = (f.bottom - bp_env * f.ih * 0.88).clamp(f.iy + 2.0 * dpx, f.bottom);
+        comb_fill.line_to(x, y);
+        if i == 0 {
+            comb_curve.move_to(x, y);
+            bp_curve.move_to(x, y_bp);
+        } else {
+            comb_curve.line_to(x, y);
+            bp_curve.line_to(x, y_bp);
+        }
+    }
+    comb_fill.line_to(f.ix + f.iw, f.bottom);
+    comb_fill.close();
+
+    if flt_on {
+        let mut bp_paint = vg::Paint::color(vg::Color::rgba(
+            accent.0,
+            accent.1,
+            accent.2,
+            if enabled { 105 } else { 45 },
+        ));
+        bp_paint.set_line_width(1.0 * dpx);
+        canvas.stroke_path(&bp_curve, &bp_paint);
+    }
+
+    paint_vertical_gradient_fill(
+        canvas,
+        &comb_fill,
+        f.ix,
+        f.iy,
+        f.bottom,
+        accent,
+        if enabled { 86 } else { 22 },
+        if enabled { 10 } else { 4 },
+    );
+    let mut paint = vg::Paint::color(vg::Color::rgba(
+        accent.0,
+        accent.1,
+        accent.2,
+        if enabled { 225 } else { 100 },
+    ));
+    paint.set_line_width(1.4 * dpx);
+    canvas.stroke_path(&comb_curve, &paint);
 
     f.end(canvas, pal);
 }
@@ -806,6 +931,16 @@ impl View for FxSlotVisualizer {
                 &pal,
             ),
             FxTypeParam::Diopser => paint_diopser_scope(
+                canvas,
+                bounds,
+                dpx,
+                self.bus_idx,
+                self.slot_idx,
+                &self.params,
+                &self.mod_ui,
+                &pal,
+            ),
+            FxTypeParam::TubeResonator => paint_tube_res_scope(
                 canvas,
                 bounds,
                 dpx,

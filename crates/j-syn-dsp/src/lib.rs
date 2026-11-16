@@ -21,10 +21,13 @@ pub use filter::{
     FilterSvfCore, StereoZdfSvf, COMB_BUF_LEN,
 };
 pub use fx::{
-    diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, filter_response_db_from_slot,
-    fx_high_cut_hz, fx_low_cut_hz, sub_cutoff_hz_to_norm, sub_cutoff_norm_to_hz, FxBusParams,
-    FxBusTopology, FxFilterSlope, FxRackParams, FxRackState, FxSlotParams, FxType, SubBusParams,
-    DELAY_SYNC_LABELS, DIOPSER_STAGE_COUNTS, MAX_FX_STACK, NUM_FX_BUSES, NUM_FX_SLOTS,
+    diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple,
+    evaluate_tube_res_scope_response, filter_response_db_from_slot, format_tube_res_tune,
+    fx_high_cut_hz, fx_low_cut_hz, sub_cutoff_hz_to_norm, sub_cutoff_norm_to_hz,
+    tube_res_decay_ms, tube_res_flt_freq_hz, tube_res_flt_width_oct, tube_res_lfo_rate_hz,
+    tube_res_tune_hz, tube_res_tune_midi, FxBusParams, FxBusTopology, FxFilterSlope, FxRackParams,
+    FxRackState, FxSlotParams, FxType, SubBusParams, DELAY_SYNC_LABELS, DIOPSER_STAGE_COUNTS,
+    MAX_FX_STACK, NUM_FX_BUSES, NUM_FX_SLOTS,
 };
 pub use insert::{
     DirectDest, FilterBusDest, FilterRouting, InsertMode, InsertParams, InsertPosition,

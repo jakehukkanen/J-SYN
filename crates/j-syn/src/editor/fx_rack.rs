@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use j_syn_dsp::filter::cutoff_norm_to_hz;
 use j_syn_dsp::mod_matrix::ModDestination;
-use j_syn_dsp::{diopser_freq_hz, fx_high_cut_hz, fx_low_cut_hz, FxRackState, FxType};
+use j_syn_dsp::{
+    diopser_freq_hz, format_tube_res_tune, fx_high_cut_hz, fx_low_cut_hz, tube_res_decay_ms,
+    tube_res_flt_freq_hz, tube_res_flt_width_oct, tube_res_lfo_rate_hz, FxRackState, FxType,
+};
 use nih_plug::prelude::{FloatParam, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 
@@ -34,6 +37,7 @@ const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Clipper", FxTypeParam::JSatClipper),
     ("Filter", FxTypeParam::Filter),
     ("Dispersion", FxTypeParam::Diopser),
+    ("Tube Res.", FxTypeParam::TubeResonator),
 ];
 
 const FX_FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
@@ -114,6 +118,12 @@ fn fx_slot_param_label(
                 2 => "PRE-DLY",
                 _ => "WIDTH",
             },
+            FxTypeParam::TubeResonator => match param_idx {
+                0 => "LFO AMT",
+                1 => "LFO SPD",
+                2 => "FEEDBK",
+                _ => "MIX",
+            },
             _ => "--",
         };
     }
@@ -180,6 +190,12 @@ fn fx_slot_param_label(
             2 => "SPREAD",
             _ => "MIX",
         },
+        FxTypeParam::TubeResonator => match param_idx {
+            0 => "TUNE",
+            1 => "FLT FREQ",
+            2 => "FLT WDTH",
+            _ => "MIX",
+        },
     }
 }
 
@@ -203,6 +219,14 @@ fn format_fx_slot_param_value(
 ) -> String {
     let n = norm.clamp(0.0, 1.0);
     if is_eq {
+        if fx_ty == FxTypeParam::TubeResonator {
+            return match param_idx {
+                0 => format!("{:.0}%", n * 100.0),
+                1 => format!("{:.2} Hz", tube_res_lfo_rate_hz(n)),
+                2 => format!("{:.1} ms", tube_res_decay_ms(n)),
+                _ => format!("{:.0}%", n * 100.0),
+            };
+        }
         return match param_idx {
             0 => format_hz(fx_low_cut_hz(n)),
             1 => format_hz(fx_high_cut_hz(n)),
@@ -258,6 +282,12 @@ fn format_fx_slot_param_value(
             0 => format_hz(diopser_freq_hz(n)),
             _ => format!("{:.0}%", n * 100.0),
         },
+        FxTypeParam::TubeResonator => match param_idx {
+            0 => format_tube_res_tune(n),
+            1 => format_hz(tube_res_flt_freq_hz(n)),
+            2 => format!("{:.2} oct", tube_res_flt_width_oct(n)),
+            _ => format!("{:.0}%", n * 100.0),
+        },
     }
 }
 
@@ -294,6 +324,7 @@ struct SlotSnapshot {
     flt_m: FilterModeParam,
     flt_s: FxFilterSlopeParam,
     diop_s: DiopserStagesParam,
+    tr_flt: bool,
 }
 
 /// Swaps all settings, EQ sub-tabs, and modulation assignments between two slots of `bus_idx`.
@@ -321,6 +352,7 @@ fn swap_fx_slots(
             flt_m: s.filter_mode.value(),
             flt_s: s.filter_slope.value(),
             diop_s: s.diopser_stages.value(),
+            tr_flt: s.tube_res_filter_enabled.value(),
         }
     };
     let a = capture(slot_a);
@@ -363,6 +395,10 @@ fn swap_fx_slots(
         setter.begin_set_parameter(&s.diopser_stages);
         setter.set_parameter(&s.diopser_stages, snap.diop_s);
         setter.end_set_parameter(&s.diopser_stages);
+
+        setter.begin_set_parameter(&s.tube_res_filter_enabled);
+        setter.set_parameter(&s.tube_res_filter_enabled, snap.tr_flt);
+        setter.end_set_parameter(&s.tube_res_filter_enabled);
     };
 
     write(slot_a, b);
@@ -399,6 +435,9 @@ fn set_fx_slot_type_with_defaults(
             setter.set_parameter(p, def_v);
             setter.end_set_parameter(p);
         }
+        setter.begin_set_parameter(&slot.tube_res_filter_enabled);
+        setter.set_parameter(&slot.tube_res_filter_enabled, true);
+        setter.end_set_parameter(&slot.tube_res_filter_enabled);
         mod_ui.set_fx_eq_subtab(bus_idx, slot_idx, false);
     }
 }
@@ -664,12 +703,57 @@ fn build_fx_scope_zstack(
                             .width(Pixels(56.0))
                             .height(Pixels(17.0));
                         }
+                        FxTypeParam::TubeResonator => {
+                            let p_tr = p_ov.clone();
+                            let g_tr = g_ov.clone();
+                            Button::new(
+                                cx,
+                                move |cx| {
+                                    let setter = ParamSetter::new(g_tr.as_ref());
+                                    let p = &p_tr.fx_bus_slots(bus_idx)[slot_idx]
+                                        .tube_res_filter_enabled;
+                                    let next = !p.value();
+                                    setter.begin_set_parameter(p);
+                                    setter.set_parameter(p, next);
+                                    setter.end_set_parameter(p);
+                                    cx.emit(UiEvent::ModUiChanged);
+                                },
+                                |cx| {
+                                    HStack::new(cx, |cx| {
+                                        Element::new(cx)
+                                            .class("fx-flt-dot")
+                                            .hoverable(false)
+                                            .width(Pixels(5.0))
+                                            .height(Pixels(5.0))
+                                            .top(Stretch(1.0))
+                                            .bottom(Stretch(1.0));
+                                        bold_label(cx, "FLT", "fx-subtab-lbl").hoverable(false);
+                                    })
+                                    .col_between(Pixels(3.0))
+                                    .child_space(Stretch(1.0))
+                                    .hoverable(false)
+                                },
+                            )
+                            .class("fx-scope-pill")
+                            .class("fx-scope-flt-btn")
+                            .toggle_class(
+                                "fx-subtab-active",
+                                UiData::params.map(move |p| {
+                                    p.fx_bus_slots(bus_idx)[slot_idx]
+                                        .tube_res_filter_enabled
+                                        .value()
+                                }),
+                            )
+                            .width(Pixels(38.0))
+                            .height(Pixels(17.0));
+                        }
                         _ => {}
                     }
 
                     Element::new(cx).width(Stretch(1.0)).hoverable(false);
 
-                    if FxType::from(fx_ty).has_eq_subtab() {
+                    if let Some(sub_lbl) = FxType::from(fx_ty).subtab_label() {
+                        let sub_w = if sub_lbl == "LFO" { 26.0 } else { 22.0 };
                         HStack::new(cx, move |cx| {
                             let m_main = m_ov.clone();
                             let m_main_cls = m_ov.clone();
@@ -697,14 +781,14 @@ fn build_fx_scope_zstack(
                                     m_eq.set_fx_eq_subtab(bus_idx, slot_idx, true);
                                     cx.emit(UiEvent::ModUiChanged);
                                 },
-                                |cx| bold_label(cx, "EQ", "fx-subtab-lbl").hoverable(false),
+                                move |cx| bold_label(cx, sub_lbl, "fx-subtab-lbl").hoverable(false),
                             )
                             .class("fx-subtab-btn")
                             .toggle_class(
                                 "fx-subtab-active",
                                 UiData::mod_ui_rev.map(move |_| m_eq_cls.fx_eq_subtab(bus_idx, slot_idx)),
                             )
-                            .width(Pixels(22.0))
+                            .width(Pixels(sub_w))
                             .height(Stretch(1.0));
                         })
                         .class("fx-scope-pill")
@@ -765,13 +849,27 @@ fn build_fx_knob_row(
                     FxKnobViewKey {
                         fx_type,
                         is_scream: s.filter_mode.value() == FilterModeParam::Scream,
-                        is_eq: FxType::from(fx_type).has_eq_subtab()
+                        is_eq: FxType::from(fx_type).subtab_label().is_some()
                             && mod_key.fx_eq_subtab(bus_idx, slot_idx),
                     }
                 }),
                 move |cx, key_lens| {
                     let key = key_lens.get(cx);
-                    let param_slot = if key.is_eq { 4 + p_idx } else { p_idx };
+                    let param_slot = if !key.is_eq {
+                        p_idx
+                    } else if key.fx_type == FxTypeParam::TubeResonator && p_idx == 3 {
+                        3
+                    } else {
+                        4 + p_idx
+                    };
+                    let snap_steps = if key.fx_type == FxTypeParam::TubeResonator
+                        && !key.is_eq
+                        && p_idx == 0
+                    {
+                        j_syn_dsp::fx::tube_resonator::TUBE_RES_MIDI_SPAN as u32
+                    } else {
+                        0
+                    };
                     let title = fx_slot_param_label(key.fx_type, key.is_eq, key.is_scream, p_idx);
                     let accent = fx_accent_rgb(key.fx_type);
                     let p_cell = p_dim.clone();
@@ -796,6 +894,7 @@ fn build_fx_knob_row(
                             tab_tag,
                             formatter,
                         )
+                        .snap_steps(snap_steps)
                         .enabled_by(p_cell, move |p| slot_enabled_for_bus(p, bus_idx, slot_idx))
                         .width(Pixels(knob_sz))
                         .height(Pixels(knob_sz))

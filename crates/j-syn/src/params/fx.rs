@@ -98,6 +98,8 @@ pub enum FxTypeParam {
     Phaser,
     #[name = "Dispersion"]
     Diopser,
+    #[name = "Tube Res."]
+    TubeResonator,
 }
 
 impl From<j_syn_dsp::FxType> for FxTypeParam {
@@ -113,6 +115,7 @@ impl From<j_syn_dsp::FxType> for FxTypeParam {
             j_syn_dsp::FxType::Filter => Self::Filter,
             j_syn_dsp::FxType::Phaser => Self::Phaser,
             j_syn_dsp::FxType::Diopser => Self::Diopser,
+            j_syn_dsp::FxType::TubeResonator => Self::TubeResonator,
         }
     }
 }
@@ -130,6 +133,7 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
             FxTypeParam::Filter => Self::Filter,
             FxTypeParam::Phaser => Self::Phaser,
             FxTypeParam::Diopser => Self::Diopser,
+            FxTypeParam::TubeResonator => Self::TubeResonator,
         }
     }
 }
@@ -247,6 +251,8 @@ pub struct FxSlotPluginParams {
     pub filter_slope: EnumParam<FxFilterSlopeParam>,
     #[id = "fx_diop_s"]
     pub diopser_stages: EnumParam<DiopserStagesParam>,
+    #[id = "fx_tr_flt"]
+    pub tube_res_filter_enabled: BoolParam,
 }
 
 impl FxSlotPluginParams {
@@ -274,6 +280,7 @@ impl FxSlotPluginParams {
             filter_mode: EnumParam::new("Filter Mode", FilterModeParam::Lp),
             filter_slope: EnumParam::new("Filter Slope", FxFilterSlopeParam::Db12),
             diopser_stages: EnumParam::new("Dispersion Stages", DiopserStagesParam::S32),
+            tube_res_filter_enabled: BoolParam::new("Tube Res. Filter", init.tube_res_filter_enabled),
         }
     }
 
@@ -318,6 +325,7 @@ impl FxSlotPluginParams {
             filter_mode: self.filter_mode.value().into(),
             filter_slope: self.filter_slope.value().into(),
             diopser_stages: self.diopser_stages.value().to_index(),
+            tube_res_filter_enabled: self.tube_res_filter_enabled.value(),
         }
     }
 }

@@ -33,12 +33,15 @@ pub struct RotaryKnob {
     mod_binding: Option<ModTargetBinding>,
     value_formatter: Option<ValueFormatter>,
     enabled_state: Option<(Arc<crate::JSynPluginParams>, EnabledPredicate)>,
+    snap_steps: Option<u32>,
 }
 
 pub trait KnobDimExt {
     fn enabled_by<F>(self, params: Arc<crate::JSynPluginParams>, check: F) -> Self
     where
         F: Fn(&crate::JSynPluginParams) -> bool + Send + Sync + 'static;
+
+    fn snap_steps(self, steps: u32) -> Self;
 }
 
 impl KnobDimExt for Handle<'_, RotaryKnob> {
@@ -48,6 +51,10 @@ impl KnobDimExt for Handle<'_, RotaryKnob> {
     {
         let pred: EnabledPredicate = Arc::new(check);
         self.modify(move |knob| knob.enabled_state = Some((params, pred)))
+    }
+
+    fn snap_steps(self, steps: u32) -> Self {
+        self.modify(move |knob| knob.snap_steps = (steps > 0).then_some(steps))
     }
 }
 
@@ -163,6 +170,7 @@ impl RotaryKnob {
             mod_binding,
             value_formatter,
             enabled_state: None,
+            snap_steps: None,
         }
         .build(
             cx,
@@ -413,11 +421,17 @@ impl View for RotaryKnob {
                     };
 
                     let dy = (state.start_y - *y) / (KNOB_DRAG_PIXELS * cx.scale_factor());
-                    let new_val = (state.start_val + dy * sensitivity).clamp(0.0, 1.0);
-                    self.param_base.set_normalized_value(cx, new_val);
+                    let raw_val = (state.start_val + dy * sensitivity).clamp(0.0, 1.0);
+                    let out_val = match self.snap_steps {
+                        Some(steps) if steps > 0 && !cx.modifiers().shift() => {
+                            (raw_val * steps as f32).round() / steps as f32
+                        }
+                        _ => raw_val,
+                    };
+                    self.param_base.set_normalized_value(cx, out_val);
 
                     state.start_y = *y;
-                    state.start_val = new_val;
+                    state.start_val = raw_val;
 
                     self.emit_tooltip(cx);
                     cx.needs_redraw();
@@ -435,11 +449,19 @@ impl View for RotaryKnob {
                         self.param_base.begin_set_parameter(cx);
                     }
 
-                    let mut current = self.param_base.unmodulated_normalized_value();
-                    let step = if finer { 0.004 } else { 0.02 };
-                    let delta = self.scrolled_lines * step;
-                    current = (current + delta).clamp(0.0, 1.0);
-                    self.param_base.set_normalized_value(cx, current);
+                    let current = self.param_base.unmodulated_normalized_value();
+                    let next = match self.snap_steps {
+                        Some(steps) if steps > 0 && !finer => {
+                            let cur_step = (current * steps as f32).round();
+                            let dir = self.scrolled_lines.signum();
+                            ((cur_step + dir) / steps as f32).clamp(0.0, 1.0)
+                        }
+                        _ => {
+                            let step = if finer { 0.004 } else { 0.02 };
+                            (current + self.scrolled_lines * step).clamp(0.0, 1.0)
+                        }
+                    };
+                    self.param_base.set_normalized_value(cx, next);
                     self.scrolled_lines = 0.0;
 
                     if !self.drag_active {

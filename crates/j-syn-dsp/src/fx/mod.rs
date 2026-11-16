@@ -4,6 +4,7 @@
 pub mod diopser;
 pub mod dynamics;
 pub mod modulation;
+pub mod tube_resonator;
 
 use std::f64::consts::FRAC_1_SQRT_2;
 
@@ -19,12 +20,18 @@ use crate::oversample::{Biquad, BiquadCoeffs, Oversampler4x};
 use self::diopser::DiopserStereo;
 use self::dynamics::{DistortionStereo, JSatClipperStereo, OttStereo};
 use self::modulation::{ChorusStereo, DelayStereo, PhaserStereo, ReverbStereo};
+use self::tube_resonator::TubeResonatorStereo;
 
 pub use self::diopser::{
     diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, DIOPSER_STAGE_COUNTS,
 };
 pub use self::modulation::{
     fx_high_cut_hz, fx_low_cut_hz, DELAY_SYNC_LABELS,
+};
+pub use self::tube_resonator::{
+    evaluate_tube_res_scope_response, format_tube_res_tune, tube_res_decay_ms,
+    tube_res_flt_freq_hz, tube_res_flt_width_oct, tube_res_lfo_rate_hz, tube_res_tune_hz,
+    tube_res_tune_midi,
 };
 
 pub const NUM_FX_BUSES: usize = 2;
@@ -46,10 +53,11 @@ pub enum FxType {
     Filter = 7,
     Phaser = 8,
     Diopser = 9,
+    TubeResonator = 10,
 }
 
 impl FxType {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Off,
         Self::Ott,
         Self::Distortion,
@@ -60,6 +68,7 @@ impl FxType {
         Self::Filter,
         Self::Phaser,
         Self::Diopser,
+        Self::TubeResonator,
     ];
 
     #[inline]
@@ -74,6 +83,7 @@ impl FxType {
             7 => Self::Filter,
             8 => Self::Phaser,
             9 => Self::Diopser,
+            10 => Self::TubeResonator,
             _ => Self::Off,
         }
     }
@@ -90,6 +100,7 @@ impl FxType {
             Self::Filter => "Filter",
             Self::Phaser => "Phaser",
             Self::Diopser => "Dispersion",
+            Self::TubeResonator => "Tube Res.",
         }
     }
 
@@ -105,12 +116,22 @@ impl FxType {
             Self::Filter => "FILTER",
             Self::Phaser => "PHASER",
             Self::Diopser => "DISP",
+            Self::TubeResonator => "TUBE",
+        }
+    }
+
+    #[inline]
+    pub const fn subtab_label(self) -> Option<&'static str> {
+        match self {
+            Self::Chorus | Self::Delay | Self::Reverb => Some("EQ"),
+            Self::TubeResonator => Some("LFO"),
+            _ => None,
         }
     }
 
     #[inline]
     pub const fn has_eq_subtab(self) -> bool {
-        matches!(self, Self::Chorus | Self::Delay | Self::Reverb)
+        self.subtab_label().is_some()
     }
 }
 
@@ -163,6 +184,8 @@ pub struct FxSlotParams {
     pub filter_slope: FxFilterSlope,
     /// `0..=4` index into `DIOPSER_STAGE_COUNTS` (`[8, 16, 32, 64, 128]`).
     pub diopser_stages: u8,
+    /// Enable the pre-resonator softening bandpass filter in `TUBE RES.` (default `true`).
+    pub tube_res_filter_enabled: bool,
 }
 
 impl Default for FxSlotParams {
@@ -176,6 +199,7 @@ impl Default for FxSlotParams {
             filter_mode: FilterMode::Lp,
             filter_slope: FxFilterSlope::Db12,
             diopser_stages: 2,
+            tube_res_filter_enabled: true,
         }
     }
 }
@@ -203,10 +227,12 @@ impl FxSlotParams {
             FxType::Phaser => [0.30, 0.70, 0.50, 1.00],
             // Diopser: Freq ~405 Hz (0.45), Res 50%, Spread 35%, Mix 100%
             FxType::Diopser => [0.45, 0.50, 0.35, 1.00],
+            // Tube Res.: Tune C1 (12/72), Flt Freq 67 Hz (0.2676), Flt Width 2.0 oct (1.5/8.5), Mix 100%
+            FxType::TubeResonator => [12.0 / 72.0, 0.267_604, 1.5 / 8.5, 1.00],
         }
     }
 
-    /// Default normalized secondary `[P5, P6, P7, P8]` (`EQ`) knob positions for `fx_type`.
+    /// Default normalized secondary `[P5, P6, P7, P8]` (`EQ` / `LFO`) knob positions for `fx_type`.
     pub const fn default_eq_params_for_type(fx_type: FxType) -> [f32; 4] {
         match fx_type {
             // Chorus EQ: Low Cut 20 Hz (0.0), High Cut 20 kHz (1.0), Spread 100% (0.5), Feedback 0% (0.0)
@@ -215,6 +241,8 @@ impl FxSlotParams {
             FxType::Delay => [0.0, 0.77, 0.0, 0.50],
             // Reverb EQ: Low Cut ~60 Hz (0.24), High Cut 20 kHz (1.0), Pre-Dly 0 ms (0.0), Width 100% (0.5)
             FxType::Reverb => [0.24, 1.0, 0.0, 0.50],
+            // Tube Res. LFO: LFO Amt 50%, LFO Spd 1.00 Hz (0.42625), Feedbk/Decay 50 ms (0.29922), Mix shared on P4
+            FxType::TubeResonator => [0.50, 0.426_25, 0.299_22, 1.00],
             _ => [0.0, 1.0, 0.50, 0.50],
         }
     }
@@ -231,6 +259,7 @@ impl FxSlotParams {
             filter_mode: FilterMode::Lp,
             filter_slope: FxFilterSlope::Db12,
             diopser_stages: 2,
+            tube_res_filter_enabled: true,
         }
     }
 }
@@ -296,12 +325,24 @@ pub enum FxBusTopology {
     Serial = 1,
 }
 
-/// Full FX Rack (`Bus A` + `Bus B` + `Sub Bus` + `FxBusTopology`).
-#[derive(Debug, Clone, Copy, Default)]
+/// Full FX Rack (`Bus A` + `Bus B` + `Sub Bus` + `FxBusTopology` + `EngineMode`).
+#[derive(Debug, Clone, Copy)]
 pub struct FxRackParams {
     pub buses: [FxBusParams; NUM_FX_BUSES],
     pub sub: SubBusParams,
     pub topology: FxBusTopology,
+    pub engine_mode: EngineMode,
+}
+
+impl Default for FxRackParams {
+    fn default() -> Self {
+        Self {
+            buses: [FxBusParams::default(); NUM_FX_BUSES],
+            sub: SubBusParams::default(),
+            topology: FxBusTopology::default(),
+            engine_mode: EngineMode::Vintage2007,
+        }
+    }
 }
 
 #[inline]
@@ -459,6 +500,7 @@ struct StereoFxStage {
     filter: FxFilterStereo,
     phaser: PhaserStereo,
     diopser: DiopserStereo,
+    tube_res: TubeResonatorStereo,
 }
 
 impl StereoFxStage {
@@ -473,6 +515,7 @@ impl StereoFxStage {
             filter: FxFilterStereo::new(sample_rate),
             phaser: PhaserStereo::new(sample_rate),
             diopser: DiopserStereo::new(sample_rate),
+            tube_res: TubeResonatorStereo::new(sample_rate),
         }
     }
 
@@ -485,6 +528,7 @@ impl StereoFxStage {
         self.filter.set_sample_rate(sample_rate);
         self.phaser.set_sample_rate(sample_rate);
         self.diopser.set_sample_rate(sample_rate);
+        self.tube_res.set_sample_rate(sample_rate);
     }
 
     fn reset(&mut self) {
@@ -497,6 +541,7 @@ impl StereoFxStage {
         self.filter.reset();
         self.phaser.reset();
         self.diopser.reset();
+        self.tube_res.reset();
     }
 
     #[inline]
@@ -509,6 +554,7 @@ impl StereoFxStage {
         p: [f32; 4],
         eq: [f32; 4],
         tempo_bpm: f32,
+        engine_mode: EngineMode,
     ) -> (f32, f32, f32) {
         match slot.fx_type {
             FxType::Off => (in_l, in_r, 0.0),
@@ -521,6 +567,14 @@ impl StereoFxStage {
             FxType::Filter => self.filter.process(in_l, in_r, slot.filter_mode, slot.filter_slope, p),
             FxType::Phaser => self.phaser.process(in_l, in_r, p),
             FxType::Diopser => self.diopser.process(in_l, in_r, p, slot.diopser_stages as usize),
+            FxType::TubeResonator => self.tube_res.process(
+                in_l,
+                in_r,
+                p,
+                eq,
+                slot.tube_res_filter_enabled,
+                engine_mode == EngineMode::Vintage2007,
+            ),
         }
     }
 }
@@ -571,6 +625,7 @@ impl FxBusState {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     fn process_sample(
         &mut self,
         in_l: f32,
@@ -578,6 +633,7 @@ impl FxBusState {
         bus: &FxBusParams,
         mod_offsets: &[f32; NUM_MOD_DESTS],
         tempo_bpm: f32,
+        engine_mode: EngineMode,
         telemetry: Option<&ModUiTelemetry>,
     ) -> (f32, f32) {
         let mut l = in_l;
@@ -624,6 +680,7 @@ impl FxBusState {
                         eff,
                         eff_eq,
                         tempo_bpm,
+                        engine_mode,
                     );
                     l = nl;
                     r = nr;
@@ -831,6 +888,7 @@ impl FxRackState {
             &rack.buses[0],
             mod_offsets,
             tempo_bpm,
+            rack.engine_mode,
             telemetry,
         );
         let (b_in_l, b_in_r, out_a_l, out_a_r) = match rack.topology {
@@ -843,6 +901,7 @@ impl FxRackState {
             &rack.buses[1],
             mod_offsets,
             tempo_bpm,
+            rack.engine_mode,
             telemetry,
         );
         let (sl, sr) = self

@@ -2509,3 +2509,129 @@ fn mpe_per_voice_pitch_bend_pressure_slide_and_master_broadcast() {
         .unwrap();
     assert!((v2_after.poly_tuning_smoothed - 7.0).abs() < 1e-2);
 }
+
+#[test]
+fn fx_tube_resonator_tune_filter_dirty_lfo_and_idle() {
+    use j_syn_dsp::{
+        evaluate_tube_res_scope_response, format_tube_res_tune, tube_res_tune_hz, FxRackParams,
+        FxRackState, FxSlotParams, FxType, NUM_MOD_DESTS,
+    };
+
+    let mod_offsets = [0.0_f32; NUM_MOD_DESTS];
+
+    let defs = FxSlotParams::default_params_for_type(FxType::TubeResonator);
+    let eq_defs = FxSlotParams::default_eq_params_for_type(FxType::TubeResonator);
+    assert_eq!(format_tube_res_tune(defs[0]), "C1");
+    assert!((tube_res_tune_hz(defs[0]) - 32.703197).abs() < 0.01);
+    assert!(format_tube_res_tune(defs[0] + 0.25 / 72.0).contains("+25c"));
+    assert_eq!(format_tube_res_tune(1.0), "C6");
+    assert!((eq_defs[0] - 0.5).abs() < 1e-6);
+
+    let mut base_params = FxRackParams::default();
+    base_params.buses[0].slots[0] = FxSlotParams {
+        enabled: true,
+        fx_type: FxType::TubeResonator,
+        stack: 1,
+        params: defs,
+        eq_params: eq_defs,
+        tube_res_filter_enabled: true,
+        ..FxSlotParams::default()
+    };
+
+    let run_burst = |params: &FxRackParams| -> Vec<f32> {
+        let mut rack = FxRackState::new(48_000.0);
+        let mut out = Vec::with_capacity(4096);
+        for n in 0..4096 {
+            let x = if n < 64 {
+                ((n as f32 * 0.37).sin()) * 0.5
+            } else {
+                0.0
+            };
+            let (l, r) =
+                rack.process_buses_sample((x, -x * 0.8), (0.0, 0.0), (0.0, 0.0), params, &mod_offsets, 120.0, None);
+            assert!(l.is_finite() && r.is_finite());
+            out.push(l);
+        }
+        out
+    };
+
+    let out_flt_on = run_burst(&base_params);
+    let mut flt_off_params = base_params.clone();
+    flt_off_params.buses[0].slots[0].tube_res_filter_enabled = false;
+    let out_flt_off = run_burst(&flt_off_params);
+
+    let energy_on: f32 = out_flt_on[64..].iter().map(|s| s * s).sum();
+    let energy_off: f32 = out_flt_off[64..].iter().map(|s| s * s).sum();
+    assert!(energy_on > 1e-4 && energy_off > 1e-4);
+    let flt_diff: f32 = out_flt_on
+        .iter()
+        .zip(out_flt_off.iter())
+        .map(|(a, b)| (a - b).abs())
+        .sum();
+    assert!(flt_diff > 1.0, "Filter On vs Off must noticeably shape tail");
+
+    // Verify Dirty (EngineMode::Vintage2007) vs Clean (EngineMode::Hq) LFO behavior
+    let mut dirty_p = base_params.clone();
+    dirty_p.engine_mode = EngineMode::Vintage2007;
+    dirty_p.buses[0].slots[0].eq_params[0] = 1.0; // LFO AMT 100%
+    dirty_p.buses[0].slots[0].eq_params[1] = 0.85; // fast LFO
+    dirty_p.buses[0].slots[0].eq_params[2] = 0.6; // longer feedback decay
+
+    let mut clean_p = dirty_p.clone();
+    clean_p.engine_mode = EngineMode::Hq;
+
+    let out_dirty = run_burst(&dirty_p);
+    let out_clean = run_burst(&clean_p);
+    let lfo_mode_diff: f32 = out_dirty[128..]
+        .iter()
+        .zip(out_clean[128..].iter())
+        .map(|(a, b)| (a - b).abs())
+        .sum();
+    assert!(
+        lfo_mode_diff > 0.01,
+        "Dirty vs Clean engine mode must produce distinct Pitch LFO modulation (diff={lfo_mode_diff})"
+    );
+
+    // Scope response evaluator should return bounded finite values
+    for i in 0..=32 {
+        let freq_hz = 20.0 * (1000.0_f32).powf(i as f32 / 32.0);
+        let (mag, bp_env) = evaluate_tube_res_scope_response(defs, eq_defs, true, 0.0, freq_hz);
+        assert!(mag.is_finite() && (0.0..=1.0).contains(&mag));
+        assert!(bp_env.is_finite() && (0.0..=1.0).contains(&bp_env));
+    }
+
+    // Long silence should decay cleanly to idle without NaNs
+    let mut rack = FxRackState::new(48_000.0);
+    let (l0, r0) = rack.process_buses_sample(
+        (0.4, 0.4),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        &base_params,
+        &mod_offsets,
+        120.0,
+        None,
+    );
+    assert!(l0.is_finite() && r0.is_finite());
+    for _ in 0..96_000 {
+        let (l, r) = rack.process_buses_sample(
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            &base_params,
+            &mod_offsets,
+            120.0,
+            None,
+        );
+        assert!(l.is_finite() && r.is_finite());
+    }
+    let (l_end, r_end) = rack.process_buses_sample(
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        &base_params,
+        &mod_offsets,
+        120.0,
+        None,
+    );
+    assert!(l_end.abs() < 1e-5 && r_end.abs() < 1e-5);
+}
