@@ -1,12 +1,13 @@
 //! Drag-and-drop Modulation Source Pill bar, live telemetry 60 Hz redraw ticker,
 //! and inline modulation slot inspector (`UNI/BIP`, depth readout, slot cycle, remove).
 
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use j_syn_dsp::mod_matrix::{
-    ModDestination, ModMatrixSource, ModSlot, ModUiTelemetry, NUM_MOD_DESTS, NUM_MOD_SLOTS,
+    ModDestination, ModMatrixSource, ModSlot, ModUiTelemetry, ALL_MOD_DESTINATIONS,
+    NUM_MOD_DESTS, NUM_MOD_SLOTS,
 };
 use j_syn_dsp::modseq::ModSeqStepShape;
 use nih_plug_vizia::vizia::prelude::*;
@@ -19,6 +20,8 @@ use crate::JSynPluginParams;
 
 const UNSET_U8: u8 = 255;
 pub(crate) const FX_VIEW_TAG: u8 = 5;
+pub(crate) const MAIN_FX_A_TAG: u8 = 6;
+pub(crate) const MAIN_FX_B_TAG: u8 = 7;
 
 /// Converts `BottomTab` to the visibility tag used for drop-target hit testing (`1..=4`, `0` = always visible).
 #[inline]
@@ -40,6 +43,8 @@ pub(crate) struct ModUiState {
     active_bottom_tab: AtomicU8,
     active_modseq_subtab: AtomicU8,
     active_view_mode: AtomicU8,
+    active_main_fx_bus: AtomicU8,
+    fx_eq_mask: AtomicU16,
     inspected_dest: AtomicU8,
     inspected_slot: AtomicU8,
     active_stamp: AtomicU8,
@@ -62,6 +67,8 @@ impl ModUiState {
             active_bottom_tab: AtomicU8::new(bottom_tab_tag(BottomTab::VoiceEnv)),
             active_modseq_subtab: AtomicU8::new(0),
             active_view_mode: AtomicU8::new(0),
+            active_main_fx_bus: AtomicU8::new(0),
+            fx_eq_mask: AtomicU16::new(0),
             inspected_dest: AtomicU8::new(UNSET_U8),
             inspected_slot: AtomicU8::new(UNSET_U8),
             active_stamp: AtomicU8::new(ModSeqStepShape::RampDown as u8),
@@ -101,41 +108,38 @@ impl ModUiState {
         ModSeqStepShape::from_u8(self.active_stamp.load(Ordering::Relaxed))
     }
 
-    /// Packs module enable states (OSC1..4, Noise, F1..2, INS1..2, OSC1..4 unison>1, and FX1..8
-    /// enabled/type/stack) into a `u64` bitmask so host automation or swaps refresh the UI.
+    #[inline]
+    fn fnv1a_mix(hash: &mut u64, value: u64) {
+        *hash ^= value;
+        *hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+
+    /// Hashes structural module states (enables, unison>1, inserts, sub bus, both FX buses'
+    /// slot type/stack/filter mode/slope/diopser stages) so host automation or swaps refresh the UI.
     pub fn compute_enabled_mask(params: &JSynPluginParams) -> u64 {
-        let mut mask = 0u64;
-        for (i, osc) in params.oscs.iter().enumerate() {
-            if params.oscs[i].enabled.value() {
-                mask |= 1 << i;
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for osc in &params.oscs {
+            Self::fnv1a_mix(&mut h, osc.enabled.value() as u64);
+            Self::fnv1a_mix(&mut h, (osc.unison.value() > 1) as u64);
+        }
+        Self::fnv1a_mix(&mut h, params.noise.enabled.value() as u64);
+        Self::fnv1a_mix(&mut h, params.filters[0].enabled.value() as u64);
+        Self::fnv1a_mix(&mut h, params.filters[1].enabled.value() as u64);
+        Self::fnv1a_mix(&mut h, params.routing.inserts[0].mode.value() as u64);
+        Self::fnv1a_mix(&mut h, params.routing.inserts[1].mode.value() as u64);
+        Self::fnv1a_mix(&mut h, params.sub_bus.enabled.value() as u64);
+        for bus in 0..2 {
+            for fx in params.fx_bus_slots(bus) {
+                let packed = (fx.enabled.value() as u64)
+                    | ((fx.fx_type.value() as u64) << 1)
+                    | ((fx.stack.value().clamp(1, 4) as u64) << 6)
+                    | ((fx.filter_mode.value() as u64) << 9)
+                    | ((fx.filter_slope.value() as u64) << 14)
+                    | ((fx.diopser_stages.value() as u64) << 16);
+                Self::fnv1a_mix(&mut h, packed);
             }
-            if osc.unison.value() > 1 {
-                mask |= 1 << (9 + i);
-            }
         }
-        if params.noise.enabled.value() {
-            mask |= 1 << 4;
-        }
-        if params.filters[0].enabled.value() {
-            mask |= 1 << 5;
-        }
-        if params.filters[1].enabled.value() {
-            mask |= 1 << 6;
-        }
-        if params.routing.inserts[0].mode.value() != crate::InsertModeParam::Off {
-            mask |= 1 << 7;
-        }
-        if params.routing.inserts[1].mode.value() != crate::InsertModeParam::Off {
-            mask |= 1 << 8;
-        }
-        for (i, fx) in params.fx_slots.iter().enumerate() {
-            let en_bit = fx.enabled.value() as u64;
-            let ty_bits = (fx.fx_type.value() as u64) & 0x7;
-            let stack_bits = ((fx.stack.value().clamp(1, 4) - 1) as u64) & 0x3;
-            let packed = en_bit | (ty_bits << 1) | (stack_bits << 4);
-            mask |= packed << (13 + i * 6);
-        }
-        mask
+        h
     }
 
     pub fn poll_enabled_mask_changed(&self) -> bool {
@@ -232,12 +236,43 @@ impl ModUiState {
         self.active_view_mode.store(mode, Ordering::Relaxed);
     }
 
+    pub fn set_main_fx_bus(&self, bus: usize) {
+        self.active_main_fx_bus.store((bus & 1) as u8, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn fx_eq_subtab(&self, bus: usize, slot: usize) -> bool {
+        let bit = ((bus & 1) * 8 + (slot & 7)) as u32;
+        ((self.fx_eq_mask.load(Ordering::Relaxed) >> bit) & 1) != 0
+    }
+
+    pub fn set_fx_eq_subtab(&self, bus: usize, slot: usize, is_eq: bool) {
+        let bit = 1_u16 << (((bus & 1) * 8 + (slot & 7)) as u32);
+        if is_eq {
+            self.fx_eq_mask.fetch_or(bit, Ordering::Relaxed);
+        } else {
+            self.fx_eq_mask.fetch_and(!bit, Ordering::Relaxed);
+        }
+    }
+
+    pub fn swap_fx_eq_subtab(&self, bus: usize, slot_a: usize, slot_b: usize) {
+        let a = self.fx_eq_subtab(bus, slot_a);
+        let b = self.fx_eq_subtab(bus, slot_b);
+        self.set_fx_eq_subtab(bus, slot_a, b);
+        self.set_fx_eq_subtab(bus, slot_b, a);
+    }
+
     fn hit_test_cursor(&self, x: f32, y: f32) -> Option<usize> {
         let view_mode = self.active_view_mode.load(Ordering::Relaxed);
-        if view_mode == 2 {
+        if view_mode >= 2 {
             return None;
         }
         let active_tab = self.active_bottom_tab.load(Ordering::Relaxed);
+        let main_bus_tag = if self.active_main_fx_bus.load(Ordering::Relaxed) == 0 {
+            MAIN_FX_A_TAG
+        } else {
+            MAIN_FX_B_TAG
+        };
         let rects = self.drop_rects.lock().ok()?;
         for (idx, &(rx, ry, rw, rh, tag)) in rects.iter().enumerate() {
             if rw <= 1.0 || rh <= 1.0 {
@@ -246,7 +281,7 @@ impl ModUiState {
             let visible = if view_mode == 1 {
                 tag == FX_VIEW_TAG
             } else {
-                tag == 0 || tag == active_tab
+                tag == 0 || tag == active_tab || tag == main_bus_tag
             };
             if !visible {
                 continue;
@@ -628,6 +663,17 @@ impl ModUiState {
         let mut mat = self.params.mod_matrix.snapshot();
         if mat.slots[slot_idx].enabled {
             mat.slots[slot_idx].source = source;
+            self.params.mod_matrix.store_value(mat);
+        }
+    }
+
+    pub fn set_slot_destination_at(&self, slot_idx: usize, destination: ModDestination) {
+        if slot_idx >= NUM_MOD_SLOTS {
+            return;
+        }
+        let mut mat = self.params.mod_matrix.snapshot();
+        if mat.slots[slot_idx].enabled {
+            mat.slots[slot_idx].destination = destination;
             self.params.mod_matrix.store_value(mat);
         }
     }
@@ -1188,6 +1234,7 @@ fn build_matrix_row(
     let aux_text = mod_ui.aux_short_label(slot.aux_source);
 
     let ui_src = mod_ui.clone();
+    let ui_dst = mod_ui.clone();
     let ui_depth = mod_ui.clone();
     let ui_curve = mod_ui.clone();
     let ui_pol = mod_ui.clone();
@@ -1265,11 +1312,55 @@ fn build_matrix_row(
             .height(Stretch(1.0))
             .child_space(Stretch(1.0));
 
-        bold_label(cx, &dst_text, "matrix-cell-dest")
-            .width(Stretch(1.0))
-            .height(Stretch(1.0))
-            .child_top(Stretch(1.0))
-            .child_bottom(Stretch(1.0));
+        let ui_dst_trig = ui_dst.clone();
+        let dst_text_c = dst_text.clone();
+        Dropdown::new(
+            cx,
+            move |cx| {
+                let ui_d = ui_dst_trig.clone();
+                let d_txt = dst_text_c.clone();
+                HStack::new(cx, move |cx| {
+                    build_dropdown_trigger_labels(
+                        cx,
+                        UiData::mod_ui_rev.map(move |_| {
+                            let s = ui_d.params.mod_matrix.snapshot().slots[slot_idx];
+                            if s.enabled {
+                                s.destination.name().to_string()
+                            } else {
+                                d_txt.clone()
+                            }
+                        }),
+                    );
+                })
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .child_top(Pixels(0.0))
+                .child_bottom(Pixels(0.0))
+                .overflow(Overflow::Hidden)
+            },
+            move |cx| {
+                let ui_dst_list = ui_dst.clone();
+                ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+                    let ui_dst_inner = ui_dst_list.clone();
+                    VStack::new(cx, move |cx| {
+                        for dest in ALL_MOD_DESTINATIONS {
+                            let ui_set = ui_dst_inner.clone();
+                            bold_label(cx, dest.name(), "dropdown-item").on_press(move |cx| {
+                                ui_set.set_slot_destination_at(slot_idx, dest);
+                                cx.emit(UiEvent::ModUiChanged);
+                                cx.emit(PopupEvent::Close);
+                            });
+                        }
+                    })
+                    .class("dropdown-scroll-content");
+                })
+                .class("dropdown-scroll");
+            },
+        )
+        .width(Stretch(1.0))
+        .height(Pixels(20.0))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0));
 
         MatrixDragBox::new(cx, slot_idx, MatrixField::Depth, ui_depth)
             .width(Pixels(64.0))

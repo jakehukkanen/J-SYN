@@ -2,10 +2,11 @@ use crate::envelope::{AdsrParams, AmpAdsr};
 use crate::filter::{
     cutoff_hz_to_norm, cutoff_norm_to_hz, FilterParams, FilterState, FilterSvfCore,
 };
+use crate::fx::{FxBusParams, FxSlotParams, SubBusParams};
 use crate::insert::{
-    FilterRouting, InsertPosition, InsertShaperState, RoutingParams, VoiceFeedbackState,
+    DirectDest, FilterBusDest, FilterRouting, InsertPosition, InsertShaperState, RoutingParams,
+    VoiceFeedbackState,
 };
-use crate::fx::{FxSlotParams, NUM_FX_SLOTS};
 use crate::mod_matrix::{
     ModDestination, ModMatrixState, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS,
 };
@@ -18,6 +19,30 @@ use crate::wavetable::Wavetable;
 pub enum PolyMode {
     Poly = 0,
     MonoLegato = 1,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VoiceBusOutput {
+    pub bus_a_l: f32,
+    pub bus_a_r: f32,
+    pub bus_b_l: f32,
+    pub bus_b_r: f32,
+    pub sub_l: f32,
+    pub sub_r: f32,
+}
+
+impl VoiceBusOutput {
+    #[inline]
+    pub fn scale(self, gain: f32) -> Self {
+        Self {
+            bus_a_l: self.bus_a_l * gain,
+            bus_a_r: self.bus_a_r * gain,
+            bus_b_l: self.bus_b_l * gain,
+            bus_b_r: self.bus_b_r * gain,
+            sub_l: self.sub_l * gain,
+            sub_r: self.sub_r * gain,
+        }
+    }
 }
 
 /// Snapshot of all synthesizer DSP parameters for a processing block.
@@ -41,7 +66,9 @@ pub struct SynthParams {
     pub modseq_steps: ModSeqStepBank,
     pub mod_matrix: ModMatrixState,
     pub macros: [f32; 8],
-    pub fx_slots: [FxSlotParams; NUM_FX_SLOTS],
+    pub fx_bus_a: FxBusParams,
+    pub fx_bus_b: FxBusParams,
+    pub sub_bus: SubBusParams,
     pub tempo_bpm: f32,
     pub dc_blocker: bool,
     pub master_limiter: bool,
@@ -51,6 +78,7 @@ impl Default for SynthParams {
     fn default() -> Self {
         let mut oscs = [OscParams::default(); 4];
         oscs[0].level = 0.75;
+        let init_slots = std::array::from_fn(FxSlotParams::init_patch_slot);
         Self {
             master_gain: 0.707_106_77, // -3 dB
             engine_mode: EngineMode::Vintage2007,
@@ -73,7 +101,17 @@ impl Default for SynthParams {
             modseq_steps: ModSeqStepBank::default(),
             mod_matrix: ModMatrixState::default(),
             macros: [0.0; 8],
-            fx_slots: [FxSlotParams::default(); NUM_FX_SLOTS],
+            fx_bus_a: FxBusParams {
+                slots: init_slots,
+                level: 1.0,
+                pan: 0.0,
+            },
+            fx_bus_b: FxBusParams {
+                slots: init_slots,
+                level: 1.0,
+                pan: 0.0,
+            },
+            sub_bus: SubBusParams::default(),
             tempo_bpm: 120.0,
             dc_blocker: true,
             master_limiter: false,
@@ -247,6 +285,49 @@ fn apply_routing_modulation(
 }
 
 #[inline]
+fn route_direct_to_bus(out: &mut VoiceBusOutput, dest: DirectDest, l: f32, r: f32) {
+    match dest {
+        DirectDest::Off => {}
+        DirectDest::BusA => {
+            out.bus_a_l += l;
+            out.bus_a_r += r;
+        }
+        DirectDest::BusB => {
+            out.bus_b_l += l;
+            out.bus_b_r += r;
+        }
+        DirectDest::Sub => {
+            out.sub_l += l;
+            out.sub_r += r;
+        }
+    }
+}
+
+#[inline]
+fn route_filter_to_bus(out: &mut VoiceBusOutput, dest: FilterBusDest, l: f32, r: f32) {
+    match dest {
+        FilterBusDest::BusA => {
+            out.bus_a_l += l;
+            out.bus_a_r += r;
+        }
+        FilterBusDest::BusB => {
+            out.bus_b_l += l;
+            out.bus_b_r += r;
+        }
+        FilterBusDest::Both => {
+            out.bus_a_l += l;
+            out.bus_a_r += r;
+            out.bus_b_l += l;
+            out.bus_b_r += r;
+        }
+        FilterBusDest::Sub => {
+            out.sub_l += l;
+            out.sub_r += r;
+        }
+    }
+}
+
+#[inline]
 #[allow(clippy::too_many_arguments)]
 fn process_voice_bus<F: StereoFilterStage>(
     oscillators: &mut [OscillatorState; 4],
@@ -255,13 +336,14 @@ fn process_voice_bus<F: StereoFilterStage>(
     noise: &mut NoiseState,
     filters: &mut [F; 2],
     inserts: &mut [InsertShaperState; 2],
+    inserts_aux: &mut [InsertShaperState; 2],
     feedback: &mut VoiceFeedbackState,
     params: &SynthParams,
     mod_offsets: &[f32; NUM_MOD_DESTS],
     tables: [&Wavetable; 4],
     effective_note: f32,
     sample_rate: f32,
-) -> (f32, f32) {
+) -> VoiceBusOutput {
     // C3 (MIDI 60) = 440 * 2^(-9/12) Hz
     const C3_HZ: f32 = 130.812_78;
     let base_hz = 440.0 * (2.0_f32).powf((effective_note - 69.0) / 12.0);
@@ -270,8 +352,7 @@ fn process_voice_bus<F: StereoFilterStage>(
     let mut f1_r = 0.0_f32;
     let mut f2_l = 0.0_f32;
     let mut f2_r = 0.0_f32;
-    let mut direct_l = 0.0_f32;
-    let mut direct_r = 0.0_f32;
+    let mut bus_out = VoiceBusOutput::default();
 
     let mod_oscs: [OscParams; 4] =
         std::array::from_fn(|i| apply_osc_modulation(&params.oscs[i], i, mod_offsets));
@@ -337,9 +418,8 @@ fn process_voice_bus<F: StereoFilterStage>(
         );
         osc_out[a] = raw;
         if osc_p.level > 0.0001 {
-            if mod_routing.osc_direct[a] {
-                direct_l += l;
-                direct_r += r;
+            if mod_routing.osc_direct[a] != DirectDest::Off {
+                route_direct_to_bus(&mut bus_out, mod_routing.osc_direct[a], l, r);
             } else {
                 split_filter_send(
                     l,
@@ -359,9 +439,8 @@ fn process_voice_bus<F: StereoFilterStage>(
     // Noise Generator
     let mod_noise = apply_noise_modulation(&params.noise, mod_offsets);
     let (nl, nr) = noise.process_sample(&mod_noise, sample_rate);
-    if mod_routing.noise_direct {
-        direct_l += nl;
-        direct_r += nr;
+    if mod_routing.noise_direct != DirectDest::Off {
+        route_direct_to_bus(&mut bus_out, mod_routing.noise_direct, nl, nr);
     } else {
         split_filter_send(
             nl,
@@ -402,7 +481,7 @@ fn process_voice_bus<F: StereoFilterStage>(
     if f2_has {
         (f2_l, f2_r) = run_inserts_at(
             InsertPosition::PreFilter,
-            inserts,
+            inserts_aux,
             &mod_routing,
             params.engine_mode,
             sample_rate,
@@ -431,14 +510,14 @@ fn process_voice_bus<F: StereoFilterStage>(
         out1_r,
     );
 
-    // Filter 2 + Serial / Parallel Bus Routing
+    // Filter 2 + Serial / Parallel Bus Routing + Parallel FX Bus Assignment
     let mix = mod_routing.filter_mix.clamp(-1.0, 1.0);
     let gain_f1 = (1.0 - mix).clamp(0.0, 1.0);
     let gain_f2 = (1.0 + mix).clamp(0.0, 1.0);
 
-    let (mut post_l, mut post_r) = match mod_routing.filter_routing {
+    match mod_routing.filter_routing {
         FilterRouting::Serial => {
-            if mod_flt1.enabled {
+            let (mut post_l, mut post_r, out_dest) = if mod_flt1.enabled {
                 let (out2_l, out2_r) = filters[1].process_filter(
                     out1_l + f2_l,
                     out1_r + f2_r,
@@ -447,19 +526,33 @@ fn process_voice_bus<F: StereoFilterStage>(
                     sample_rate,
                     params.engine_mode,
                 );
-                if mix >= 0.0 {
+                let mixed = if mix >= 0.0 {
                     (out2_l, out2_r)
                 } else {
                     let w1 = -mix;
                     let w2 = 1.0 + mix;
                     (out1_l * w1 + out2_l * w2, out1_r * w1 + out2_r * w2)
-                }
+                };
+                (mixed.0, mixed.1, mod_routing.filter_out_bus[1])
             } else {
                 (
                     out1_l * gain_f1 + f2_l * gain_f2,
                     out1_r * gain_f1 + f2_r * gain_f2,
+                    mod_routing.filter_out_bus[0],
                 )
-            }
+            };
+
+            (post_l, post_r) = run_inserts_at(
+                InsertPosition::PostFilter,
+                inserts,
+                &mod_routing,
+                params.engine_mode,
+                sample_rate,
+                post_l,
+                post_r,
+            );
+            feedback.store_post_filter(post_l, post_r);
+            route_filter_to_bus(&mut bus_out, out_dest, post_l, post_r);
         }
         FilterRouting::Parallel => {
             let (out2_l, out2_r) = filters[1].process_filter(
@@ -470,25 +563,66 @@ fn process_voice_bus<F: StereoFilterStage>(
                 sample_rate,
                 params.engine_mode,
             );
-            (
-                out1_l * gain_f1 + out2_l * gain_f2,
-                out1_r * gain_f1 + out2_r * gain_f2,
-            )
+            let b1_l = out1_l * gain_f1;
+            let b1_r = out1_r * gain_f1;
+            let b2_l = out2_l * gain_f2;
+            let b2_r = out2_r * gain_f2;
+
+            if mod_routing.filter_out_bus[0] == mod_routing.filter_out_bus[1] {
+                let (mut post_l, mut post_r) = (b1_l + b2_l, b1_r + b2_r);
+                (post_l, post_r) = run_inserts_at(
+                    InsertPosition::PostFilter,
+                    inserts,
+                    &mod_routing,
+                    params.engine_mode,
+                    sample_rate,
+                    post_l,
+                    post_r,
+                );
+                feedback.store_post_filter(post_l, post_r);
+                route_filter_to_bus(
+                    &mut bus_out,
+                    mod_routing.filter_out_bus[0],
+                    post_l,
+                    post_r,
+                );
+            } else {
+                let (post1_l, post1_r) = run_inserts_at(
+                    InsertPosition::PostFilter,
+                    inserts,
+                    &mod_routing,
+                    params.engine_mode,
+                    sample_rate,
+                    b1_l,
+                    b1_r,
+                );
+                let (post2_l, post2_r) = run_inserts_at(
+                    InsertPosition::PostFilter,
+                    inserts_aux,
+                    &mod_routing,
+                    params.engine_mode,
+                    sample_rate,
+                    b2_l,
+                    b2_r,
+                );
+                feedback.store_post_filter(post1_l + post2_l, post1_r + post2_r);
+                route_filter_to_bus(
+                    &mut bus_out,
+                    mod_routing.filter_out_bus[0],
+                    post1_l,
+                    post1_r,
+                );
+                route_filter_to_bus(
+                    &mut bus_out,
+                    mod_routing.filter_out_bus[1],
+                    post2_l,
+                    post2_r,
+                );
+            }
         }
-    };
+    }
 
-    (post_l, post_r) = run_inserts_at(
-        InsertPosition::PostFilter,
-        inserts,
-        &mod_routing,
-        params.engine_mode,
-        sample_rate,
-        post_l,
-        post_r,
-    );
-
-    feedback.store_post_filter(post_l, post_r);
-    (post_l + direct_l, post_r + direct_r)
+    bus_out
 }
 
 /// Pre-allocated polyphonic voice.
@@ -507,6 +641,7 @@ pub struct Voice {
     pub noise: NoiseState,
     pub filters: [FilterState; 2],
     pub inserts: [InsertShaperState; 2],
+    pub inserts_aux: [InsertShaperState; 2],
     pub feedback: VoiceFeedbackState,
     pub amp_env: AmpAdsr,
     pub mod_envs: [AmpAdsr; 3],
@@ -545,6 +680,7 @@ impl Voice {
             noise: NoiseState::new(),
             filters: [FilterState::new(20_000.0), FilterState::new(2_000.0)],
             inserts: [InsertShaperState::new(), InsertShaperState::new()],
+            inserts_aux: [InsertShaperState::new(), InsertShaperState::new()],
             feedback: VoiceFeedbackState::new(),
             amp_env: AmpAdsr::new(),
             mod_envs: [AmpAdsr::new(); 3],
@@ -577,6 +713,8 @@ impl Voice {
         self.noise.reset();
         self.inserts[0].reset();
         self.inserts[1].reset();
+        self.inserts_aux[0].reset();
+        self.inserts_aux[1].reset();
         self.feedback.reset();
         for f in &mut self.filters {
             f.reset();
@@ -673,9 +811,9 @@ impl Voice {
         tables: [&Wavetable; 4],
         sample_rate: f32,
         pitch_bend_semitones: f32,
-    ) -> (f32, f32) {
+    ) -> VoiceBusOutput {
         if !self.active {
-            return (0.0, 0.0);
+            return VoiceBusOutput::default();
         }
 
         // Portamento / Glide (with GlideMs modulation support)
@@ -703,17 +841,18 @@ impl Voice {
         if !self.amp_env.is_active() {
             self.active = false;
             self.releasing = false;
-            return (0.0, 0.0);
+            return VoiceBusOutput::default();
         }
 
         let effective_note = self.current_midi_note + pitch_bend_semitones;
-        let (post_l, post_r) = process_voice_bus(
+        let out = process_voice_bus(
             &mut self.oscillators,
             &mut self.osc_out,
             &mut self.prev_osc_out,
             &mut self.noise,
             &mut self.filters,
             &mut self.inserts,
+            &mut self.inserts_aux,
             &mut self.feedback,
             params,
             &self.mod_offsets,
@@ -722,7 +861,7 @@ impl Voice {
             sample_rate,
         );
 
-        (post_l * env_level, post_r * env_level)
+        out.scale(env_level)
     }
 }
 
@@ -739,6 +878,7 @@ pub struct TailVoice {
     pub noise: NoiseState,
     pub filter_cores: [FilterSvfCore; 2],
     pub inserts: [InsertShaperState; 2],
+    pub inserts_aux: [InsertShaperState; 2],
     pub feedback: VoiceFeedbackState,
     pub mod_offsets: [f32; NUM_MOD_DESTS],
     pub osc_out: [f32; 4],
@@ -769,6 +909,7 @@ impl TailVoice {
             noise: NoiseState::new(),
             filter_cores: [FilterSvfCore::new(20_000.0), FilterSvfCore::new(2_000.0)],
             inserts: [InsertShaperState::new(), InsertShaperState::new()],
+            inserts_aux: [InsertShaperState::new(), InsertShaperState::new()],
             feedback: VoiceFeedbackState::new(),
             mod_offsets: [0.0; NUM_MOD_DESTS],
             osc_out: [0.0; 4],
@@ -786,6 +927,8 @@ impl TailVoice {
         self.noise.reset();
         self.inserts[0].reset();
         self.inserts[1].reset();
+        self.inserts_aux[0].reset();
+        self.inserts_aux[1].reset();
         self.feedback.reset();
         for fc in &mut self.filter_cores {
             fc.reset_states();
@@ -806,6 +949,7 @@ impl TailVoice {
         self.noise = voice.noise;
         self.filter_cores = [voice.filters[0].core, voice.filters[1].core];
         self.inserts = voice.inserts;
+        self.inserts_aux = voice.inserts_aux;
         self.feedback = voice.feedback;
         self.mod_offsets = voice.mod_offsets;
         self.osc_out = voice.osc_out;
@@ -819,10 +963,10 @@ impl TailVoice {
         tables: [&Wavetable; 4],
         sample_rate: f32,
         pitch_bend_semitones: f32,
-    ) -> (f32, f32) {
+    ) -> VoiceBusOutput {
         if !self.active || self.fade_remaining == 0 {
             self.active = false;
-            return (0.0, 0.0);
+            return VoiceBusOutput::default();
         }
 
         let fade_gain = self.fade_remaining as f32 / self.fade_total as f32;
@@ -832,13 +976,14 @@ impl TailVoice {
         }
 
         let effective_note = self.current_midi_note + pitch_bend_semitones;
-        let (post_l, post_r) = process_voice_bus(
+        let out = process_voice_bus(
             &mut self.oscillators,
             &mut self.osc_out,
             &mut self.prev_osc_out,
             &mut self.noise,
             &mut self.filter_cores,
             &mut self.inserts,
+            &mut self.inserts_aux,
             &mut self.feedback,
             params,
             &self.mod_offsets,
@@ -848,6 +993,6 @@ impl TailVoice {
         );
 
         let gain = self.amp_at_steal * fade_gain;
-        (post_l * gain, post_r * gain)
+        out.scale(gain)
     }
 }

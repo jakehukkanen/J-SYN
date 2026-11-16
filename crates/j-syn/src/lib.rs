@@ -6,10 +6,11 @@ use std::sync::{Arc, Mutex};
 
 use arc_swap::ArcSwap;
 use j_syn_dsp::{
-    AdsrParams, EngineMode, FactoryWavetable, FilterMode, FilterParams, FilterRouting, FilterSlope,
-    InsertMode, InsertParams, InsertPosition, ModMatrixState, ModOrder, ModSeqMode, ModSeqParams,
-    ModSeqPlayMode, ModSeqRetrig, ModSeqStepBank, ModSeqSyncMode, ModSource, ModType,
-    NoiseParams, NoiseType, OscParams, PolyMode, RoutingParams, SynthEngine, SynthParams, WarpMode,
+    AdsrParams, DirectDest, EngineMode, FactoryWavetable, FilterBusDest, FilterMode, FilterParams,
+    FilterRouting, FilterSlope, FxBusParams, FxFilterSlope, InsertMode, InsertParams,
+    InsertPosition, ModMatrixState, ModOrder, ModSeqMode, ModSeqParams, ModSeqPlayMode,
+    ModSeqRetrig, ModSeqStepBank, ModSeqSyncMode, ModSource, ModType, NoiseParams, NoiseType,
+    OscParams, PolyMode, RoutingParams, SubBusParams, SynthEngine, SynthParams, WarpMode,
     Wavetable, WavetableBank,
 };
 use nih_plug::params::persist::PersistentField;
@@ -514,6 +515,52 @@ impl InsertSlotPluginParams {
     }
 }
 
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectRouteParam {
+    #[name = "Off"]
+    Off,
+    #[name = "Bus A"]
+    BusA,
+    #[name = "Bus B"]
+    BusB,
+    #[name = "Sub"]
+    Sub,
+}
+
+impl From<DirectRouteParam> for DirectDest {
+    fn from(v: DirectRouteParam) -> Self {
+        match v {
+            DirectRouteParam::Off => Self::Off,
+            DirectRouteParam::BusA => Self::BusA,
+            DirectRouteParam::BusB => Self::BusB,
+            DirectRouteParam::Sub => Self::Sub,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterBusParam {
+    #[name = "Bus A"]
+    BusA,
+    #[name = "Bus B"]
+    BusB,
+    #[name = "A+B"]
+    Both,
+    #[name = "Sub"]
+    Sub,
+}
+
+impl From<FilterBusParam> for FilterBusDest {
+    fn from(v: FilterBusParam) -> Self {
+        match v {
+            FilterBusParam::BusA => Self::BusA,
+            FilterBusParam::BusB => Self::BusB,
+            FilterBusParam::Both => Self::Both,
+            FilterBusParam::Sub => Self::Sub,
+        }
+    }
+}
+
 #[derive(Params)]
 pub struct RoutingPluginParams {
     #[id = "osc1_flt_bal"]
@@ -532,19 +579,25 @@ pub struct RoutingPluginParams {
     pub noise_flt_bal: FloatParam,
 
     #[id = "osc1_direct"]
-    pub osc1_direct: BoolParam,
+    pub osc1_direct: EnumParam<DirectRouteParam>,
 
     #[id = "osc2_direct"]
-    pub osc2_direct: BoolParam,
+    pub osc2_direct: EnumParam<DirectRouteParam>,
 
     #[id = "osc3_direct"]
-    pub osc3_direct: BoolParam,
+    pub osc3_direct: EnumParam<DirectRouteParam>,
 
     #[id = "osc4_direct"]
-    pub osc4_direct: BoolParam,
+    pub osc4_direct: EnumParam<DirectRouteParam>,
 
     #[id = "noise_direct"]
-    pub noise_direct: BoolParam,
+    pub noise_direct: EnumParam<DirectRouteParam>,
+
+    #[id = "f1_out_bus"]
+    pub f1_out_bus: EnumParam<FilterBusParam>,
+
+    #[id = "f2_out_bus"]
+    pub f2_out_bus: EnumParam<FilterBusParam>,
 
     #[id = "flt_routing"]
     pub filter_routing: EnumParam<FilterRoutingParam>,
@@ -567,11 +620,13 @@ impl Default for RoutingPluginParams {
             osc3_flt_bal: bipolar_percentage_param("OSC 3 Send", -1.0),
             osc4_flt_bal: bipolar_percentage_param("OSC 4 Send", -1.0),
             noise_flt_bal: bipolar_percentage_param("Noise Send", -1.0),
-            osc1_direct: BoolParam::new("OSC 1 Direct", false),
-            osc2_direct: BoolParam::new("OSC 2 Direct", false),
-            osc3_direct: BoolParam::new("OSC 3 Direct", false),
-            osc4_direct: BoolParam::new("OSC 4 Direct", false),
-            noise_direct: BoolParam::new("Noise Direct", false),
+            osc1_direct: EnumParam::new("OSC 1 Direct", DirectRouteParam::Off),
+            osc2_direct: EnumParam::new("OSC 2 Direct", DirectRouteParam::Off),
+            osc3_direct: EnumParam::new("OSC 3 Direct", DirectRouteParam::Off),
+            osc4_direct: EnumParam::new("OSC 4 Direct", DirectRouteParam::Off),
+            noise_direct: EnumParam::new("Noise Direct", DirectRouteParam::Off),
+            f1_out_bus: EnumParam::new("Filter 1 Out", FilterBusParam::BusA),
+            f2_out_bus: EnumParam::new("Filter 2 Out", FilterBusParam::BusA),
             filter_routing: EnumParam::new("Filter Routing", FilterRoutingParam::Serial),
             filter_mix: bipolar_percentage_param("Filter Mix", 0.0),
             inserts: [InsertSlotPluginParams::new(0), InsertSlotPluginParams::new(1)],
@@ -591,12 +646,16 @@ impl RoutingPluginParams {
             ],
             noise_filter_balance: self.noise_flt_bal.value(),
             osc_direct: [
-                self.osc1_direct.value(),
-                self.osc2_direct.value(),
-                self.osc3_direct.value(),
-                self.osc4_direct.value(),
+                self.osc1_direct.value().into(),
+                self.osc2_direct.value().into(),
+                self.osc3_direct.value().into(),
+                self.osc4_direct.value().into(),
             ],
-            noise_direct: self.noise_direct.value(),
+            noise_direct: self.noise_direct.value().into(),
+            filter_out_bus: [
+                self.f1_out_bus.value().into(),
+                self.f2_out_bus.value().into(),
+            ],
             filter_routing: self.filter_routing.value().into(),
             filter_mix: self.filter_mix.value(),
             inserts: [self.inserts[0].to_dsp(), self.inserts[1].to_dsp()],
@@ -1031,11 +1090,130 @@ pub struct JSynPluginParams {
     #[nested(array, group = "Master FX")]
     pub fx_slots: [FxSlotPluginParams; 8],
 
+    #[id = "bus_a_lvl"]
+    pub bus_a_level: FloatParam,
+
+    #[id = "bus_a_pan"]
+    pub bus_a_pan: FloatParam,
+
+    #[nested(id_prefix = "bus_b", group = "Bus B FX")]
+    pub fx_bus_b: FxBusPluginParams,
+
+    #[nested(id_prefix = "sub", group = "Sub Bus")]
+    pub sub_bus: SubBusPluginParams,
+
     #[nested(array, group = "Macros")]
     pub macros: [MacroPluginParams; 8],
 
     #[persist = "macro_names"]
     pub macro_names: Arc<Mutex<[String; 8]>>,
+}
+
+impl JSynPluginParams {
+    #[inline]
+    pub fn fx_bus_slots(&self, bus: usize) -> &[FxSlotPluginParams; 8] {
+        if bus == 0 {
+            &self.fx_slots
+        } else {
+            &self.fx_bus_b.slots
+        }
+    }
+
+    #[inline]
+    pub fn fx_bus_level_param(&self, bus: usize) -> &FloatParam {
+        if bus == 0 {
+            &self.bus_a_level
+        } else {
+            &self.fx_bus_b.level
+        }
+    }
+
+    #[inline]
+    pub fn fx_bus_pan_param(&self, bus: usize) -> &FloatParam {
+        if bus == 0 {
+            &self.bus_a_pan
+        } else {
+            &self.fx_bus_b.pan
+        }
+    }
+}
+
+fn fx_level_param(name: &str) -> FloatParam {
+    FloatParam::new(name, 1.0, FloatRange::Linear { min: 0.0, max: 2.0 })
+        .with_unit(" %")
+        .with_value_to_string(formatters::v2s_f32_percentage(0))
+        .with_string_to_value(formatters::s2v_f32_percentage())
+}
+
+#[derive(Params)]
+pub struct FxBusPluginParams {
+    #[id = "lvl"]
+    pub level: FloatParam,
+
+    #[id = "pan"]
+    pub pan: FloatParam,
+
+    #[nested(array, group = "Slots")]
+    pub slots: [FxSlotPluginParams; 8],
+}
+
+impl FxBusPluginParams {
+    pub fn new_bus_b() -> Self {
+        Self {
+            level: fx_level_param("Bus B Level"),
+            pan: bipolar_percentage_param("Bus B Pan", 0.0),
+            slots: std::array::from_fn(FxSlotPluginParams::new_slot),
+        }
+    }
+}
+
+#[derive(Params)]
+pub struct SubBusPluginParams {
+    #[id = "en"]
+    pub enabled: BoolParam,
+
+    #[id = "cutoff"]
+    pub cutoff: FloatParam,
+
+    #[id = "drive"]
+    pub drive: FloatParam,
+
+    #[id = "lvl"]
+    pub level: FloatParam,
+}
+
+impl Default for SubBusPluginParams {
+    fn default() -> Self {
+        Self {
+            enabled: BoolParam::new("Sub Bus", true),
+            cutoff: FloatParam::new(
+                "Sub LP Cutoff",
+                2_000.0,
+                FloatRange::Skewed {
+                    min: 20.0,
+                    max: 2_000.0,
+                    factor: FloatRange::skew_factor(-1.8),
+                },
+            )
+            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0))
+            .with_string_to_value(formatters::s2v_f32_hz_then_khz()),
+            drive: FloatParam::new("Sub Drive", 0.0, FloatRange::Linear { min: 0.0, max: 24.0 })
+                .with_unit(" dB")
+                .with_value_to_string(formatters::v2s_f32_rounded(1)),
+            level: fx_level_param("Sub Level"),
+        }
+    }
+}
+
+impl SubBusPluginParams {
+    pub fn to_dsp(&self) -> SubBusParams {
+        SubBusParams {
+            enabled: self.enabled.value(),
+            lp_cutoff_hz: self.cutoff.value(),
+            clip_drive_db: self.drive.value(),
+            level: self.level.value(),
+        }
+    }
 }
 
 #[derive(Params)]
@@ -1079,6 +1257,8 @@ pub enum FxTypeParam {
     Filter,
     #[name = "Phaser"]
     Phaser,
+    #[name = "Diopser"]
+    Diopser,
 }
 
 impl From<j_syn_dsp::FxType> for FxTypeParam {
@@ -1093,6 +1273,7 @@ impl From<j_syn_dsp::FxType> for FxTypeParam {
             j_syn_dsp::FxType::JSatClipper => Self::JSatClipper,
             j_syn_dsp::FxType::Filter => Self::Filter,
             j_syn_dsp::FxType::Phaser => Self::Phaser,
+            j_syn_dsp::FxType::Diopser => Self::Diopser,
         }
     }
 }
@@ -1109,6 +1290,64 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
             FxTypeParam::JSatClipper => Self::JSatClipper,
             FxTypeParam::Filter => Self::Filter,
             FxTypeParam::Phaser => Self::Phaser,
+            FxTypeParam::Diopser => Self::Diopser,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FxFilterSlopeParam {
+    #[name = "12 dB"]
+    Db12,
+    #[name = "24 dB"]
+    Db24,
+    #[name = "48 dB"]
+    Db48,
+}
+
+impl From<FxFilterSlopeParam> for FxFilterSlope {
+    fn from(v: FxFilterSlopeParam) -> Self {
+        match v {
+            FxFilterSlopeParam::Db12 => Self::Db12,
+            FxFilterSlopeParam::Db24 => Self::Db24,
+            FxFilterSlopeParam::Db48 => Self::Db48,
+        }
+    }
+}
+
+impl From<FxFilterSlope> for FxFilterSlopeParam {
+    fn from(v: FxFilterSlope) -> Self {
+        match v {
+            FxFilterSlope::Db12 => Self::Db12,
+            FxFilterSlope::Db24 => Self::Db24,
+            FxFilterSlope::Db48 => Self::Db48,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiopserStagesParam {
+    #[name = "8"]
+    S8,
+    #[name = "16"]
+    S16,
+    #[name = "32"]
+    S32,
+    #[name = "64"]
+    S64,
+    #[name = "128"]
+    S128,
+}
+
+impl DiopserStagesParam {
+    #[inline]
+    pub const fn to_index(self) -> u8 {
+        match self {
+            Self::S8 => 0,
+            Self::S16 => 1,
+            Self::S32 => 2,
+            Self::S64 => 3,
+            Self::S128 => 4,
         }
     }
 }
@@ -1129,6 +1368,20 @@ pub struct FxSlotPluginParams {
     pub p3: FloatParam,
     #[id = "fx_p4"]
     pub p4: FloatParam,
+    #[id = "fx_p5"]
+    pub p5: FloatParam,
+    #[id = "fx_p6"]
+    pub p6: FloatParam,
+    #[id = "fx_p7"]
+    pub p7: FloatParam,
+    #[id = "fx_p8"]
+    pub p8: FloatParam,
+    #[id = "fx_flt_m"]
+    pub filter_mode: EnumParam<FilterModeParam>,
+    #[id = "fx_flt_s"]
+    pub filter_slope: EnumParam<FxFilterSlopeParam>,
+    #[id = "fx_diop_s"]
+    pub diopser_stages: EnumParam<DiopserStagesParam>,
 }
 
 impl FxSlotPluginParams {
@@ -1149,11 +1402,58 @@ impl FxSlotPluginParams {
             p2: FloatParam::new("Param 2", init.params[1], FloatRange::Linear { min: 0.0, max: 1.0 }),
             p3: FloatParam::new("Param 3", init.params[2], FloatRange::Linear { min: 0.0, max: 1.0 }),
             p4: FloatParam::new("Param 4", init.params[3], FloatRange::Linear { min: 0.0, max: 1.0 }),
+            p5: FloatParam::new("Param 5", init.eq_params[0], FloatRange::Linear { min: 0.0, max: 1.0 }),
+            p6: FloatParam::new("Param 6", init.eq_params[1], FloatRange::Linear { min: 0.0, max: 1.0 }),
+            p7: FloatParam::new("Param 7", init.eq_params[2], FloatRange::Linear { min: 0.0, max: 1.0 }),
+            p8: FloatParam::new("Param 8", init.eq_params[3], FloatRange::Linear { min: 0.0, max: 1.0 }),
+            filter_mode: EnumParam::new("Filter Mode", FilterModeParam::Lp),
+            filter_slope: EnumParam::new("Filter Slope", FxFilterSlopeParam::Db12),
+            diopser_stages: EnumParam::new("Diopser Stages", DiopserStagesParam::S32),
         }
     }
 
     pub fn params_array(&self) -> [&FloatParam; 4] {
         [&self.p1, &self.p2, &self.p3, &self.p4]
+    }
+
+    pub fn eq_params_array(&self) -> [&FloatParam; 4] {
+        [&self.p5, &self.p6, &self.p7, &self.p8]
+    }
+
+    pub fn param_at(&self, idx: usize) -> &FloatParam {
+        match idx {
+            0 => &self.p1,
+            1 => &self.p2,
+            2 => &self.p3,
+            3 => &self.p4,
+            4 => &self.p5,
+            5 => &self.p6,
+            6 => &self.p7,
+            _ => &self.p8,
+        }
+    }
+
+    pub fn to_dsp(&self) -> j_syn_dsp::FxSlotParams {
+        j_syn_dsp::FxSlotParams {
+            fx_type: self.fx_type.value().into(),
+            enabled: self.enabled.value(),
+            stack: self.stack.value().clamp(1, 4) as u8,
+            params: [
+                self.p1.value(),
+                self.p2.value(),
+                self.p3.value(),
+                self.p4.value(),
+            ],
+            eq_params: [
+                self.p5.value(),
+                self.p6.value(),
+                self.p7.value(),
+                self.p8.value(),
+            ],
+            filter_mode: self.filter_mode.value().into(),
+            filter_slope: self.filter_slope.value().into(),
+            diopser_stages: self.diopser_stages.value().to_index(),
+        }
     }
 }
 
@@ -1225,7 +1525,11 @@ impl Default for JSynPluginParams {
             routing: RoutingPluginParams::default(),
             mod_envs: std::array::from_fn(|_| ModEnvPluginParams::default()),
             modseqs: std::array::from_fn(|_| ModSeqPluginParams::default()),
-            fx_slots: std::array::from_fn(|i| FxSlotPluginParams::new_slot(i)),
+            fx_slots: std::array::from_fn(FxSlotPluginParams::new_slot),
+            bus_a_level: fx_level_param("Bus A Level"),
+            bus_a_pan: bipolar_percentage_param("Bus A Pan", 0.0),
+            fx_bus_b: FxBusPluginParams::new_bus_b(),
+            sub_bus: SubBusPluginParams::default(),
             macros: std::array::from_fn(MacroPluginParams::new),
             macro_names: Arc::new(Mutex::new(std::array::from_fn(|i| {
                 format!("MACRO {}", i + 1)
@@ -1380,17 +1684,17 @@ impl Plugin for JSynPlugin {
             modseq_steps,
             mod_matrix,
             macros: std::array::from_fn(|i| self.params.macros[i].value.value()),
-            fx_slots: std::array::from_fn(|i| j_syn_dsp::FxSlotParams {
-                fx_type: self.params.fx_slots[i].fx_type.value().into(),
-                enabled: self.params.fx_slots[i].enabled.value(),
-                stack: self.params.fx_slots[i].stack.value().clamp(1, 4) as u8,
-                params: [
-                    self.params.fx_slots[i].p1.value(),
-                    self.params.fx_slots[i].p2.value(),
-                    self.params.fx_slots[i].p3.value(),
-                    self.params.fx_slots[i].p4.value(),
-                ],
-            }),
+            fx_bus_a: FxBusParams {
+                slots: std::array::from_fn(|i| self.params.fx_slots[i].to_dsp()),
+                level: self.params.bus_a_level.value(),
+                pan: self.params.bus_a_pan.value(),
+            },
+            fx_bus_b: FxBusParams {
+                slots: std::array::from_fn(|i| self.params.fx_bus_b.slots[i].to_dsp()),
+                level: self.params.fx_bus_b.level.value(),
+                pan: self.params.fx_bus_b.pan.value(),
+            },
+            sub_bus: self.params.sub_bus.to_dsp(),
             tempo_bpm,
             dc_blocker: self.params.dc_blocker.value(),
             master_limiter: self.params.master_limiter.value(),
@@ -1599,7 +1903,10 @@ mod tests {
         // Verify idle processing with default FX slots and active-patch FX slots produces silence quickly.
         let default_params = j_syn_dsp::SynthParams::default();
         let mut patch_fx_params = j_syn_dsp::SynthParams::default();
-        for (slot_idx, slot) in patch_fx_params.fx_slots.iter_mut().enumerate() {
+        for (slot_idx, slot) in patch_fx_params.fx_bus_a.slots.iter_mut().enumerate() {
+            *slot = j_syn_dsp::fx::FxSlotParams::init_patch_slot(slot_idx);
+        }
+        for (slot_idx, slot) in patch_fx_params.fx_bus_b.slots.iter_mut().enumerate() {
             *slot = j_syn_dsp::fx::FxSlotParams::init_patch_slot(slot_idx);
         }
 
@@ -1658,5 +1965,17 @@ mod tests {
         assert!((decoded.mod_matrix.slots[0].curve - 0.35).abs() < 1e-6);
         assert!(decoded.params.contains_key("dc_blocker"));
         assert!(decoded.params.contains_key("master_limiter"));
+        assert!(decoded.params.contains_key("bus_a_lvl"));
+        assert!(decoded.params.contains_key("bus_b_lvl"));
+        assert!(decoded.params.contains_key("bus_b_fx_en_1"));
+        assert!(decoded.params.contains_key("sub_en"));
+        assert!(decoded.params.contains_key("sub_cutoff"));
+        assert!(decoded.params.contains_key("sub_drive"));
+        assert!(decoded.params.contains_key("sub_lvl"));
+        assert!(decoded.params.contains_key("fx_p5_1"));
+        assert!(decoded.params.contains_key("fx_flt_m_1"));
+        assert!(decoded.params.contains_key("fx_diop_s_1"));
+        assert!(decoded.params.contains_key("f1_out_bus"));
+        assert!(decoded.params.contains_key("f2_out_bus"));
     }
 }

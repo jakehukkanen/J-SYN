@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use crate::fx::FxRackState;
+use crate::fx::{FxRackParams, FxRackState};
 use crate::mod_matrix::{ModDestination, ModUiTelemetry, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS};
 use crate::modseq::{ModSeqRetrig, ModSeqState};
 use crate::oscillator::EngineMode;
-use crate::voice::{PolyMode, SynthParams, TailVoice, Voice};
+use crate::voice::{PolyMode, SynthParams, TailVoice, Voice, VoiceBusOutput};
 use crate::wavetable::{Wavetable, WavetableBank};
 
 pub const MAX_VOICES: usize = 64;
@@ -590,8 +590,12 @@ impl SynthEngine {
             }
         }
 
-        let mut mix_l = 0.0_f32;
-        let mut mix_r = 0.0_f32;
+        let mut sum_a_l = 0.0_f32;
+        let mut sum_a_r = 0.0_f32;
+        let mut sum_b_l = 0.0_f32;
+        let mut sum_b_r = 0.0_f32;
+        let mut sum_sub_l = 0.0_f32;
+        let mut sum_sub_r = 0.0_f32;
 
         if any_voices || any_tail {
             let mut cr_params = *params;
@@ -607,14 +611,19 @@ impl SynthEngine {
             }
 
             let pb_semi = self.pitch_bend_smoothed * params.pitch_bend_range;
+            let mut accum = |o: VoiceBusOutput| {
+                sum_a_l += o.bus_a_l;
+                sum_a_r += o.bus_a_r;
+                sum_b_l += o.bus_b_l;
+                sum_b_r += o.bus_b_r;
+                sum_sub_l += o.sub_l;
+                sum_sub_r += o.sub_r;
+            };
 
             if any_voices {
                 for v in &mut self.voices {
                     if v.active {
-                        let (vl, vr) =
-                            v.process_sample(&cr_params, tables, self.sample_rate, pb_semi);
-                        mix_l += vl;
-                        mix_r += vr;
+                        accum(v.process_sample(&cr_params, tables, self.sample_rate, pb_semi));
                     }
                 }
             }
@@ -622,10 +631,7 @@ impl SynthEngine {
             if any_tail {
                 for tv in &mut self.tail_voices {
                     if tv.active {
-                        let (tl, tr) =
-                            tv.process_sample(&cr_params, tables, self.sample_rate, pb_semi);
-                        mix_l += tl;
-                        mix_r += tr;
+                        accum(tv.process_sample(&cr_params, tables, self.sample_rate, pb_semi));
                     }
                 }
             }
@@ -635,15 +641,18 @@ impl SynthEngine {
             self.publish_telemetry(params);
         }
 
-        // Polyphonic headroom scaling (~-9 dB) -> Master FX Rack -> master gain
+        // Polyphonic headroom scaling (~-9 dB) -> Parallel FX Buses (Bus A / Bus B / Sub) -> master gain
         const HEADROOM: f32 = 0.35;
-        let pre_l = mix_l * HEADROOM;
-        let pre_r = mix_r * HEADROOM;
         let fx_mod = Self::current_global_fx_mod_offsets(&self.voices, &self.idle_mod_offsets);
-        let (fx_l, fx_r) = self.fx_rack.process_sample(
-            pre_l,
-            pre_r,
-            &params.fx_slots,
+        let rack = FxRackParams {
+            buses: [params.fx_bus_a, params.fx_bus_b],
+            sub: params.sub_bus,
+        };
+        let (fx_l, fx_r) = self.fx_rack.process_buses_sample(
+            (sum_a_l * HEADROOM, sum_a_r * HEADROOM),
+            (sum_b_l * HEADROOM, sum_b_r * HEADROOM),
+            (sum_sub_l * HEADROOM, sum_sub_r * HEADROOM),
+            &rack,
             fx_mod,
             params.tempo_bpm,
             Some(&self.telemetry),

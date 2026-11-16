@@ -21,11 +21,14 @@ pub use filter::{
     FilterSvfCore, StereoZdfSvf, COMB_BUF_LEN,
 };
 pub use fx::{
-    FxRackState, FxSlotParams, FxType, DELAY_SYNC_LABELS, MAX_FX_STACK, NUM_FX_SLOTS,
+    diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, filter_response_db_from_slot,
+    fx_high_cut_hz, fx_low_cut_hz, sub_cutoff_hz_to_norm, sub_cutoff_norm_to_hz, FxBusParams,
+    FxFilterSlope, FxRackParams, FxRackState, FxSlotParams, FxType, SubBusParams,
+    DELAY_SYNC_LABELS, DIOPSER_STAGE_COUNTS, MAX_FX_STACK, NUM_FX_BUSES, NUM_FX_SLOTS,
 };
 pub use insert::{
-    FilterRouting, InsertMode, InsertParams, InsertPosition, InsertShaperState, InsertState,
-    RoutingParams, VoiceFeedbackState,
+    DirectDest, FilterBusDest, FilterRouting, InsertMode, InsertParams, InsertPosition,
+    InsertShaperState, InsertState, RoutingParams, VoiceFeedbackState,
 };
 pub use mod_matrix::{
     FxScopeRing, ModDestination, ModMatrixSource, ModMatrixState, ModSlot, ModUiTelemetry,
@@ -45,7 +48,7 @@ pub use oscillator::{
     sample_with_warp_and_pm, warp_phase_bend, EngineMode, ModOrder, ModSource, ModType, OscParams,
     OscillatorState, WarpMode, MAX_UNISON,
 };
-pub use voice::{PolyMode, SynthParams, TailVoice, Voice};
+pub use voice::{PolyMode, SynthParams, TailVoice, Voice, VoiceBusOutput};
 pub use wavetable::{
     FactoryWavetable, Wavetable, WavetableBank, FRAME_LEN, MAX_FRAMES, NUM_FACTORY_WAVETABLES,
     NUM_MIP_LEVELS,

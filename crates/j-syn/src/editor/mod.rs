@@ -30,6 +30,7 @@ use crate::JSynPluginParams;
 mod controls;
 mod filter_panel;
 mod fx_rack;
+mod fx_scopes;
 mod insert_panel;
 mod macros_tab;
 mod mod_bar;
@@ -133,6 +134,7 @@ pub(crate) enum UiEvent {
     SelectViewMode(MainViewMode),
     SelectTab(BottomTab),
     SelectModSeqSubTab(ModSeqSubTab),
+    SelectMainFxBus(usize),
     ModUiChanged,
     ModValChanged,
     SetUiScale(u32),
@@ -169,6 +171,7 @@ pub(crate) struct UiData {
     pub view_mode: MainViewMode,
     pub active_tab: BottomTab,
     pub modseq_subtab: ModSeqSubTab,
+    pub main_fx_bus: usize,
     pub mod_ui_rev: u64,
     pub mod_val_rev: u64,
     pub ui_scale_pct: u32,
@@ -214,6 +217,13 @@ impl Model for UiData {
             UiEvent::SelectModSeqSubTab(sub) => {
                 self.modseq_subtab = *sub;
                 self.mod_ui.set_modseq_subtab(*sub);
+                self.tooltip.visible = false;
+                meta.consume();
+            }
+            UiEvent::SelectMainFxBus(bus) => {
+                let next = (*bus).min(1);
+                self.main_fx_bus = next;
+                self.mod_ui.set_main_fx_bus(next);
                 self.tooltip.visible = false;
                 meta.consume();
             }
@@ -1175,6 +1185,7 @@ pub(crate) fn create(
             view_mode: MainViewMode::Main,
             active_tab: BottomTab::VoiceEnv,
             modseq_subtab: ModSeqSubTab::MSeq(0),
+            main_fx_bus: 0,
             mod_ui_rev: 0,
             mod_val_rev: 0,
             ui_scale_pct: initial_scale_pct,

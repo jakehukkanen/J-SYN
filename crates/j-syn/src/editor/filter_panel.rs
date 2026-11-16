@@ -41,7 +41,7 @@ fn filter_enabled_fn(filter_idx: usize) -> fn(&JSynPluginParams) -> bool {
     }
 }
 
-const FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
+pub(super) const FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
     ("LP", FilterModeParam::Lp),
     ("BP", FilterModeParam::Bp),
     ("HP", FilterModeParam::Hp),

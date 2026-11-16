@@ -84,13 +84,54 @@ impl Default for InsertParams {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DirectDest {
+    #[default]
+    Off = 0,
+    BusA = 1,
+    BusB = 2,
+    Sub = 3,
+}
+
+impl DirectDest {
+    pub const fn from_index(idx: usize) -> Self {
+        match idx {
+            1 => Self::BusA,
+            2 => Self::BusB,
+            3 => Self::Sub,
+            _ => Self::Off,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FilterBusDest {
+    #[default]
+    BusA = 0,
+    BusB = 1,
+    Both = 2,
+    Sub = 3,
+}
+
+impl FilterBusDest {
+    pub const fn from_index(idx: usize) -> Self {
+        match idx {
+            1 => Self::BusB,
+            2 => Self::Both,
+            3 => Self::Sub,
+            _ => Self::BusA,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RoutingParams {
     pub osc_filter_balance: [f32; 4], // -1.0 (F1) to +1.0 (F2)
     pub noise_filter_balance: f32,    // -1.0 (F1) to +1.0 (F2)
-    pub osc_direct: [bool; 4],
-    pub noise_direct: bool,
+    pub osc_direct: [DirectDest; 4],
+    pub noise_direct: DirectDest,
     pub filter_routing: FilterRouting,
+    pub filter_out_bus: [FilterBusDest; 2],
     pub filter_mix: f32,              // -1.0 (F1) to +1.0 (F2), default 0.0
     pub inserts: [InsertParams; 2],
     pub feedback_amount: f32,         // 0.0 to 1.0
@@ -101,9 +142,10 @@ impl Default for RoutingParams {
         Self {
             osc_filter_balance: [-1.0; 4],
             noise_filter_balance: -1.0,
-            osc_direct: [false; 4],
-            noise_direct: false,
+            osc_direct: [DirectDest::Off; 4],
+            noise_direct: DirectDest::Off,
             filter_routing: FilterRouting::Serial,
+            filter_out_bus: [FilterBusDest::BusA, FilterBusDest::BusA],
             filter_mix: 0.0,
             inserts: [InsertParams::default(), InsertParams::default()],
             feedback_amount: 0.0,

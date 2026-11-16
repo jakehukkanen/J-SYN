@@ -738,7 +738,7 @@ fn insert_waveshaper_modes_positions_and_voice_feedback() {
 #[test]
 fn direct_out_bypasses_filters_inserts_and_feedback() {
     use j_syn_dsp::{
-        FilterMode, FilterParams, FilterSlope, InsertMode, InsertPosition, SynthEngine,
+        DirectDest, FilterMode, FilterParams, FilterSlope, InsertMode, InsertPosition, SynthEngine,
         SynthParams, WavetableBank,
     };
 
@@ -751,7 +751,11 @@ fn direct_out_bypasses_filters_inserts_and_feedback() {
         params.amp_attack_s = 0.001;
         params.oscs[0].level = 1.0;
         params.oscs[0].wt_pos = 0.0;
-        params.routing.osc_direct[0] = osc_direct;
+        params.routing.osc_direct[0] = if osc_direct {
+            DirectDest::BusA
+        } else {
+            DirectDest::Off
+        };
         params.filters[0] = FilterParams {
             enabled: filters_on,
             mode: FilterMode::Lp,
@@ -1593,11 +1597,13 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
         FxType::Chorus,
     ];
     for (idx, &fx_type) in test_types.iter().enumerate() {
-        init_params.fx_slots[idx] = FxSlotParams {
+        init_params.fx_bus_a.slots[idx] = FxSlotParams {
             fx_type,
             enabled: true,
             stack: 1,
             params: FxSlotParams::default_params_for_type(fx_type),
+            eq_params: FxSlotParams::default_eq_params_for_type(fx_type),
+            ..FxSlotParams::default()
         };
     }
 
@@ -1613,25 +1619,27 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
 
     let mut pre_buf = [0.0_f32; FX_SCOPE_LEN];
     let mut post_buf = [0.0_f32; FX_SCOPE_LEN];
-    let _ = eng.telemetry().fx_scopes[3].read_snapshot(&mut pre_buf, &mut post_buf);
+    let _ = eng.telemetry().fx_scope(0, 3).read_snapshot(&mut pre_buf, &mut post_buf);
     assert!(pre_buf.iter().any(|&v| v > 0.0), "Expected live FX scope telemetry");
 
     // 2. Series STACK 4 vs STACK 1 changes output energy and J-SAT ceiling clipping limits post peak
     let run_peak = |stack: u8, ceil_norm: f32, mod_wheel: f32| -> f32 {
         let mut p = SynthParams::default();
-        p.fx_slots = [FxSlotParams::default(); NUM_FX_SLOTS];
-        p.fx_slots[0] = FxSlotParams {
+        p.fx_bus_a.slots = [FxSlotParams::default(); NUM_FX_SLOTS];
+        p.fx_bus_a.slots[0] = FxSlotParams {
             fx_type: FxType::Distortion,
             enabled: true,
             stack,
             params: [0.0, 0.75, 0.5, 1.0],
+            ..FxSlotParams::default()
         };
-        p.fx_slots[1] = FxSlotParams {
+        p.fx_bus_a.slots[1] = FxSlotParams {
             fx_type: FxType::JSatClipper,
             enabled: true,
             stack: 1,
             // Drive +12 dB (0.50), Ceiling configurable, Knee 0% (hard clip), Mix 100%
             params: [0.50, ceil_norm, 0.0, 1.0],
+            ..FxSlotParams::default()
         };
         p.mod_matrix.slots[0] = ModSlot {
             source: ModMatrixSource::ModWheel,
@@ -1728,18 +1736,23 @@ fn filter_notch_peak_and_normalized_cutoff_modulation() {
 
 #[test]
 fn fx_filter_all_modes_and_macro_mod_sources() {
-    use j_syn_dsp::{FxSlotParams, FxType, ModDestination, ModMatrixSource, ModSlot};
+    use j_syn_dsp::{
+        FilterMode, FxFilterSlope, FxSlotParams, FxType, ModDestination, ModMatrixSource, ModSlot,
+    };
 
     let bank = WavetableBank::new();
-    // All 7 FxType::Filter modes process cleanly with finite output
-    for mode_idx in 0..7 {
+    // All 15 FxType::Filter modes process cleanly with finite audible output
+    for mode_idx in 0..15 {
         let mut p = SynthParams::default();
-        p.oscs[0].wt_pos = 0.75; // rich harmonics so HP/BP modes are audible
-        p.fx_slots[0] = FxSlotParams {
+        p.oscs[0].wt_pos = 0.75; // rich harmonics so HP/BP/Notch/Comb modes are audible
+        p.fx_bus_a.slots[0] = FxSlotParams {
             fx_type: FxType::Filter,
             enabled: true,
             stack: 1,
-            params: [0.45, 0.4, (mode_idx as f32) / 6.0, 1.0],
+            params: [0.45, 0.4, 0.25, 1.0],
+            filter_mode: FilterMode::from_index(mode_idx),
+            filter_slope: FxFilterSlope::Db24,
+            ..FxSlotParams::default()
         };
         let mut eng = SynthEngine::new(48_000.0);
         eng.note_on(0, 57, 1.0, None, &p);
@@ -2005,16 +2018,17 @@ fn filter_bandreject_peakpeak_notchnotch_and_combo_slopes() {
 #[test]
 fn fx_phaser_processes_stereo_and_idle_recovery() {
     use j_syn_dsp::{
-        FxRackState, FxSlotParams, FxType, ModUiTelemetry, NUM_FX_SLOTS, NUM_MOD_DESTS,
+        FxRackParams, FxRackState, FxSlotParams, FxType, ModUiTelemetry, NUM_MOD_DESTS,
     };
 
     let mut rack = FxRackState::new(48_000.0);
-    let mut slots = [FxSlotParams::default(); NUM_FX_SLOTS];
-    slots[0] = FxSlotParams {
+    let mut rack_params = FxRackParams::default();
+    rack_params.buses[0].slots[0] = FxSlotParams {
         fx_type: FxType::Phaser,
         enabled: true,
         stack: 1,
         params: [0.65, 0.85, 0.65, 1.0],
+        ..FxSlotParams::default()
     };
     let deltas = [0.0_f32; NUM_MOD_DESTS];
     let tel = ModUiTelemetry::new();
@@ -2024,7 +2038,15 @@ fn fx_phaser_processes_stereo_and_idle_recovery() {
     for i in 0..4096 {
         let phase = ((i as f32) * 180.0 / 48_000.0).fract();
         let x = (phase * 2.0 - 1.0) * 0.4;
-        let (l, r) = rack.process_sample(x, x, &slots, &deltas, 120.0, Some(&tel));
+        let (l, r) = rack.process_buses_sample(
+            (x, x),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            &rack_params,
+            &deltas,
+            120.0,
+            Some(&tel),
+        );
         assert!(l.is_finite() && r.is_finite() && l.abs() < 4.0 && r.abs() < 4.0);
         out_peak = out_peak.max(l.abs()).max(r.abs());
         stereo_diff = stereo_diff.max((l - r).abs());
@@ -2034,15 +2056,308 @@ fn fx_phaser_processes_stereo_and_idle_recovery() {
 
     let mut tail_peak = 0.0_f32;
     for _ in 0..8192 {
-        let (l, r) = rack.process_sample(0.0, 0.0, &slots, &deltas, 120.0, None);
+        let (l, r) = rack.process_buses_sample(
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            &rack_params,
+            &deltas,
+            120.0,
+            None,
+        );
         assert!(l.is_finite() && r.is_finite());
         tail_peak = tail_peak.max(l.abs()).max(r.abs());
     }
     // Check final tail block settles cleanly to zero
     let mut end_peak = 0.0_f32;
     for _ in 0..512 {
-        let (l, r) = rack.process_sample(0.0, 0.0, &slots, &deltas, 120.0, None);
+        let (l, r) = rack.process_buses_sample(
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            &rack_params,
+            &deltas,
+            120.0,
+            None,
+        );
         end_peak = end_peak.max(l.abs()).max(r.abs());
     }
     assert!(end_peak < 1e-6 && tail_peak < 2.0, "Phaser idle decay failed: end_peak={end_peak}");
+}
+
+#[test]
+fn parallel_fx_buses_and_sub_bus_routing_and_modulation() {
+    use j_syn_dsp::{
+        DirectDest, FilterBusDest, FilterRouting, FxSlotParams, FxType, ModDestination,
+        ModMatrixSource, ModSlot, SynthEngine, SynthParams, WavetableBank,
+    };
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    // 1. DirectDest::Sub bypasses Filter 1 (even at 30 Hz cutoff) and Bus A/B muted levels,
+    //    Sub LP Cutoff rolls off high harmonics, and Sub Clip Drive saturates cleanly.
+    let run_sub = |lp_cutoff_hz: f32, drive_db: f32, sub_enabled: bool| -> f32 {
+        let mut p = SynthParams::default();
+        p.amp_attack_s = 0.001;
+        p.oscs[0].level = 0.8;
+        p.oscs[0].wt_pos = 0.8; // bright wave
+        p.routing.osc_direct[0] = DirectDest::Sub;
+        p.filters[0].cutoff_hz = 30.0; // would crush highs if not direct
+        p.fx_bus_a.level = 0.0;
+        p.fx_bus_b.level = 0.0;
+        p.sub_bus.enabled = sub_enabled;
+        p.sub_bus.lp_cutoff_hz = lp_cutoff_hz;
+        p.sub_bus.clip_drive_db = drive_db;
+        p.sub_bus.level = 1.0;
+
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.note_on(0, 72, 1.0, None, &p); // C5 (523 Hz)
+        let mut sq = 0.0_f32;
+        for _ in 0..4096 {
+            let (l, r) = eng.process_sample(&p, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            sq += 0.5 * (l * l + r * r);
+        }
+        (sq / 4096.0).sqrt()
+    };
+
+    let rms_sub_open = run_sub(2_000.0, 0.0, true);
+    let rms_sub_driven = run_sub(2_000.0, 24.0, true);
+    let rms_sub_low = run_sub(80.0, 0.0, true);
+    let rms_sub_off = run_sub(2_000.0, 0.0, false);
+    assert!(
+        rms_sub_open > 0.01,
+        "Sub bus should carry bright C5 direct signal: open={rms_sub_open}, low={rms_sub_low}, off={rms_sub_off}"
+    );
+    assert!(
+        rms_sub_driven > rms_sub_open * 2.0 && rms_sub_driven < 1.0,
+        "Sub Clipper +24 dB drive must saturate & boost RMS cleanly: dry={rms_sub_open}, driven={rms_sub_driven}"
+    );
+    assert!(rms_sub_low < rms_sub_open * 0.25, "Sub LP 80 Hz must attenuate C5: {rms_sub_low} vs {rms_sub_open}");
+    assert_eq!(rms_sub_off, 0.0, "Disabled Sub bus should output silence when Buses A & B muted");
+
+    // 2. Parallel Filter routing: Filter 1 -> Bus A (panned Left), Filter 2 -> Bus B (panned Right)
+    let mut mp = SynthParams::default();
+    mp.amp_attack_s = 0.001;
+    mp.oscs[0].enabled = true;
+    mp.oscs[0].level = 0.8;
+    mp.oscs[1].enabled = true;
+    mp.oscs[1].level = 0.8;
+    mp.routing.filter_routing = FilterRouting::Parallel;
+    mp.routing.osc_filter_balance[0] = -1.0; // Osc 1 -> Filter 1 only
+    mp.routing.osc_filter_balance[1] = 1.0; // Osc 2 -> Filter 2 only
+    mp.routing.filter_out_bus = [FilterBusDest::BusA, FilterBusDest::BusB];
+    mp.filters[1].enabled = true;
+    mp.filters[1].cutoff_hz = 20_000.0;
+    mp.fx_bus_a.pan = -1.0; // hard left
+    mp.fx_bus_b.pan = 1.0; // hard right
+    mp.fx_bus_b.slots[0] = FxSlotParams {
+        fx_type: FxType::Distortion,
+        enabled: true,
+        stack: 1,
+        params: [0.0, 0.5, 0.5, 1.0],
+        ..FxSlotParams::default()
+    };
+
+    let mut eng = SynthEngine::new(sample_rate);
+    eng.note_on(0, 57, 1.0, None, &mp);
+    let (mut l_sq, mut r_sq) = (0.0_f32, 0.0_f32);
+    for _ in 0..2048 {
+        let (l, r) = eng.process_sample(&mp, &bank);
+        l_sq += l * l;
+        r_sq += r * r;
+    }
+    assert!(l_sq > 0.01 && r_sq > 0.01, "Expected both Bus A (L) and Bus B (R) active: l={l_sq}, r={r_sq}");
+
+    // Now mute Bus A via Macro1 -> BusALevel (-1.0 depth), leaving only Right channel (Bus B)
+    mp.mod_matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::Macro1,
+        destination: ModDestination::BusALevel,
+        depth: -1.0,
+        bipolar: false,
+        enabled: true,
+        ..ModSlot::default()
+    };
+    mp.macros[0] = 1.0;
+    let mut eng_muted = SynthEngine::new(sample_rate);
+    eng_muted.note_on(0, 57, 1.0, None, &mp);
+    let (mut ml_sq, mut mr_sq) = (0.0_f32, 0.0_f32);
+    for _ in 0..2048 {
+        let (l, r) = eng_muted.process_sample(&mp, &bank);
+        ml_sq += l * l;
+        mr_sq += r * r;
+    }
+    assert!(ml_sq < 1e-6 && mr_sq > 0.01, "Expected Bus A muted on L while Bus B remains on R: l={ml_sq}, r={mr_sq}");
+}
+
+#[test]
+fn fx_diopser_stages_stacking_dispersion_and_idle() {
+    use j_syn_dsp::{
+        diopser_freq_hz, evaluate_diopser_ripple, FxRackParams, FxRackState, FxSlotParams, FxType,
+        ModUiTelemetry, NUM_MOD_DESTS,
+    };
+
+    let deltas = [0.0_f32; NUM_MOD_DESTS];
+    let tel = ModUiTelemetry::new();
+
+    // Verify ripple curve peaks around center frequency for all stage counts
+    let p_diop = [0.5, 0.85, 0.0, 1.0];
+    let center_hz = diopser_freq_hz(p_diop[0]);
+    for stages_idx in 0..5 {
+        let peak_val = evaluate_diopser_ripple(p_diop, stages_idx, 1, center_hz);
+        let far_val = evaluate_diopser_ripple(p_diop, stages_idx, 1, 20_000.0);
+        assert!(
+            peak_val > far_val * 2.0,
+            "Diopser ripple should peak near center {center_hz} Hz (stages_idx={stages_idx}: peak={peak_val}, far={far_val})"
+        );
+
+        let mut rack = FxRackState::new(48_000.0);
+        let mut rp = FxRackParams::default();
+        rp.buses[0].slots[0] = FxSlotParams {
+            fx_type: FxType::Diopser,
+            enabled: true,
+            stack: 2,
+            params: [0.45, 0.75, 0.35, 1.0],
+            diopser_stages: stages_idx as u8,
+            ..FxSlotParams::default()
+        };
+
+        // Transient impulse dispersion + clean decay to silence
+        let mut max_abs = 0.0_f32;
+        for i in 0..4096 {
+            let imp = if i == 0 { 0.8 } else { 0.0 };
+            let (l, r) = rack.process_buses_sample(
+                (imp, imp),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                &rp,
+                &deltas,
+                120.0,
+                Some(&tel),
+            );
+            assert!(l.is_finite() && r.is_finite());
+            max_abs = max_abs.max(l.abs()).max(r.abs());
+        }
+        assert!(max_abs > 0.1 && max_abs <= 1.5, "Unexpected Diopser impulse peak {max_abs}");
+
+        for _ in 0..140_000 {
+            let _ = rack.process_buses_sample(
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                &rp,
+                &deltas,
+                120.0,
+                None,
+            );
+        }
+        let (end_l, end_r) = rack.process_buses_sample(
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            &rp,
+            &deltas,
+            120.0,
+            None,
+        );
+        assert!(end_l.abs() < 1e-6 && end_r.abs() < 1e-6, "Diopser did not settle idle cleanly");
+    }
+}
+
+#[test]
+fn fx_reverb_delay_chorus_eq_subtabs_and_bus_b_modulation() {
+    use j_syn_dsp::{
+        FxRackParams, FxRackState, FxSlotParams, FxType, ModDestination, ModUiTelemetry,
+        NUM_MOD_DESTS,
+    };
+
+    let deltas = [0.0_f32; NUM_MOD_DESTS];
+
+    // Delay Ping-Pong: feed Left channel only -> Right channel receives bounced taps
+    let mut rack = FxRackState::new(48_000.0);
+    let mut rp = FxRackParams::default();
+    rp.buses[1].slots[0] = FxSlotParams {
+        fx_type: FxType::Delay,
+        enabled: true,
+        stack: 1,
+        params: [0.0, 0.65, 0.1, 1.0], // 1/16 note (~125 ms at 120 BPM = 6000 samples)
+        eq_params: [0.0, 1.0, 1.0, 0.5], // Ping-Pong = 100%, Width = 100%
+        ..FxSlotParams::default()
+    };
+
+    let mut right_energy = 0.0_f32;
+    for i in 0..24_000 {
+        let in_l = if i < 64 { 0.5 } else { 0.0 };
+        let (_l, r) = rack.process_buses_sample(
+            (0.0, 0.0),
+            (in_l, 0.0),
+            (0.0, 0.0),
+            &rp,
+            &deltas,
+            120.0,
+            None,
+        );
+        if i > 10_000 {
+            right_energy += r * r;
+        }
+    }
+    assert!(right_energy > 0.05, "Ping-Pong Delay fed on L should bounce to R: {right_energy}");
+
+    // Reverb Pre-Delay: 0 ms vs 250 ms delays wet onset, and Bus B Eq P5..P8 modulation works cleanly
+    let tel = ModUiTelemetry::new();
+    let measure_reverb_early_wet = |predelay_norm: f32, mod_eq_cutoff: f32| -> f32 {
+        let mut r = FxRackState::new(48_000.0);
+        let mut p = FxRackParams::default();
+        p.buses[1].slots[2] = FxSlotParams {
+            fx_type: FxType::Reverb,
+            enabled: true,
+            stack: 1,
+            params: [0.6, 0.7, 0.2, 1.0],
+            eq_params: [0.0, 1.0, predelay_norm, 0.5],
+            ..FxSlotParams::default()
+        };
+        let mut d = [0.0_f32; NUM_MOD_DESTS];
+        // Modulate Bus B Slot 2 Eq Param 0 (LOW CUT = P5)
+        d[ModDestination::fx_bus_slot_param(1, 2, 4).index()] = mod_eq_cutoff;
+
+        let mut energy = 0.0_f32;
+        // First 4800 samples (100 ms) at 48 kHz
+        for i in 0..4800 {
+            let x = if i < 32 { 0.7 } else { 0.0 };
+            let (ol, or) =
+                r.process_buses_sample((0.0, 0.0), (x, x), (0.0, 0.0), &p, &d, 120.0, Some(&tel));
+            if i > 200 {
+                energy += ol * ol + or * or;
+            }
+        }
+        energy
+    };
+
+    let immediate = measure_reverb_early_wet(0.0, 0.0);
+    let predelayed = measure_reverb_early_wet(1.0, 0.0); // 250 ms pre-delay > 100 ms window
+    let high_passed = measure_reverb_early_wet(0.0, 1.0); // 2 kHz low-cut attenuates wet tail
+    assert!(immediate > 1e-4, "Immediate reverb should produce tail in first 100ms");
+    assert!(predelayed < 1e-6, "250ms pre-delay should hold reverb wet before 100ms: {predelayed}");
+    assert!(high_passed < immediate, "Bus B Reverb Low Cut EQ modulation should reduce energy: {high_passed} vs {immediate}");
+
+    // Chorus with EQ Low Cut + Feedback runs finite & cleanly
+    let mut rc = FxRackState::new(48_000.0);
+    let mut cp = FxRackParams::default();
+    cp.buses[0].slots[1] = FxSlotParams {
+        fx_type: FxType::Chorus,
+        enabled: true,
+        stack: 1,
+        params: [0.4, 0.6, 0.8, 1.0],
+        eq_params: [0.4, 0.6, 0.8, 0.5],
+        ..FxSlotParams::default()
+    };
+    let mut chorus_pk = 0.0_f32;
+    for i in 0..2048 {
+        let s = (i as f32 * 0.04).sin() * 0.4;
+        let (l, r) = rc.process_buses_sample((s, s), (0.0, 0.0), (0.0, 0.0), &cp, &deltas, 120.0, None);
+        assert!(l.is_finite() && r.is_finite());
+        chorus_pk = chorus_pk.max(l.abs()).max(r.abs());
+    }
+    assert!(chorus_pk > 0.05 && chorus_pk < 3.0);
 }

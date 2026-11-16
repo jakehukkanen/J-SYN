@@ -231,6 +231,44 @@ impl BiquadCoeffs {
 
         Self::normalize(b0, b1, b2, a0, a1, a2)
     }
+
+    /// 2nd-order RBJ Low-Pass biquad.
+    #[inline]
+    pub fn low_pass(sample_rate: f64, freq_hz: f64, q: f64) -> Self {
+        let w0 = Self::safe_w0(sample_rate, freq_hz);
+        let (sin_w0, cos_w0) = w0.sin_cos();
+        let alpha = sin_w0 / (2.0 * q.max(0.05));
+        let b1 = 1.0 - cos_w0;
+        let b0 = 0.5 * b1;
+        Self::normalize(b0, b1, b0, 1.0 + alpha, -2.0 * cos_w0, 1.0 - alpha)
+    }
+
+    /// 2nd-order RBJ High-Pass biquad.
+    #[inline]
+    pub fn high_pass(sample_rate: f64, freq_hz: f64, q: f64) -> Self {
+        let w0 = Self::safe_w0(sample_rate, freq_hz);
+        let (sin_w0, cos_w0) = w0.sin_cos();
+        let alpha = sin_w0 / (2.0 * q.max(0.05));
+        let b0 = 0.5 * (1.0 + cos_w0);
+        let b1 = -(1.0 + cos_w0);
+        Self::normalize(b0, b1, b0, 1.0 + alpha, -2.0 * cos_w0, 1.0 - alpha)
+    }
+
+    /// 2nd-order RBJ All-Pass biquad (unity magnitude, steep phase rotation at `freq_hz`).
+    #[inline]
+    pub fn all_pass(sample_rate: f64, freq_hz: f64, q: f64) -> Self {
+        let w0 = Self::safe_w0(sample_rate, freq_hz);
+        let (sin_w0, cos_w0) = w0.sin_cos();
+        let alpha = sin_w0 / (2.0 * q.max(0.05));
+        Self::normalize(
+            1.0 - alpha,
+            -2.0 * cos_w0,
+            1.0 + alpha,
+            1.0 + alpha,
+            -2.0 * cos_w0,
+            1.0 - alpha,
+        )
+    }
 }
 
 /// Direct Form II Transposed biquad filter (64-bit internal state for precision).

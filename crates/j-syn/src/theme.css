@@ -902,19 +902,27 @@ led-toggle:checked .switch-label {
   color: #fff6e6;
 }
 
-/* Milestone 4: Master FX Rack */
+/* Milestone 4: Master FX Rack & Parallel Dual-Bus Layout */
 .fx-compact-card {
   child-left: 6px;
   child-right: 6px;
-  child-top: 5px;
-  child-bottom: 5px;
+  child-top: 4px;
+  child-bottom: 4px;
+}
+
+.fx-compact-card .knob-title {
+  font-size: 8;
 }
 
 .fx-full-card {
-  child-left: 8px;
-  child-right: 8px;
-  child-top: 6px;
-  child-bottom: 6px;
+  child-left: 5px;
+  child-right: 5px;
+  child-top: 4px;
+  child-bottom: 4px;
+}
+
+.fx-full-card .knob-title {
+  font-size: 7.5;
 }
 
 .fx-rack-banner {
@@ -926,10 +934,110 @@ led-toggle:checked .switch-label {
   child-right: 10px;
 }
 
+.fx-bus-header {
+  background-color: #241f1a;
+  border-width: 1px;
+  border-color: #463b32;
+  border-radius: 4px;
+  child-left: 8px;
+  child-right: 8px;
+}
+
 .fx-rack-sub {
   font-size: 8.5;
   font-weight: bold;
   color: #a99582;
+}
+
+.fx-bus-switch {
+  background-color: #211c17;
+  border-width: 1px;
+  border-color: #463b32;
+  border-radius: 3px;
+  child-space: 1px;
+}
+
+.fx-scope-pill {
+  background-color: #211c17d1;
+  border-width: 1px;
+  border-color: #463b32;
+  border-radius: 3px;
+}
+
+.fx-scope-dd dropdown {
+  background-color: #211c17d1;
+  border-color: #463b32;
+  border-width: 1px;
+  border-radius: 3px;
+}
+
+.fx-scope-dd dropdown:hover {
+  background-color: #322a23;
+  border-color: #f5b349;
+}
+
+.fx-scope-dd.dropdown-disabled dropdown,
+.fx-scope-dd.dropdown-disabled dropdown:hover {
+  background-color: #211c17d1;
+  border-color: #39312a;
+}
+
+.fx-scope-dd dropdown .title {
+  child-left: 4px;
+  child-right: 4px;
+}
+
+.fx-scope-pill dropdown .dropdown-text,
+.fx-scope-dd dropdown .dropdown-text {
+  font-size: 8;
+}
+
+.fx-scope-diopser dropdown,
+.fx-scope-diopser dropdown:hover {
+  background-color: transparent;
+  border-width: 0px;
+}
+
+.fx-scope-pill-lbl {
+  font-size: 7.5;
+  font-weight: bold;
+  color: #a99582;
+}
+
+.fx-scope-subtabs {
+  child-space: 1px;
+}
+
+.fx-subtab-btn {
+  background-color: transparent;
+  border-radius: 2px;
+  child-space: 1s;
+}
+
+.fx-subtab-btn:hover {
+  background-color: #473828;
+}
+
+.fx-subtab-btn.fx-subtab-active {
+  background-color: #594631;
+}
+
+.fx-subtab-lbl {
+  font-size: 7.5;
+  font-weight: bold;
+  color: #a99582;
+}
+
+.fx-subtab-btn.fx-subtab-active .fx-subtab-lbl {
+  color: #ffd382;
+}
+
+.routing-pill-active dropdown {
+  border-color: #f5b349;
+}
+
+.routing-pill-active .dropdown-text {
+  color: #ffd382;
 }
 
 .fx-move-btn {

@@ -217,7 +217,45 @@ pub(super) fn paint_filter_response_curve(
     rgb: (u8, u8, u8),
     pal: &ThemePalette,
 ) {
-    let enabled = params.enabled;
+    paint_filter_response_curve_with_eval(
+        canvas,
+        params.enabled,
+        params.cutoff_hz,
+        ix,
+        iy,
+        iw,
+        ih,
+        db_min,
+        db_max,
+        pts,
+        dpx,
+        stroke_w,
+        rgb,
+        pal,
+        |freq_hz| j_syn_dsp::evaluate_filter_response_db(params, freq_hz),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn paint_filter_response_curve_with_eval<F>(
+    canvas: &mut Canvas,
+    enabled: bool,
+    cutoff_hz: f32,
+    ix: f32,
+    iy: f32,
+    iw: f32,
+    ih: f32,
+    db_min: f32,
+    db_max: f32,
+    pts: usize,
+    dpx: f32,
+    stroke_w: f32,
+    rgb: (u8, u8, u8),
+    pal: &ThemePalette,
+    eval_db: F,
+) where
+    F: Fn(f32) -> f32,
+{
     let bottom = iy + ih;
     let floor_y = bottom - 0.5 * dpx;
     let mut curve = vg::Path::new();
@@ -229,7 +267,7 @@ pub(super) fn paint_filter_response_curve(
     for i in 0..count {
         let t = i as f32 / (count - 1) as f32;
         let freq_hz = 20.0 * 1000.0_f32.powf(t);
-        let db = j_syn_dsp::evaluate_filter_response_db(params, freq_hz);
+        let db = eval_db(freq_hz);
         let x = ix + t * iw;
         let raw_y = filter_db_to_raw_y(db, iy, ih, db_min, db_max);
         let fill_y = raw_y.clamp(iy, bottom);
@@ -297,8 +335,8 @@ pub(super) fn paint_filter_response_curve(
     curve_paint.set_line_width(stroke_w);
     canvas.stroke_path(&curve, &curve_paint);
 
-    let fc_x = ix + filter_freq_to_norm(params.cutoff_hz) * iw;
-    let fc_db = j_syn_dsp::evaluate_filter_response_db(params, params.cutoff_hz);
+    let fc_x = ix + filter_freq_to_norm(cutoff_hz) * iw;
+    let fc_db = eval_db(cutoff_hz);
     let fc_raw_y = filter_db_to_raw_y(fc_db, iy, ih, db_min, db_max);
     if fc_raw_y < bottom - 1.0 * dpx {
         let mut dot = vg::Path::new();
