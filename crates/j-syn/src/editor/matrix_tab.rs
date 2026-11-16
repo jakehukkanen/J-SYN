@@ -12,7 +12,7 @@ use super::controls::{
 use super::mod_bar::ModUiState;
 use super::{UiData, UiEvent};
 
-const ALL_MOD_SOURCES: [ModMatrixSource; 21] = [
+pub(super) const ALL_MOD_SOURCES: [ModMatrixSource; 21] = [
     ModMatrixSource::Env1,
     ModMatrixSource::Env2,
     ModMatrixSource::Env3,

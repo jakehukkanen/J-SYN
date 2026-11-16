@@ -12,7 +12,10 @@ use crate::mod_matrix::{
 };
 use crate::modseq::{ModSeqParams, ModSeqRetrig, ModSeqState, ModSeqStepBank};
 use crate::noise::{NoiseParams, NoiseState};
-use crate::oscillator::{EngineMode, ModSource, OscParams, OscillatorState};
+use crate::oscillator::{
+    osc_hz_offset_from_norm, osc_hz_offset_to_norm, EngineMode, ModSource, OscParams,
+    OscillatorState,
+};
 use crate::wavetable::Wavetable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +222,12 @@ fn apply_osc_modulation(
     out.pitch_semitones = (out.pitch_semitones
         + mod_offsets[ModDestination::osc_pitch(idx).index()] * 96.0)
         .clamp(-48.0, 48.0);
+    out.ratio = (out.ratio + mod_offsets[ModDestination::osc_ratio(idx).index()] * 32.0).max(0.0);
+    let d_hz = mod_offsets[ModDestination::osc_hz_offset(idx).index()];
+    if d_hz.abs() > 1e-6 {
+        let norm = osc_hz_offset_to_norm(out.hz_offset);
+        out.hz_offset = osc_hz_offset_from_norm((norm + d_hz).clamp(0.0, 1.0));
+    }
     out.phase_offset =
         (out.phase_offset + mod_offsets[ModDestination::osc_phase(idx).index()]).rem_euclid(1.0);
     out.detune =
@@ -360,7 +369,7 @@ fn process_voice_bus<F: StereoFilterStage>(
     sample_rate: f32,
 ) -> VoiceBusOutput {
     // C3 (MIDI 60) = 440 * 2^(-9/12) Hz
-    const C3_HZ: f32 = 130.812_78;
+    const C3_HZ: f32 = 261.625_58;
     let base_hz = 440.0 * (2.0_f32).powf((effective_note - 69.0) / 12.0);
     let mod_routing = apply_routing_modulation(&params.routing, mod_offsets);
     let mut f1_l = 0.0_f32;

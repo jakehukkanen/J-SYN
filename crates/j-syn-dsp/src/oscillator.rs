@@ -100,12 +100,36 @@ pub enum EngineMode {
     Hq = 1,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OscPitchMode {
+    #[default]
+    Semitones = 0,
+    Ratio = 1,
+}
+
+/// Maps normalized `[0.0, 1.0]` to symmetrically skewed `[-1000.0, +1000.0] Hz` (bias near `0.1–20 Hz`).
+#[inline]
+pub fn osc_hz_offset_from_norm(norm: f32) -> f32 {
+    let d = (norm.clamp(0.0, 1.0) - 0.5) * 2.0;
+    d.signum() * d.abs().powf(4.0) * 1000.0
+}
+
+/// Maps `[-1000.0, +1000.0] Hz` back into normalized `[0.0, 1.0]`.
+#[inline]
+pub fn osc_hz_offset_to_norm(hz: f32) -> f32 {
+    let s = (hz / 1000.0).clamp(-1.0, 1.0);
+    0.5 + 0.5 * s.signum() * s.abs().powf(0.25)
+}
+
 /// Per-oscillator control-rate / sample-rate parameters.
 #[derive(Debug, Clone, Copy)]
 pub struct OscParams {
     pub enabled: bool,
     pub wt_pos: f32,
+    pub pitch_mode: OscPitchMode,
     pub pitch_semitones: f32,
+    pub ratio: f32,
+    pub hz_offset: f32,
     /// Normalized phase offset `[0.0, 1.0)` corresponding to `0°..360°`.
     pub phase_offset: f32,
     pub retrig: bool,
@@ -128,7 +152,10 @@ impl Default for OscParams {
         Self {
             enabled: true,
             wt_pos: 0.0,
+            pitch_mode: OscPitchMode::Semitones,
             pitch_semitones: 0.0,
+            ratio: 1.0,
+            hz_offset: 0.0,
             phase_offset: 0.0,
             retrig: true,
             warp_mode: WarpMode::None,
@@ -224,9 +251,14 @@ impl OscillatorState {
         let _ = osc_idx;
         let sr = sample_rate.max(1000.0);
 
-        // Continuous pitch offset in semitones (-48.00..=+48.00 + modulation)
-        let semitone_offset = params.pitch_semitones.clamp(-96.0, 96.0);
-        let osc_hz = base_note_hz * (2.0_f32).powf(semitone_offset / 12.0);
+        let osc_hz = match params.pitch_mode {
+            OscPitchMode::Semitones => {
+                // Continuous pitch offset in semitones (-48.00..=+48.00 + modulation)
+                let semitone_offset = params.pitch_semitones.clamp(-96.0, 96.0);
+                base_note_hz * (2.0_f32).powf(semitone_offset / 12.0)
+            }
+            OscPitchMode::Ratio => (base_note_hz * params.ratio.max(0.0) + params.hz_offset).max(0.0),
+        };
         let base_inc = (osc_hz / sr).clamp(0.0, 0.49);
 
         // Condition modulation signal (apply 1-pole feedback filter for B >= A)

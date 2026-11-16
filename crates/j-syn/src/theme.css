@@ -202,6 +202,64 @@ button > .inner {
   color: #f0e4d6;
 }
 
+.mod-context-mode-btn {
+  background-color: #2b231d;
+  border-width: 1px;
+  border-color: #4b4037;
+  border-radius: 3px;
+  child-left: 5px;
+  child-right: 5px;
+}
+
+.mod-context-mode-btn:hover {
+  background-color: #4a3c30;
+  border-color: #f5b349;
+}
+
+.mod-context-mode-btn:checked {
+  background-color: #594631;
+  border-color: #f5b349;
+}
+
+.mod-context-mode-btn .mod-context-check {
+  color: #ffd382;
+}
+
+.mod-context-mode-btn:checked .mod-context-btn-text {
+  color: #fff6e6;
+}
+
+.mod-context-sep {
+  background-color: #4b4037;
+}
+
+.mod-context-pick-grid {
+  background-color: #261f1a;
+  border-width: 1px;
+  border-color: #4b4037;
+  border-radius: 3px;
+  child-space: 3px;
+}
+
+.mod-context-pick-btn {
+  background-color: #362c24;
+  border-width: 1px;
+  border-color: #5a4a3c;
+  border-radius: 2px;
+  child-space: 1s;
+}
+
+.mod-context-pick-btn:hover {
+  background-color: #4d3e2f;
+  border-color: #f5b349;
+}
+
+.mod-context-pick-text {
+  font-size: 7.5;
+  font-weight: bold;
+  color: #f0e4d6;
+}
+
 .knob-readout-box {
   background-color: #211c17;
   border-width: 1px;
@@ -237,6 +295,32 @@ button > .inner {
   font-size: 10;
   font-weight: bold;
   color: #ffd382;
+}
+
+.mini-label.pitch-mode-ratio-lbl {
+  color: #f5b349;
+}
+
+.hardware-module.module-disabled .mini-label.pitch-mode-ratio-lbl {
+  color: #6b6157;
+}
+
+.compact-pill.ratio-pill {
+  child-left: 2px;
+  child-right: 2px;
+}
+
+.compact-pill.ratio-pill .compact-pill-text {
+  font-size: 9.5;
+}
+
+.compact-pill.hz-offset-pill {
+  child-left: 2px;
+  child-right: 2px;
+}
+
+.compact-pill.hz-offset-pill .compact-pill-text {
+  font-size: 8.5;
 }
 
 dropdown {

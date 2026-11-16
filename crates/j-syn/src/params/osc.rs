@@ -5,11 +5,37 @@ use std::sync::Arc;
 use j_syn_dsp::{
     DirectDest, FactoryWavetable, FilterBusDest, FilterMode, FilterParams, FilterRouting,
     FilterSlope, InsertMode, InsertParams, InsertPosition, ModOrder, ModSource, ModType,
-    NoiseParams, NoiseType, OscParams, RoutingParams, WarpMode,
+    NoiseParams, NoiseType, OscParams, OscPitchMode, RoutingParams, WarpMode,
 };
 use nih_plug::prelude::*;
 
 use super::{bipolar_percentage_param, percentage_param};
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PitchModeParam {
+    #[name = "Semitones"]
+    Semitones,
+    #[name = "Ratio"]
+    Ratio,
+}
+
+impl From<PitchModeParam> for OscPitchMode {
+    fn from(val: PitchModeParam) -> Self {
+        match val {
+            PitchModeParam::Semitones => OscPitchMode::Semitones,
+            PitchModeParam::Ratio => OscPitchMode::Ratio,
+        }
+    }
+}
+
+impl From<OscPitchMode> for PitchModeParam {
+    fn from(val: OscPitchMode) -> Self {
+        match val {
+            OscPitchMode::Semitones => PitchModeParam::Semitones,
+            OscPitchMode::Ratio => PitchModeParam::Ratio,
+        }
+    }
+}
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WavetableChoice {
@@ -588,6 +614,15 @@ pub struct OscPluginParams {
     #[id = "pitch"]
     pub pitch: FloatParam,
 
+    #[id = "pitch_mode"]
+    pub pitch_mode: EnumParam<PitchModeParam>,
+
+    #[id = "ratio"]
+    pub ratio: FloatParam,
+
+    #[id = "hz_offset"]
+    pub hz_offset: FloatParam,
+
     #[id = "phase"]
     pub phase: FloatParam,
 
@@ -664,6 +699,63 @@ impl OscPluginParams {
             .with_string_to_value(Arc::new(|s| {
                 s.trim().trim_end_matches("st").trim().parse::<f32>().ok()
             })),
+            pitch_mode: EnumParam::new("Pitch Mode", PitchModeParam::Semitones),
+            ratio: FloatParam::new(
+                "Ratio",
+                1.0,
+                FloatRange::Linear {
+                    min: 0.0,
+                    max: 32.0,
+                },
+            )
+            .with_unit(" ×")
+            .with_value_to_string(Arc::new(|val| {
+                let clean = if val.abs() < 0.00005 {
+                    0.0
+                } else {
+                    val.clamp(0.0, 32.0)
+                };
+                format!("{clean:.3}")
+            }))
+            .with_string_to_value(Arc::new(|s| {
+                s.trim()
+                    .trim_end_matches('×')
+                    .trim_end_matches('x')
+                    .trim()
+                    .parse::<f32>()
+                    .ok()
+            })),
+            hz_offset: FloatParam::new(
+                "Hz Offset",
+                0.0,
+                FloatRange::SymmetricalSkewed {
+                    min: -1000.0,
+                    max: 1000.0,
+                    factor: FloatRange::skew_factor(-2.0),
+                    center: 0.0,
+                },
+            )
+            .with_unit(" Hz")
+            .with_value_to_string(Arc::new(|val| {
+                let clean = if val.abs() < 0.05 { 0.0 } else { val };
+                if clean == 0.0 {
+                    "0.0".to_string()
+                } else if clean.abs() < 10.0 {
+                    format!("{clean:+.2}")
+                } else if clean.abs() < 100.0 {
+                    format!("{clean:+.1}")
+                } else {
+                    format!("{clean:+.0}")
+                }
+            }))
+            .with_string_to_value(Arc::new(|s| {
+                s.trim()
+                    .trim_end_matches("Hz")
+                    .trim_end_matches("hz")
+                    .trim()
+                    .parse::<f32>()
+                    .ok()
+            })),
             phase: FloatParam::new(
                 "Phase",
                 0.0,
@@ -727,7 +819,10 @@ impl OscPluginParams {
         OscParams {
             enabled: self.enabled.value(),
             wt_pos: self.wt_pos.value(),
+            pitch_mode: self.pitch_mode.value().into(),
             pitch_semitones: self.pitch.value(),
+            ratio: self.ratio.value().clamp(0.0, 32.0),
+            hz_offset: self.hz_offset.value(),
             phase_offset: (self.phase.value() / 360.0).rem_euclid(1.0).fract(),
             retrig: self.retrig.value(),
             warp_mode: match self.warp_mode.value() {

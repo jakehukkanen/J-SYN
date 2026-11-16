@@ -147,9 +147,11 @@ pub(super) fn update_mod_collar_cursor(cx: &mut EventContext, active: bool, curs
 
 mod knob;
 mod pill;
+mod ratio;
 mod switch;
 
 pub use knob::RotaryKnob;
 pub(super) use knob::KnobDimExt;
 pub use pill::{ParamStepPill, PitchDragBox};
+pub use ratio::RatioDragBox;
 pub use switch::LedToggleSwitch;

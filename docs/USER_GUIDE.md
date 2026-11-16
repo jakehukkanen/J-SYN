@@ -19,10 +19,9 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 ---
 
 ## 2. Oscillators (`OSC 1` – `OSC 4`) & Noise
-- **Enable & Pitch:** Toggle each oscillator with its LED switch. Drag the `PITCH` box (`±48 st`):
-  - **Normal Drag:** Semitones (`1.00 st`)
-  - **`Opt/Alt + Drag`:** Octaves (`±12.00 st`)
-  - **`Shift + Drag`:** Fine cents (`0.01 st`)
+- **Enable & Pitch / Ratio:** Toggle each oscillator with its LED switch. Right-click the **`PITCH`** / **`RATIO`** box to switch between **`Pitch (Semitones)`** and **`Ratio (FM Harmonic)`** modes, assign modulation, clear modulation, or reset:
+  - **Pitch (`Semitones`) Mode (`±48 st`):** Normal drag = `1.00 st`, `Opt/Alt + Drag` = `±12.00 st`, `Shift + Drag` = `0.01 st`.
+  - **Ratio (`FM Harmonic`) Mode (`0.000–32.000 ×`):** Dragging the **Left Half** steps through whole/sub-harmonic ratios (`0, 0.25, 0.5, 1..32`); dragging the **Right Half** adjusts fractions (`0.10`, or `0.01` with `Shift`). Includes a companion **`Hz Offset`** pill (`±1000 Hz` skewed toward `0.1–20 Hz`) beneath `RATIO` with its own right-click modulation menu.
 - **Wavetables:** Use `<` / `>` or the wavetable dropdown to choose factory tables, `"Load .WAV..."`, or `.wav` files in your configured `Wavetables Directory` (sliced automatically into up to `256` × `2048`-sample frames). Subfolders appear as collapsible categories.
 - **Unison & Tone:** `PHASE`, `UNI` (`1`–`8`), `DETUNE`, `SPREAD`, `WT POS`, `WARP` (`None`, `B-`, `B+`, `SP`), `>`/`<` routing order toggle (`Warp -> Mod` vs `Mod -> Warp`), `MOD` (`Off`, `PM 1..4`, `RM 1..4`), and `LEVEL`. Both `WARP` and `MOD` dropdowns support mouse-wheel scrolling.
 - **Noise:** Stereo `White`, `Pink`, or `Brown` noise with `COLOR`, `STEREO`, and `LEVEL`.
@@ -42,8 +41,8 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
   - **`PARALLEL (A | B)`:** `Bus A` and `Bus B` process in parallel and sum into the Master stage alongside the Sub Bus.
   - **`SERIAL (A -> B)`:** `Bus A` (after `Bus A LEVEL/PAN`) feeds directly into `Bus B` for up to 16 serial FX slots.
 - **`SUB / DIRECT` Bus:** `[• SUB FX]` toggle, `LP CUTOFF` (`20 Hz–2 kHz`), `CLIP DRIVE` (`0–24 dB`), and `LEVEL`. When `SUB FX` is turned off (`SUB OFF`), LP and Clipper DSP are bypassed and signal routed to `Sub` passes straight through at `SUB LEVEL` as a clean Direct Out.
-- **Available Slot Effects:** `Empty`, `OTT`, `Distortion`, `Chorus`, `Phaser`, `Delay`, `Reverb`, `Clipper`, `Filter` (all 15 modes + `12/24/48` slopes via floating scope dropdowns), and `Dispersion` (up to `128`-stage cascaded allpass bank with floating `STG` selector).
-- **Floating Scope Controls (`ZStack`):** `Reverb`, `Delay`, and `Chorus` feature a translucent `MAIN | EQ` toggle at the top-right of their scope to switch between main and EQ/spatial parameters while keeping all 8 parameters active and modulatable.
+- **Available Slot Effects:** `Empty`, `OTT`, `Distortion`, `Chorus`, `Phaser`, `Delay`, `Reverb`, `Clipper`, `Filter` (all 15 modes + `12/24/48` slopes via floating scope dropdowns), `Dispersion` (up to `128`-stage cascaded allpass bank with floating `STG` selector), and `Tube Res.` (waveguide tube resonator with note-snapping `TUNE`, floating `[• FLT]` toggle, and `MAIN | LFO` sub-tab).
+- **Floating Scope Controls (`ZStack`):** `Reverb`, `Delay`, and `Chorus` feature a translucent `MAIN | EQ` toggle (`Tube Res.` uses `MAIN | LFO`) at the top-right of their scope to switch between sub-pages while keeping all slot parameters active and modulatable.
 - Each slot has an `ON/OFF` toggle, `STK 1..4` multiplier, live `150 Hz` pre/post scope, and `▲`/`▼` slot-swapping buttons in the `FX` view. Empty slots default to `ON` with `Mix = 100%`; cards only dim when toggled `OFF`.
 
 ---

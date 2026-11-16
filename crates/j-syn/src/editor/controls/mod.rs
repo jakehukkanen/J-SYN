@@ -8,7 +8,9 @@ use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
 use super::mod_bar::ModUiState;
-use super::widgets::{KnobDimExt, ParamStepPill, PitchDragBox, RotaryKnob, ValueFormatter};
+use super::widgets::{
+    KnobDimExt, ParamStepPill, PitchDragBox, RatioDragBox, RotaryKnob, ValueFormatter,
+};
 use super::{BottomTab, UiData, UiEvent};
 use crate::JSynPluginParams;
 
@@ -510,8 +512,10 @@ fn build_stacked_pill_shell<'a>(
     .row_between(Pixels(2.0))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_pitch_pill_cell<'a, L, Params, P, FMap>(
     cx: &'a mut Context,
+    osc_idx: usize,
     params: L,
     params_to_param: FMap,
     title: &'static str,
@@ -526,10 +530,58 @@ where
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
     build_stacked_pill_shell(cx, title, move |cx| {
-        PitchDragBox::new_with_mod(cx, params, params_to_param, dest, mod_ui, tab_tag)
+        PitchDragBox::new_osc_pitch(cx, osc_idx, params, params_to_param, dest, mod_ui, tab_tag)
             .width(Stretch(1.0))
             .height(Pixels(19.0));
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_ratio_pill_cell<'a, L, Params, PR, PH, FMapR, FMapH>(
+    cx: &'a mut Context,
+    osc_idx: usize,
+    params: L,
+    ratio_map: FMapR,
+    hz_map: FMapH,
+    ratio_dest: ModDestination,
+    hz_dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+    tab_tag: u8,
+) -> Handle<'a, VStack>
+where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    PR: Param + 'static,
+    PH: Param + 'static,
+    FMapR: Fn(&Params) -> &PR + Copy + 'static,
+    FMapH: Fn(&Params) -> &PH + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        bold_label(cx, "RATIO", "mini-label")
+            .class("pitch-mode-ratio-lbl")
+            .width(Stretch(1.0))
+            .height(Pixels(12.0))
+            .child_space(Stretch(1.0));
+        RatioDragBox::new_osc_ratio(
+            cx,
+            osc_idx,
+            params.clone(),
+            ratio_map,
+            ratio_dest,
+            mod_ui.clone(),
+            tab_tag,
+        )
+        .width(Stretch(1.0))
+        .height(Pixels(19.0));
+        ParamStepPill::new_with_mod_menu(cx, params, hz_map, 200, hz_dest, mod_ui, tab_tag)
+            .class("hz-offset-pill")
+            .width(Stretch(1.0))
+            .height(Pixels(17.0));
+    })
+    .class("stacked-pill-cell")
+    .width(Stretch(1.0))
+    .height(Auto)
+    .row_between(Pixels(2.0))
 }
 
 pub(super) fn build_stacked_pill_cell<'a, L, Params, P, FMap>(

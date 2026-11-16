@@ -296,3 +296,39 @@ impl View for VectorArrow {
         draw_triangle_glyph(cx, canvas, self.dir, Some(4.5));
     }
 }
+
+/// Crisp centered vector checkmark used for active menu/mode toggles across all platforms.
+pub(crate) struct CheckIcon;
+
+impl CheckIcon {
+    pub(crate) fn new<'a>(cx: &'a mut Context) -> Handle<'a, Self> {
+        Self.build(cx, |_| {}).hoverable(false)
+    }
+}
+
+impl View for CheckIcon {
+    fn element(&self) -> Option<&'static str> {
+        Some("check-icon")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        use nih_plug_vizia::vizia::vg;
+
+        let b = cx.bounds();
+        if b.w <= 1.0 || b.h <= 1.0 {
+            return;
+        }
+        let s = b.w.min(b.h) * 0.34;
+        let cx_pt = b.x + b.w * 0.5;
+        let cy_pt = b.y + b.h * 0.52;
+        let mut path = vg::Path::new();
+        path.move_to(cx_pt - s * 0.95, cy_pt - s * 0.05);
+        path.line_to(cx_pt - s * 0.25, cy_pt + s * 0.70);
+        path.line_to(cx_pt + s * 0.95, cy_pt - s * 0.75);
+        let mut paint = vg::Paint::color(resolve_glyph_color(cx));
+        paint.set_line_width((1.6 * cx.scale_factor()).max(1.4));
+        paint.set_line_cap(vg::LineCap::Round);
+        paint.set_line_join(vg::LineJoin::Round);
+        canvas.stroke_path(&path, &paint);
+    }
+}

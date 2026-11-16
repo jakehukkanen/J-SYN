@@ -9,8 +9,9 @@ use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown, build_flex_knob_cell_mod_dim,
-    build_pitch_pill_cell, build_stacked_pill_cell, build_stacked_pill_cell_mod,
-    build_wavetable_dropdown, step_wavetable, ArrowButton, ArrowDir, ScrollDropdown,
+    build_pitch_pill_cell, build_ratio_pill_cell, build_stacked_pill_cell,
+    build_stacked_pill_cell_mod, build_wavetable_dropdown, step_wavetable, ArrowButton, ArrowDir,
+    ScrollDropdown,
 };
 use super::mod_bar::ModUiState;
 use super::scope::WavetableScope;
@@ -18,7 +19,7 @@ use super::widgets::LedToggleSwitch;
 use super::UiData;
 use crate::{
     JSynPluginParams, ModOrderParam, ModSourceParam, ModTypeParam, OscPluginParams,
-    WarpModeParam,
+    PitchModeParam, WarpModeParam,
 };
 
 fn osc0_enabled(p: &JSynPluginParams) -> bool {
@@ -87,8 +88,9 @@ pub(super) fn build_osc_panel(
     let p_dim = params.clone();
 
     HStack::new(cx, move |cx| {
-        // Column 1: OSC title, PITCH drag pill, RETRIG toggle
+        // Column 1: OSC title, PITCH / RATIO (+ Hz Offset) drag pills, RETRIG toggle
         let p_pitch = mod_ui.clone();
+        let p_col1_mode = params.clone();
         let gui_left = gui_context.clone();
         VStack::new(cx, move |cx| {
             LedToggleSwitch::new(
@@ -102,17 +104,44 @@ pub(super) fn build_osc_panel(
             .width(Stretch(1.0))
             .height(Pixels(20.0));
 
-            build_pitch_pill_cell(
+            let p_mode_bind = p_pitch.clone();
+            Binding::new(
                 cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).pitch,
-                "PITCH",
-                ModDestination::osc_pitch(osc_idx),
-                p_pitch,
-                0,
-            )
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
+                UiData::mod_ui_rev.map(move |_| {
+                    p_col1_mode.oscs[osc_idx].pitch_mode.value() == PitchModeParam::Ratio
+                }),
+                move |cx, is_ratio_lens| {
+                    let mod_cell = p_mode_bind.clone();
+                    if !is_ratio_lens.get(cx) {
+                        build_pitch_pill_cell(
+                            cx,
+                            osc_idx,
+                            UiData::params,
+                            move |p| &get_osc(p, osc_idx).pitch,
+                            "PITCH",
+                            ModDestination::osc_pitch(osc_idx),
+                            mod_cell,
+                            0,
+                        )
+                        .top(Stretch(1.0))
+                        .bottom(Stretch(1.0));
+                    } else {
+                        build_ratio_pill_cell(
+                            cx,
+                            osc_idx,
+                            UiData::params,
+                            move |p| &get_osc(p, osc_idx).ratio,
+                            move |p| &get_osc(p, osc_idx).hz_offset,
+                            ModDestination::osc_ratio(osc_idx),
+                            ModDestination::osc_hz_offset(osc_idx),
+                            mod_cell,
+                            0,
+                        )
+                        .top(Stretch(1.0))
+                        .bottom(Stretch(1.0));
+                    }
+                },
+            );
 
             LedToggleSwitch::new(
                 cx,

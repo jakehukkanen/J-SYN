@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub const NUM_MOD_SLOTS: usize = 32;
 pub const NUM_ACTIVE_SOURCES: usize = 21;
-pub const NUM_MOD_DESTS: usize = 198;
+pub const NUM_MOD_DESTS: usize = 206;
 
 /// Modulation sources assignable in any matrix slot.
 #[repr(u8)]
@@ -407,6 +407,15 @@ pub enum ModDestination {
     BusAPan = 195,
     BusBLevel = 196,
     BusBPan = 197,
+    // Oscillator Ratio & Linear Hz Offset (198..=205)
+    Osc1Ratio = 198,
+    Osc2Ratio = 199,
+    Osc3Ratio = 200,
+    Osc4Ratio = 201,
+    Osc1HzOffset = 202,
+    Osc2HzOffset = 203,
+    Osc3HzOffset = 204,
+    Osc4HzOffset = 205,
 }
 
 pub const ALL_MOD_DESTINATIONS: [ModDestination; NUM_MOD_DESTS] = [
@@ -608,6 +617,14 @@ pub const ALL_MOD_DESTINATIONS: [ModDestination; NUM_MOD_DESTS] = [
     ModDestination::BusAPan,
     ModDestination::BusBLevel,
     ModDestination::BusBPan,
+    ModDestination::Osc1Ratio,
+    ModDestination::Osc2Ratio,
+    ModDestination::Osc3Ratio,
+    ModDestination::Osc4Ratio,
+    ModDestination::Osc1HzOffset,
+    ModDestination::Osc2HzOffset,
+    ModDestination::Osc3HzOffset,
+    ModDestination::Osc4HzOffset,
 ];
 
 const FX_MOD_DEST_NAMES: [&str; 128] = [
@@ -721,6 +738,26 @@ impl ModDestination {
             1 => Self::Osc2Pitch,
             2 => Self::Osc3Pitch,
             _ => Self::Osc4Pitch,
+        }
+    }
+
+    #[inline]
+    pub const fn osc_ratio(idx: usize) -> Self {
+        match idx {
+            0 => Self::Osc1Ratio,
+            1 => Self::Osc2Ratio,
+            2 => Self::Osc3Ratio,
+            _ => Self::Osc4Ratio,
+        }
+    }
+
+    #[inline]
+    pub const fn osc_hz_offset(idx: usize) -> Self {
+        match idx {
+            0 => Self::Osc1HzOffset,
+            1 => Self::Osc2HzOffset,
+            2 => Self::Osc3HzOffset,
+            _ => Self::Osc4HzOffset,
         }
     }
 
@@ -950,6 +987,14 @@ impl ModDestination {
             Self::BusAPan => "BUS A PAN",
             Self::BusBLevel => "BUS B LVL",
             Self::BusBPan => "BUS B PAN",
+            Self::Osc1Ratio => "OSC1 RATIO",
+            Self::Osc2Ratio => "OSC2 RATIO",
+            Self::Osc3Ratio => "OSC3 RATIO",
+            Self::Osc4Ratio => "OSC4 RATIO",
+            Self::Osc1HzOffset => "OSC1 HZ",
+            Self::Osc2HzOffset => "OSC2 HZ",
+            Self::Osc3HzOffset => "OSC3 HZ",
+            Self::Osc4HzOffset => "OSC4 HZ",
             _ => "",
         }
     }

@@ -19,13 +19,13 @@
 
 use std::sync::Arc;
 
-use j_syn_dsp::mod_matrix::{ModDestination, ModUiTelemetry};
+use j_syn_dsp::mod_matrix::{ModDestination, ModMatrixSource, ModUiTelemetry};
 use j_syn_dsp::WavetableBank;
-use nih_plug::prelude::{Editor, GuiContext};
+use nih_plug::prelude::{Editor, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
 
-use crate::JSynPluginParams;
+use crate::{JSynPluginParams, PitchModeParam};
 
 mod controls;
 mod filter_panel;
@@ -48,7 +48,7 @@ mod widgets;
 
 use controls::{
     bold_label, build_dropdown_trigger_labels, build_header_knob_cell, build_tab_button,
-    build_ui_scale_dropdown, ArrowButton, ArrowDir, CrossButton,
+    build_ui_scale_dropdown, ArrowButton, ArrowDir, CheckIcon, CrossButton,
 };
 use filter_panel::build_filter_panel;
 use insert_panel::build_insert_panel;
@@ -113,6 +113,9 @@ impl Data for TooltipState {
 pub(crate) struct ModContextMenuState {
     pub visible: bool,
     pub dest_idx: usize,
+    pub osc_pitch_idx: Option<usize>,
+    pub always_show_actions: bool,
+    pub show_mod_picker: bool,
     pub anchor_x: f32,
     pub anchor_y: f32,
     pub rev: u64,
@@ -159,6 +162,9 @@ pub(crate) enum UiEvent {
     ShowTooltip(TooltipState),
     HideTooltip,
     ShowModContextMenu(ModDestination, f32, f32),
+    ShowActionModContextMenu(ModDestination, f32, f32),
+    ShowPitchContextMenu(usize, ModDestination, f32, f32),
+    ToggleModMenuPicker,
     HideModContextMenu,
     ModMenuRefresh,
 }
@@ -501,14 +507,51 @@ impl Model for UiData {
                 self.mod_menu = ModContextMenuState {
                     visible: true,
                     dest_idx: dest.index(),
+                    osc_pitch_idx: None,
+                    always_show_actions: false,
+                    show_mod_picker: false,
                     anchor_x: *x,
                     anchor_y: *y,
                     rev: self.mod_menu.rev.wrapping_add(1),
                 };
                 meta.consume();
             }
+            UiEvent::ShowActionModContextMenu(dest, x, y) => {
+                self.tooltip.visible = false;
+                self.mod_menu = ModContextMenuState {
+                    visible: true,
+                    dest_idx: dest.index(),
+                    osc_pitch_idx: None,
+                    always_show_actions: true,
+                    show_mod_picker: false,
+                    anchor_x: *x,
+                    anchor_y: *y,
+                    rev: self.mod_menu.rev.wrapping_add(1),
+                };
+                meta.consume();
+            }
+            UiEvent::ShowPitchContextMenu(osc_idx, dest, x, y) => {
+                self.tooltip.visible = false;
+                self.mod_menu = ModContextMenuState {
+                    visible: true,
+                    dest_idx: dest.index(),
+                    osc_pitch_idx: Some(*osc_idx),
+                    always_show_actions: true,
+                    show_mod_picker: false,
+                    anchor_x: *x,
+                    anchor_y: *y,
+                    rev: self.mod_menu.rev.wrapping_add(1),
+                };
+                meta.consume();
+            }
+            UiEvent::ToggleModMenuPicker => {
+                self.mod_menu.show_mod_picker = !self.mod_menu.show_mod_picker;
+                self.mod_menu.rev = self.mod_menu.rev.wrapping_add(1);
+                meta.consume();
+            }
             UiEvent::HideModContextMenu => {
                 self.mod_menu.visible = false;
+                self.mod_menu.show_mod_picker = false;
                 meta.consume();
             }
             UiEvent::ModMenuRefresh => {
@@ -1032,6 +1075,8 @@ pub(crate) fn create(
         let bank_for_ui = bank.clone();
         let params_for_ui = params.clone();
         let gui_ctx_for_ui = gui_context.clone();
+        let params_menu = params_for_ui.clone();
+        let gui_ctx_menu = gui_ctx_for_ui.clone();
         let mod_ui_for_ui = mod_ui.clone();
 
         VStack::new(cx, move |cx| {
@@ -1171,6 +1216,8 @@ pub(crate) fn create(
             let mod_ui_menu = mod_ui;
             VStack::new(cx, move |cx| {
                 let ui_menu = mod_ui_menu.clone();
+                let p_menu = params_menu.clone();
+                let g_menu = gui_ctx_menu.clone();
                 Binding::new(cx, UiData::mod_menu, move |cx, menu_lens| {
                     let menu = menu_lens.get(cx);
                     if !menu.visible {
@@ -1180,13 +1227,44 @@ pub(crate) fn create(
                         return;
                     };
                     let slots = ui_menu.all_slots_for_dest(dest);
-                    if slots.is_empty() {
+                    if slots.is_empty() && !menu.always_show_actions && menu.osc_pitch_idx.is_none()
+                    {
                         return;
                     }
+
+                    if let Some(osc_idx) = menu.osc_pitch_idx {
+                        build_pitch_mode_menu_section(
+                            cx,
+                            osc_idx,
+                            &p_menu,
+                            &g_menu,
+                        );
+                        Element::new(cx)
+                            .class("mod-context-sep")
+                            .width(Stretch(1.0))
+                            .height(Pixels(1.0));
+                    }
+
                     let header = format!("MOD: {}", dest.name());
                     bold_label(cx, &header, "mod-context-header")
                         .width(Stretch(1.0))
                         .height(Pixels(16.0));
+
+                    if menu.always_show_actions || menu.osc_pitch_idx.is_some() {
+                        build_context_menu_actions_row(
+                            cx,
+                            dest,
+                            !slots.is_empty(),
+                            menu.show_mod_picker,
+                            &ui_menu,
+                            &p_menu,
+                            &g_menu,
+                        );
+                        if menu.show_mod_picker {
+                            build_context_mod_source_grid(cx, dest, &ui_menu);
+                        }
+                    }
+
                     for (slot_idx, slot) in slots {
                         let (r, g, b) = slot.source.color_rgb();
                         let src_name = ui_menu.source_display_name(slot.source);
@@ -1194,6 +1272,7 @@ pub(crate) fn create(
                         let ui_byp = ui_menu.clone();
                         let ui_pol = ui_menu.clone();
                         let ui_rem = ui_menu.clone();
+                        let keep_open = menu.always_show_actions || menu.osc_pitch_idx.is_some();
                         HStack::new(cx, move |cx| {
                             Element::new(cx)
                                 .width(Pixels(4.0))
@@ -1255,7 +1334,7 @@ pub(crate) fn create(
                             CrossButton::new(cx, move |cx| {
                                 ui_rem.remove_slot_at(slot_idx);
                                 cx.emit(UiEvent::ModUiChanged);
-                                if ui_rem.all_slots_for_dest(dest).is_empty() {
+                                if !keep_open && ui_rem.all_slots_for_dest(dest).is_empty() {
                                     cx.emit(UiEvent::HideModContextMenu);
                                 } else {
                                     cx.emit(UiEvent::ModMenuRefresh);
@@ -1279,7 +1358,7 @@ pub(crate) fn create(
                 Pixels(m.anchor_x.clamp(6.0, BASE_WIDTH as f32 - 236.0))
             }))
             .top(UiData::mod_menu.map(|m| {
-                Pixels(m.anchor_y.clamp(6.0, BASE_HEIGHT as f32 - 150.0))
+                Pixels(m.anchor_y.clamp(6.0, BASE_HEIGHT as f32 - 236.0))
             }))
             .width(Pixels(228.0))
             .height(Auto)
@@ -1290,4 +1369,228 @@ pub(crate) fn create(
         .width(Stretch(1.0))
         .height(Stretch(1.0));
     })
+}
+
+fn build_pitch_mode_menu_section(
+    cx: &mut Context,
+    osc_idx: usize,
+    params: &Arc<JSynPluginParams>,
+    gui_context: &Arc<dyn GuiContext>,
+) {
+    bold_label(cx, "PITCH MODE", "mod-context-header")
+        .width(Stretch(1.0))
+        .height(Pixels(15.0));
+
+    let cur_mode = params.oscs[osc_idx].pitch_mode.value();
+    for (label, target_mode) in [
+        ("Pitch (Semitones)", PitchModeParam::Semitones),
+        ("Ratio (FM Harmonic)", PitchModeParam::Ratio),
+    ] {
+        let active = cur_mode == target_mode;
+        let p_set = params.clone();
+        let g_set = gui_context.clone();
+        Button::new(
+            cx,
+            move |cx| {
+                let setter = ParamSetter::new(g_set.as_ref());
+                let param = &p_set.oscs[osc_idx].pitch_mode;
+                setter.begin_set_parameter(param);
+                setter.set_parameter(param, target_mode);
+                setter.end_set_parameter(param);
+                cx.emit(UiEvent::ModUiChanged);
+                cx.emit(UiEvent::HideModContextMenu);
+            },
+            move |cx| {
+                HStack::new(cx, move |cx| {
+                    if active {
+                        CheckIcon::new(cx)
+                            .class("mod-context-check")
+                            .width(Pixels(12.0))
+                            .height(Pixels(12.0))
+                            .top(Stretch(1.0))
+                            .bottom(Stretch(1.0));
+                    } else {
+                        Element::new(cx)
+                            .width(Pixels(12.0))
+                            .height(Pixels(12.0))
+                            .hoverable(false);
+                    }
+                    bold_label(cx, label, "mod-context-btn-text")
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0))
+                        .child_top(Stretch(1.0))
+                        .child_bottom(Stretch(1.0))
+                        .hoverable(false);
+                })
+                .col_between(Pixels(4.0))
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .hoverable(false)
+            },
+        )
+        .class("mod-context-mode-btn")
+        .checked(active)
+        .width(Stretch(1.0))
+        .height(Pixels(20.0));
+    }
+}
+
+fn build_context_menu_actions_row(
+    cx: &mut Context,
+    dest: ModDestination,
+    has_slots: bool,
+    picker_open: bool,
+    mod_ui: &Arc<ModUiState>,
+    params: &Arc<JSynPluginParams>,
+    gui_context: &Arc<dyn GuiContext>,
+) {
+    let ui_clr = mod_ui.clone();
+    let p_rst = params.clone();
+    let g_rst = gui_context.clone();
+    HStack::new(cx, move |cx| {
+        Button::new(
+            cx,
+            |cx| cx.emit(UiEvent::ToggleModMenuPicker),
+            |cx| {
+                bold_label(cx, "Modulate", "mod-context-btn-text")
+                    .child_space(Stretch(1.0))
+                    .hoverable(false)
+            },
+        )
+        .class("mod-context-btn")
+        .checked(picker_open)
+        .width(Stretch(1.0))
+        .height(Stretch(1.0));
+
+        if has_slots {
+            Button::new(
+                cx,
+                move |cx| {
+                    ui_clr.remove_all_slots_for_dest(dest);
+                    cx.emit(UiEvent::ModUiChanged);
+                    cx.emit(UiEvent::ModMenuRefresh);
+                },
+                |cx| {
+                    bold_label(cx, "Clear Mod", "mod-context-btn-text")
+                        .child_space(Stretch(1.0))
+                        .hoverable(false)
+                },
+            )
+            .class("mod-context-btn")
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
+        }
+
+        Button::new(
+            cx,
+            move |cx| {
+                reset_dest_param_to_default(&p_rst, &g_rst, dest);
+                cx.emit(UiEvent::ModUiChanged);
+                cx.emit(UiEvent::HideModContextMenu);
+            },
+            |cx| {
+                bold_label(cx, "Reset", "mod-context-btn-text")
+                    .child_space(Stretch(1.0))
+                    .hoverable(false)
+            },
+        )
+        .class("mod-context-btn")
+        .width(Pixels(48.0))
+        .height(Stretch(1.0));
+    })
+    .col_between(Pixels(4.0))
+    .width(Stretch(1.0))
+    .height(Pixels(19.0));
+}
+
+fn build_context_mod_source_grid(cx: &mut Context, dest: ModDestination, mod_ui: &Arc<ModUiState>) {
+    VStack::new(cx, move |cx| {
+        for chunk in matrix_tab::ALL_MOD_SOURCES.chunks(7) {
+            HStack::new(cx, move |cx| {
+                for &src in chunk {
+                    let short = mod_source_menu_short_label(src);
+                    let ui_assign = mod_ui.clone();
+                    Button::new(
+                        cx,
+                        move |cx| {
+                            ui_assign.assign_drop(src, dest);
+                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(UiEvent::ToggleModMenuPicker);
+                        },
+                        move |cx| {
+                            bold_label(cx, short, "mod-context-pick-text")
+                                .child_space(Stretch(1.0))
+                                .hoverable(false)
+                        },
+                    )
+                    .class("mod-context-pick-btn")
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0));
+                }
+            })
+            .col_between(Pixels(2.0))
+            .width(Stretch(1.0))
+            .height(Pixels(17.0));
+        }
+    })
+    .class("mod-context-pick-grid")
+    .row_between(Pixels(2.0))
+    .width(Stretch(1.0))
+    .height(Auto);
+}
+
+#[inline]
+fn mod_source_menu_short_label(src: ModMatrixSource) -> &'static str {
+    match src {
+        ModMatrixSource::Env1 => "E1",
+        ModMatrixSource::Env2 => "E2",
+        ModMatrixSource::Env3 => "E3",
+        ModMatrixSource::Env4 => "E4",
+        ModMatrixSource::ModSeq1 => "MS1",
+        ModMatrixSource::ModSeq2 => "MS2",
+        ModMatrixSource::ModSeq3 => "MS3",
+        ModMatrixSource::ModSeq4 => "MS4",
+        ModMatrixSource::Macro1 => "M1",
+        ModMatrixSource::Macro2 => "M2",
+        ModMatrixSource::Macro3 => "M3",
+        ModMatrixSource::Macro4 => "M4",
+        ModMatrixSource::Macro5 => "M5",
+        ModMatrixSource::Macro6 => "M6",
+        ModMatrixSource::Macro7 => "M7",
+        ModMatrixSource::Macro8 => "M8",
+        ModMatrixSource::Velocity => "VEL",
+        ModMatrixSource::Keytrack => "KEY",
+        ModMatrixSource::ModWheel => "MW",
+        ModMatrixSource::Aftertouch => "AT",
+        ModMatrixSource::Slide => "SLD",
+        ModMatrixSource::None => "--",
+    }
+}
+
+fn reset_dest_param_to_default(
+    params: &Arc<JSynPluginParams>,
+    gui_context: &Arc<dyn GuiContext>,
+    dest: ModDestination,
+) {
+    let param = match dest {
+        ModDestination::Osc1Pitch => Some(&params.oscs[0].pitch),
+        ModDestination::Osc2Pitch => Some(&params.oscs[1].pitch),
+        ModDestination::Osc3Pitch => Some(&params.oscs[2].pitch),
+        ModDestination::Osc4Pitch => Some(&params.oscs[3].pitch),
+        ModDestination::Osc1Ratio => Some(&params.oscs[0].ratio),
+        ModDestination::Osc2Ratio => Some(&params.oscs[1].ratio),
+        ModDestination::Osc3Ratio => Some(&params.oscs[2].ratio),
+        ModDestination::Osc4Ratio => Some(&params.oscs[3].ratio),
+        ModDestination::Osc1HzOffset => Some(&params.oscs[0].hz_offset),
+        ModDestination::Osc2HzOffset => Some(&params.oscs[1].hz_offset),
+        ModDestination::Osc3HzOffset => Some(&params.oscs[2].hz_offset),
+        ModDestination::Osc4HzOffset => Some(&params.oscs[3].hz_offset),
+        _ => None,
+    };
+    if let Some(p) = param {
+        let setter = ParamSetter::new(gui_context.as_ref());
+        setter.begin_set_parameter(p);
+        setter.set_parameter(p, p.default_plain_value());
+        setter.end_set_parameter(p);
+    }
 }

@@ -2635,3 +2635,76 @@ fn fx_tube_resonator_tune_filter_dirty_lfo_and_idle() {
     );
     assert!(l_end.abs() < 1e-5 && r_end.abs() < 1e-5);
 }
+
+#[test]
+fn osc_pitch_ratio_hz_offset_and_modulation() {
+    use j_syn_dsp::{ModDestination, ModMatrixSource, ModSlot, OscPitchMode};
+
+    let bank = WavetableBank::new();
+    let sample_rate = 48_000.0;
+
+    let count_zero_crossings = |params: &SynthParams, note: u8| -> usize {
+        let mut eng = SynthEngine::new(sample_rate);
+        eng.note_on(0, note, 0.9, None, params);
+        let mut prev = 0.0_f32;
+        let mut zc = 0usize;
+        for i in 0..4800 {
+            let (l, r) = eng.process_sample(params, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            if i > 200 && prev <= 0.0 && l > 0.0 {
+                zc += 1;
+            }
+            prev = l;
+        }
+        zc
+    };
+
+    let mut base_p = SynthParams::default();
+    base_p.amp_attack_s = 0.001;
+    base_p.filters[0].enabled = false;
+    base_p.oscs[0].pitch_mode = OscPitchMode::Ratio;
+    base_p.oscs[0].ratio = 1.0;
+    base_p.oscs[0].hz_offset = 0.0;
+
+    let mut ratio2_p = base_p;
+    ratio2_p.oscs[0].ratio = 2.0;
+
+    let zc1 = count_zero_crossings(&base_p, 69); // A4 = 440 Hz
+    let zc2 = count_zero_crossings(&ratio2_p, 69); // 880 Hz (2x ratio)
+    let ratio = zc2 as f32 / (zc1.max(1) as f32);
+    assert!(
+        (ratio - 2.0).abs() < 0.08,
+        "Ratio 2.0 must double oscillator frequency: zc1={zc1}, zc2={zc2}, ratio={ratio}"
+    );
+
+    // Ratio = 0.0 with +200 Hz linear offset and keytrack=false produces constant 200 Hz regardless of MIDI note
+    let mut fixed_hz_p = base_p;
+    fixed_hz_p.oscs[0].keytrack = false;
+    fixed_hz_p.oscs[0].ratio = 0.0;
+    fixed_hz_p.oscs[0].hz_offset = 200.0;
+    let zc_fixed_c3 = count_zero_crossings(&fixed_hz_p, 60);
+    let zc_fixed_c5 = count_zero_crossings(&fixed_hz_p, 84);
+    assert_eq!(zc_fixed_c3, zc_fixed_c5);
+    let est_hz = zc_fixed_c3 as f32 * (sample_rate / 4600.0);
+    assert!((est_hz - 200.0).abs() < 15.0, "Expected ~200 Hz fixed beating freq, got {est_hz}");
+
+    // Modulation matrix: Macro1 -> Osc1Ratio raises frequency cleanly
+    let mut mod_ratio_p = base_p;
+    mod_ratio_p.macros[0] = 1.0;
+    mod_ratio_p.mod_matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::Macro1,
+        destination: ModDestination::Osc1Ratio,
+        depth: 0.0625, // +0.0625 * 32 = +2.0 => total ratio 3.0x (1320 Hz on A4)
+        bipolar: false,
+        enabled: true,
+        bypassed: false,
+        aux_source: ModMatrixSource::None,
+        curve: 0.0,
+    };
+    let zc_mod = count_zero_crossings(&mod_ratio_p, 69);
+    let ratio_mod = zc_mod as f32 / (zc1.max(1) as f32);
+    assert!(
+        (ratio_mod - 3.0).abs() < 0.15,
+        "Osc1Ratio modulation (+2.0 -> 3.0x) failed: zc1={zc1}, zc_mod={zc_mod}"
+    );
+}

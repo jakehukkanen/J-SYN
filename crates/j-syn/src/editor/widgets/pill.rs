@@ -36,6 +36,7 @@ pub struct ParamStepPill {
     param_base: ParamWidgetBase,
     num_steps: usize,
     click_cycles: bool,
+    right_click_opens_menu: bool,
     hovered: bool,
     drag_active: bool,
     drag_moved: bool,
@@ -59,7 +60,7 @@ impl ParamStepPill {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
-        Self::build_inner(cx, params, params_to_param, num_steps, true, None, None)
+        Self::build_inner(cx, params, params_to_param, num_steps, true, false, None, None)
     }
 
     pub fn new_with_mod<'a, L, Params, P, FMap>(
@@ -83,6 +84,38 @@ impl ParamStepPill {
             params_to_param,
             num_steps,
             num_steps <= 16,
+            false,
+            Some(ModTargetBinding {
+                dest,
+                mod_ui,
+                tab_tag,
+            }),
+            None,
+        )
+    }
+
+    pub fn new_with_mod_menu<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        num_steps: usize,
+        dest: ModDestination,
+        mod_ui: Arc<ModUiState>,
+        tab_tag: u8,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self::build_inner(
+            cx,
+            params,
+            params_to_param,
+            num_steps,
+            false,
+            true,
             Some(ModTargetBinding {
                 dest,
                 mod_ui,
@@ -105,7 +138,7 @@ impl ParamStepPill {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
-        Self::build_inner(cx, params, params_to_param, num_steps, true, None, Some(label))
+        Self::build_inner(cx, params, params_to_param, num_steps, true, false, None, Some(label))
     }
 
     fn format_tooltip_text(&self) -> Option<String> {
@@ -153,12 +186,14 @@ impl ParamStepPill {
         cx.needs_redraw();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_inner<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         params: L,
         params_to_param: FMap,
         num_steps: usize,
         click_cycles: bool,
+        right_click_opens_menu: bool,
         mod_binding: Option<ModTargetBinding>,
         inline_label: Option<&'static str>,
     ) -> Handle<'a, Self>
@@ -177,6 +212,7 @@ impl ParamStepPill {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
             num_steps: num_steps.max(2),
             click_cycles,
+            right_click_opens_menu,
             hovered: false,
             drag_active: false,
             drag_moved: false,
@@ -305,6 +341,17 @@ impl View for ParamStepPill {
                             meta.consume();
                             return;
                         }
+                    } else if self.right_click_opens_menu {
+                        let bounds = cx.bounds();
+                        let scale = cx.scale_factor().max(0.01);
+                        cx.emit(UiEvent::ShowActionModContextMenu(
+                            mb.dest,
+                            bounds.x / scale,
+                            (bounds.y + bounds.h + 4.0) / scale,
+                        ));
+                        cx.needs_redraw();
+                        meta.consume();
+                        return;
                     } else if cx.modifiers().contains(Modifiers::ALT)
                         || cx.modifiers().command()
                         || cx.modifiers().contains(Modifiers::CTRL)
@@ -429,7 +476,8 @@ impl View for ParamStepPill {
     }
 }
 
-fn draw_pill_with_mod_bar(
+/// Shared pill background + modulation range bar renderer for pills & split-zone ratio drag box.
+pub(super) fn draw_pill_with_mod_bar(
     cx: &mut DrawContext,
     canvas: &mut Canvas,
     param_base: &ParamWidgetBase,
@@ -509,6 +557,7 @@ fn draw_pill_with_mod_bar(
 /// Pitch drag pill (`-48.00..=+48.00 st`) with semitone, fine (`Shift`), and octave (`Cmd+Opt` / `Ctrl+Alt`) drag/scroll steps.
 pub struct PitchDragBox {
     param_base: ParamWidgetBase,
+    osc_pitch_idx: Option<usize>,
     hovered: bool,
     drag_active: bool,
     last_y: f32,
@@ -521,8 +570,9 @@ pub struct PitchDragBox {
 }
 
 impl PitchDragBox {
-    pub fn new_with_mod<'a, L, Params, P, FMap>(
+    pub fn new_osc_pitch<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
+        osc_idx: usize,
         params: L,
         params_to_param: FMap,
         dest: ModDestination,
@@ -535,8 +585,10 @@ impl PitchDragBox {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
+        let osc_pitch_idx = Some(osc_idx);
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
+            osc_pitch_idx,
             hovered: false,
             drag_active: false,
             last_y: 0.0,
@@ -680,6 +732,18 @@ impl View for PitchDragBox {
                             meta.consume();
                             return;
                         }
+                    } else if let Some(osc_idx) = self.osc_pitch_idx {
+                        let bounds = cx.bounds();
+                        let scale = cx.scale_factor().max(0.01);
+                        cx.emit(UiEvent::ShowPitchContextMenu(
+                            osc_idx,
+                            mb.dest,
+                            bounds.x / scale,
+                            (bounds.y + bounds.h + 4.0) / scale,
+                        ));
+                        cx.needs_redraw();
+                        meta.consume();
+                        return;
                     } else if mb.mod_ui.has_slots_for_dest(mb.dest) {
                         let bounds = cx.bounds();
                         let scale = cx.scale_factor().max(0.01);

@@ -503,5 +503,19 @@ mod tests {
         assert!(decoded.params.contains_key("fx_bus_topo"));
         assert!(decoded.params.contains_key("mpe_en"));
         assert!(decoded.params.contains_key("mpe_pb"));
+        assert!(decoded.params.contains_key("pitch_mode_1"));
+        assert!(decoded.params.contains_key("ratio_1"));
+        assert!(decoded.params.contains_key("hz_offset_1"));
+
+        // Verify DSP SymmetricalSkewed Hz offset mapping matches nih-plug FloatParam range
+        for step in 0..=10 {
+            let norm = step as f32 / 10.0;
+            let param_hz = params.oscs[0].hz_offset.preview_plain(norm);
+            let dsp_hz = j_syn_dsp::osc_hz_offset_from_norm(norm);
+            assert!(
+                (param_hz - dsp_hz).abs() < 1e-2,
+                "hz_offset mismatch at norm={norm}: param={param_hz}, dsp={dsp_hz}"
+            );
+        }
     }
 }

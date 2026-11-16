@@ -49,8 +49,9 @@ pub use modseq::{
 };
 pub use noise::{NoiseParams, NoiseState, NoiseType};
 pub use oscillator::{
-    sample_with_warp_and_pm, warp_phase_bend, EngineMode, ModOrder, ModSource, ModType, OscParams,
-    OscillatorState, WarpMode, MAX_UNISON,
+    osc_hz_offset_from_norm, osc_hz_offset_to_norm, sample_with_warp_and_pm, warp_phase_bend,
+    EngineMode, ModOrder, ModSource, ModType, OscParams, OscPitchMode, OscillatorState, WarpMode,
+    MAX_UNISON,
 };
 pub use voice::{PolyMode, SynthParams, TailVoice, Voice, VoiceBusOutput};
 pub use wavetable::{

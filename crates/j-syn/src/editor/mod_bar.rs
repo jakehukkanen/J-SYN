@@ -120,6 +120,7 @@ impl ModUiState {
         for osc in &params.oscs {
             Self::fnv1a_mix(&mut h, osc.enabled.value() as u64);
             Self::fnv1a_mix(&mut h, (osc.unison.value() > 1) as u64);
+            Self::fnv1a_mix(&mut h, osc.pitch_mode.value() as u64);
         }
         Self::fnv1a_mix(&mut h, params.noise.enabled.value() as u64);
         Self::fnv1a_mix(&mut h, params.filters[0].enabled.value() as u64);
@@ -458,6 +459,26 @@ impl ModUiState {
             self.inspected_dest.store(UNSET_U8, Ordering::Relaxed);
         }
         true
+    }
+
+    pub fn remove_all_slots_for_dest(&self, dest: ModDestination) -> bool {
+        let mut mat = self.params.mod_matrix.snapshot();
+        let mut cleared = false;
+        for idx in 0..NUM_MOD_SLOTS {
+            let s = mat.slots[idx];
+            if s.enabled && s.source != ModMatrixSource::None && s.destination == dest {
+                mat.clear_slot(idx);
+                cleared = true;
+            }
+        }
+        if cleared {
+            self.params.mod_matrix.store_value(mat);
+            if self.inspected_dest.load(Ordering::Relaxed) as usize == dest.index() {
+                self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
+                self.inspected_dest.store(UNSET_U8, Ordering::Relaxed);
+            }
+        }
+        cleared
     }
 
     pub fn inspected_entry(&self) -> Option<(usize, ModSlot)> {
