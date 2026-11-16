@@ -273,7 +273,7 @@ pub(super) fn build_osc_panel(
             let p_bot = p_right;
             let g_bot = gui_right;
             HStack::new(cx, move |cx| {
-                Element::new(cx).width(Stretch(0.90)).height(Pixels(18.0));
+                Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
 
                 build_enum_dropdown(
                     cx,
@@ -282,7 +282,7 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).warp_mode,
                     WARP_ITEMS,
                 )
-                .width(Stretch(1.0))
+                .width(Pixels(48.0))
                 .height(Pixels(18.0));
 
                 let p_ord = p_bot.clone();
@@ -315,7 +315,7 @@ pub(super) fn build_osc_panel(
                     },
                 )
                 .class("wt-step-btn")
-                .width(Pixels(22.0))
+                .width(Pixels(20.0))
                 .height(Pixels(18.0));
 
                 let p_mod_trig = p_bot.clone();
@@ -370,12 +370,12 @@ pub(super) fn build_osc_panel(
                         }
                     },
                 )
-                .width(Stretch(1.0))
+                .width(Pixels(48.0))
                 .height(Pixels(18.0));
 
-                Element::new(cx).width(Stretch(0.90)).height(Pixels(18.0));
+                Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
             })
-            .col_between(Pixels(2.0))
+            .col_between(Pixels(3.0))
             .width(Stretch(1.0))
             .height(Pixels(18.0));
         })
