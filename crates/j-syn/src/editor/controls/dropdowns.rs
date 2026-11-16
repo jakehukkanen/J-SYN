@@ -11,7 +11,9 @@ use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
 use super::bold_label;
 use super::icon_buttons::{ArrowDir, VectorArrow};
-use super::super::{notify_baseview_resize_macos, UiData, UiEvent};
+#[cfg(target_os = "macos")]
+use super::super::notify_baseview_resize_macos;
+use super::super::{UiData, UiEvent};
 use crate::{JSynPluginParams, WavetableChoice};
 
 pub(crate) fn build_dropdown_trigger_labels<T>(cx: &mut Context, text: impl Res<T> + Clone)
