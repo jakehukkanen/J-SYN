@@ -328,7 +328,10 @@ impl ThemePalette {
             // Mod accents
             "#00e676" => &self.mod_env,
             "#00e5ff" | "#9be8ff" => &self.mod_seq,
-            "#ff6b6b" => &self.mod_midi,
+            "#ff6b6b" | "#7a4540" | "#8a4b44" => &self.mod_midi,
+            "#3f2826" | "#472826" => &self.surface_mid,
+            "#6b3530" | "#6b3632" => &self.surface_hover,
+            "#ffe3de" => &self.text_bright,
             _ => token,
         }
     }
@@ -352,6 +355,22 @@ pub fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
 #[inline]
 pub fn vg_color(hex: &str, alpha: u8) -> vg::Color {
     let (r, g, b) = hex_to_rgb(hex);
+    vg::Color::rgba(r, g, b, alpha)
+}
+
+#[inline]
+pub fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
+    let t = t.clamp(0.0, 1.0);
+    (
+        (a.0 as f32 + (b.0 as f32 - a.0 as f32) * t).round() as u8,
+        (a.1 as f32 + (b.1 as f32 - a.1 as f32) * t).round() as u8,
+        (a.2 as f32 + (b.2 as f32 - a.2 as f32) * t).round() as u8,
+    )
+}
+
+#[inline]
+pub fn vg_lerp(hex_a: &str, hex_b: &str, t: f32, alpha: u8) -> vg::Color {
+    let (r, g, b) = lerp_rgb(hex_to_rgb(hex_a), hex_to_rgb(hex_b), t);
     vg::Color::rgba(r, g, b, alpha)
 }
 

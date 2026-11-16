@@ -10,7 +10,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown, build_flex_knob_cell_mod_dim,
     build_pitch_pill_cell, build_stacked_pill_cell, build_stacked_pill_cell_mod,
-    build_wavetable_dropdown, step_wavetable,
+    build_wavetable_dropdown, step_wavetable, ScrollDropdown,
 };
 use super::mod_bar::ModUiState;
 use super::scope::WavetableScope;
@@ -318,56 +318,90 @@ pub(super) fn build_osc_panel(
                 .width(Pixels(20.0))
                 .height(Pixels(18.0));
 
+                let p_mod_scroll = p_bot.clone();
+                let g_mod_scroll = g_bot.clone();
                 let p_mod_trig = p_bot.clone();
                 let p_mod_pop = p_bot;
                 let g_mod_pop = g_bot;
-                Dropdown::new(
+                ScrollDropdown::new(
                     cx,
-                    move |cx| {
-                        let p_m = p_mod_trig.clone();
-                        HStack::new(cx, move |cx| {
-                            build_dropdown_trigger_labels(
-                                cx,
-                                UiData::params.map(move |_| {
-                                    let osc = &p_m.oscs[osc_idx];
-                                    let src = osc.mod_source.value();
-                                    let ty = osc.mod_type.value();
-                                    let prefix = match ty {
-                                        ModTypeParam::Pm => "PM",
-                                        ModTypeParam::Rm => "RM",
-                                    };
-                                    match src {
-                                        ModSourceParam::Off => "Off".to_string(),
-                                        ModSourceParam::Osc1 => format!("{prefix} 1"),
-                                        ModSourceParam::Osc2 => format!("{prefix} 2"),
-                                        ModSourceParam::Osc3 => format!("{prefix} 3"),
-                                        ModSourceParam::Osc4 => format!("{prefix} 4"),
-                                    }
-                                }),
-                            );
-                        })
-                        .width(Stretch(1.0))
-                        .height(Stretch(1.0))
-                        .child_top(Pixels(0.0))
-                        .child_bottom(Pixels(0.0))
-                        .overflow(Overflow::Hidden)
+                    move |_cx, delta| {
+                        let cur_src = p_mod_scroll.oscs[osc_idx].mod_source.value();
+                        let cur_ty = p_mod_scroll.oscs[osc_idx].mod_type.value();
+                        let pos = UNIFIED_MOD_ITEMS
+                            .iter()
+                            .position(|&(_, s, t)| {
+                                s == cur_src && (s == ModSourceParam::Off || t == cur_ty)
+                            })
+                            .unwrap_or(0);
+                        let next = (pos as isize + delta)
+                            .clamp(0, UNIFIED_MOD_ITEMS.len() as isize - 1)
+                            as usize;
+                        if next != pos {
+                            let (_, src, ty) = UNIFIED_MOD_ITEMS[next];
+                            let setter = ParamSetter::new(g_mod_scroll.as_ref());
+                            let osc = &p_mod_scroll.oscs[osc_idx];
+                            setter.begin_set_parameter(&osc.mod_type);
+                            setter.set_parameter(&osc.mod_type, ty);
+                            setter.end_set_parameter(&osc.mod_type);
+                            setter.begin_set_parameter(&osc.mod_source);
+                            setter.set_parameter(&osc.mod_source, src);
+                            setter.end_set_parameter(&osc.mod_source);
+                        }
                     },
                     move |cx| {
-                        for &(label, src, ty) in UNIFIED_MOD_ITEMS {
-                            let p_set = p_mod_pop.clone();
-                            let g_set = g_mod_pop.clone();
-                            bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                                let setter = ParamSetter::new(g_set.as_ref());
-                                let osc = &p_set.oscs[osc_idx];
-                                setter.begin_set_parameter(&osc.mod_type);
-                                setter.set_parameter(&osc.mod_type, ty);
-                                setter.end_set_parameter(&osc.mod_type);
-                                setter.begin_set_parameter(&osc.mod_source);
-                                setter.set_parameter(&osc.mod_source, src);
-                                setter.end_set_parameter(&osc.mod_source);
-                                cx.emit(PopupEvent::Close);
-                            });
-                        }
+                        let p_mod_trig = p_mod_trig.clone();
+                        let p_mod_pop = p_mod_pop.clone();
+                        let g_mod_pop = g_mod_pop.clone();
+                        Dropdown::new(
+                            cx,
+                            move |cx| {
+                                let p_m = p_mod_trig.clone();
+                                HStack::new(cx, move |cx| {
+                                    build_dropdown_trigger_labels(
+                                        cx,
+                                        UiData::params.map(move |_| {
+                                            let osc = &p_m.oscs[osc_idx];
+                                            let src = osc.mod_source.value();
+                                            let ty = osc.mod_type.value();
+                                            let prefix = match ty {
+                                                ModTypeParam::Pm => "PM",
+                                                ModTypeParam::Rm => "RM",
+                                            };
+                                            match src {
+                                                ModSourceParam::Off => "Off".to_string(),
+                                                ModSourceParam::Osc1 => format!("{prefix} 1"),
+                                                ModSourceParam::Osc2 => format!("{prefix} 2"),
+                                                ModSourceParam::Osc3 => format!("{prefix} 3"),
+                                                ModSourceParam::Osc4 => format!("{prefix} 4"),
+                                            }
+                                        }),
+                                    );
+                                })
+                                .width(Stretch(1.0))
+                                .height(Stretch(1.0))
+                                .child_top(Pixels(0.0))
+                                .child_bottom(Pixels(0.0))
+                                .overflow(Overflow::Hidden)
+                            },
+                            move |cx| {
+                                for &(label, src, ty) in UNIFIED_MOD_ITEMS {
+                                    let p_set = p_mod_pop.clone();
+                                    let g_set = g_mod_pop.clone();
+                                    bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                                        let setter = ParamSetter::new(g_set.as_ref());
+                                        let osc = &p_set.oscs[osc_idx];
+                                        setter.begin_set_parameter(&osc.mod_type);
+                                        setter.set_parameter(&osc.mod_type, ty);
+                                        setter.end_set_parameter(&osc.mod_type);
+                                        setter.begin_set_parameter(&osc.mod_source);
+                                        setter.set_parameter(&osc.mod_source, src);
+                                        setter.end_set_parameter(&osc.mod_source);
+                                        cx.emit(PopupEvent::Close);
+                                    });
+                                }
+                            },
+                        )
                     },
                 )
                 .width(Pixels(48.0))

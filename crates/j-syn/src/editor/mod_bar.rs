@@ -790,7 +790,8 @@ impl View for ModSourcePill {
             return;
         }
         let dpx = cx.scale_factor();
-        let (r, g, b) = self.source.color_rgb();
+        let pal = super::theme::current_palette(cx);
+        let (r, g, b) = super::theme::mod_source_rgb(&pal, self.source);
         let is_dragging = self.mod_ui.dragging_source() == self.source;
         let is_active_tab = self.mod_ui.is_source_tab_active(self.source);
         let is_hovered = self.hovered;
@@ -801,15 +802,13 @@ impl View for ModSourcePill {
         let fill = if is_dragging {
             vg::Color::rgba(r, g, b, 90)
         } else if is_active_tab {
-            vg::Color::rgb(
-                (54 + (r as u16 / 10)).min(255) as u8,
-                (46 + (g as u16 / 10)).min(255) as u8,
-                (40 + (b as u16 / 10)).min(255) as u8,
-            )
+            let (mr, mg, mb) = super::theme::hex_to_rgb(&pal.surface_hover);
+            let (tr, tg, tb) = super::theme::lerp_rgb((mr, mg, mb), (r, g, b), 0.16);
+            vg::Color::rgb(tr, tg, tb)
         } else if is_hovered {
-            vg::Color::rgb(68, 56, 46)
+            super::theme::vg_color(&pal.surface_hover, 255)
         } else {
-            vg::Color::rgb(46, 39, 34)
+            super::theme::vg_color(&pal.surface_mid, 255)
         };
         canvas.fill_path(&bg, &vg::Paint::color(fill));
 

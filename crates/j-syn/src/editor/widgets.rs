@@ -692,14 +692,14 @@ impl View for RotaryKnob {
             center_x,
             center_y + body_r,
             if is_enabled {
-                vg::Color::rgb(112, 98, 86)
+                super::theme::vg_lerp(&pal.border_light, &pal.text_muted, 0.25, 255)
             } else {
-                vg::Color::rgb(70, 62, 56)
+                super::theme::vg_lerp(&pal.panel_header_bg, &pal.border_light, 0.35, 255)
             },
             if is_enabled {
-                vg::Color::rgb(50, 42, 36)
+                super::theme::vg_color(&pal.knob_body, 255)
             } else {
-                vg::Color::rgb(38, 33, 29)
+                super::theme::vg_lerp(&pal.knob_body, &pal.panel_bg, 0.25, 255)
             },
         );
         canvas.fill_path(&body_path, &body_paint);
@@ -707,21 +707,33 @@ impl View for RotaryKnob {
         let mut rim_stroke = vg::Paint::color(if self.hovered || self.drag_active {
             vg::Color::rgba(ar, ag, ab, if is_enabled { 210 } else { 145 })
         } else {
-            vg::Color::rgba(24, 20, 17, 235)
+            super::theme::vg_color(&pal.border_dark, 235)
         });
         rim_stroke.set_line_width(1.1 * dpx);
         canvas.stroke_path(&body_path, &rim_stroke);
 
         let (cap_hi, cap_lo) = if is_enabled {
             if self.hovered || self.drag_active {
-                (vg::Color::rgb(156, 138, 122), vg::Color::rgb(74, 63, 55))
+                (
+                    super::theme::vg_lerp(&pal.border_light, &pal.text_bright, 0.45, 255),
+                    super::theme::vg_lerp(&pal.knob_body, &pal.panel_header_bg, 0.55, 255),
+                )
             } else {
-                (vg::Color::rgb(138, 122, 108), vg::Color::rgb(62, 53, 46))
+                (
+                    super::theme::vg_lerp(&pal.border_light, &pal.text_muted, 0.40, 255),
+                    super::theme::vg_lerp(&pal.knob_body, &pal.panel_header_bg, 0.35, 255),
+                )
             }
         } else if self.hovered || self.drag_active {
-            (vg::Color::rgb(98, 88, 80), vg::Color::rgb(54, 47, 42))
+            (
+                super::theme::vg_lerp(&pal.panel_header_bg, &pal.text_muted, 0.25, 255),
+                super::theme::vg_lerp(&pal.knob_body, &pal.panel_header_bg, 0.20, 255),
+            )
         } else {
-            (vg::Color::rgb(86, 76, 68), vg::Color::rgb(48, 42, 37))
+            (
+                super::theme::vg_lerp(&pal.panel_header_bg, &pal.text_muted, 0.15, 255),
+                super::theme::vg_color(&pal.knob_body, 255),
+            )
         };
         let mut cap_path = vg::Path::new();
         cap_path.circle(center_x, center_y, cap_r);
@@ -997,8 +1009,9 @@ impl View for LedToggleSwitch {
         }
 
         let dpx = cx.scale_factor();
+        let pal = super::theme::current_palette(cx);
         let is_on = self.param_base.modulated_normalized_value() >= 0.5;
-        let (ar, ag, ab) = self.accent_rgb;
+        let (ar, ag, ab) = pal.accent_rgb();
 
         let r = 3.5 * dpx;
         let mut bg = vg::Path::new();
@@ -1010,8 +1023,8 @@ impl View for LedToggleSwitch {
                 bounds.y,
                 bounds.x,
                 bounds.y + bounds.h,
-                vg::Color::rgb(98, 84, 72),
-                vg::Color::rgb(64, 54, 46),
+                super::theme::vg_color(&pal.border_light, 255),
+                super::theme::vg_color(&pal.surface_hover, 255),
             )
         } else if is_on {
             vg::Paint::linear_gradient(
@@ -1019,8 +1032,8 @@ impl View for LedToggleSwitch {
                 bounds.y,
                 bounds.x,
                 bounds.y + bounds.h,
-                vg::Color::rgb(82, 70, 60),
-                vg::Color::rgb(52, 44, 38),
+                super::theme::vg_color(&pal.surface_hover, 255),
+                super::theme::vg_color(&pal.panel_header_bg, 255),
             )
         } else if self.hovered {
             vg::Paint::linear_gradient(
@@ -1028,8 +1041,8 @@ impl View for LedToggleSwitch {
                 bounds.y,
                 bounds.x,
                 bounds.y + bounds.h,
-                vg::Color::rgb(68, 58, 50),
-                vg::Color::rgb(48, 40, 35),
+                super::theme::vg_color(&pal.panel_header_bg, 255),
+                super::theme::vg_color(&pal.surface_mid, 255),
             )
         } else {
             vg::Paint::linear_gradient(
@@ -1037,8 +1050,8 @@ impl View for LedToggleSwitch {
                 bounds.y,
                 bounds.x,
                 bounds.y + bounds.h,
-                vg::Color::rgb(54, 46, 40),
-                vg::Color::rgb(38, 32, 28),
+                super::theme::vg_color(&pal.surface_mid, 255),
+                super::theme::vg_color(&pal.surface_dark, 255),
             )
         };
         canvas.fill_path(&bg, &housing_paint);
@@ -1048,7 +1061,7 @@ impl View for LedToggleSwitch {
         } else if self.hovered {
             vg::Color::rgba(ar, ag, ab, 120)
         } else {
-            vg::Color::rgba(24, 20, 17, 235)
+            super::theme::vg_color(&pal.border_dark, 235)
         });
         border.set_line_width(1.0 * dpx);
         canvas.stroke_path(&bg, &border);

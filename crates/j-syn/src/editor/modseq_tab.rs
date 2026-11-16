@@ -492,12 +492,13 @@ impl View for ModSeqCurveCanvas {
             return;
         }
         let dpx = cx.scale_factor();
-        let (ar, ag, ab) = subtab_accent(ModSeqSubTab::MSeq(self.seq_idx));
+        let pal = super::theme::current_palette(cx);
+        let (ar, ag, ab) = pal.mod_seq_rgb();
 
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 4.0 * dpx);
-        canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(26, 21, 18)));
-        let mut border = vg::Paint::color(vg::Color::rgb(73, 62, 54));
+        canvas.fill_path(&bg, &vg::Paint::color(super::theme::vg_color(&pal.scope_bg, 255)));
+        let mut border = vg::Paint::color(super::theme::vg_color(&pal.border_mid, 255));
         border.set_line_width(1.0 * dpx);
         canvas.stroke_path(&bg, &border);
 
@@ -516,9 +517,9 @@ impl View for ModSeqCurveCanvas {
         let mseg = &bank.msegs[self.seq_idx];
 
         // Subtle grid (in LFO mode with SNAP enabled, show 1/16 x 1/8 snap lines)
-        let mut grid_paint = vg::Paint::color(vg::Color::rgba(90, 77, 66, 95));
+        let mut grid_paint = vg::Paint::color(super::theme::vg_color(&pal.scope_grid, 175));
         grid_paint.set_line_width(0.8 * dpx);
-        let mut snap_grid_paint = vg::Paint::color(vg::Color::rgba(90, 77, 66, 48));
+        let mut snap_grid_paint = vg::Paint::color(super::theme::vg_color(&pal.scope_grid, 90));
         snap_grid_paint.set_line_width(0.65 * dpx);
         let snap_on = is_mseg && self.mod_ui.mseg_snap();
 
@@ -834,7 +835,8 @@ impl View for LfoPresetBar {
             return;
         }
         let dpx = cx.scale_factor();
-        let accent = subtab_accent(ModSeqSubTab::MSeq(self.seq_idx));
+        let pal = super::theme::current_palette(cx);
+        let accent = pal.mod_seq_rgb();
         let gap = 2.0 * dpx;
 
         for (idx, &preset) in LfoPreset::ALL.iter().enumerate() {
@@ -847,15 +849,15 @@ impl View for LfoPresetBar {
             canvas.fill_path(
                 &tile,
                 &vg::Paint::color(if hovered {
-                    vg::Color::rgb(56, 47, 40)
+                    super::theme::vg_color(&pal.surface_hover, 255)
                 } else {
-                    vg::Color::rgb(38, 32, 27)
+                    super::theme::vg_color(&pal.surface_dark, 255)
                 }),
             );
             let mut border = vg::Paint::color(if hovered {
-                vg::Color::rgb(245, 179, 73)
+                super::theme::vg_color(&pal.accent_primary, 255)
             } else {
-                vg::Color::rgb(76, 64, 54)
+                super::theme::vg_color(&pal.border_mid, 255)
             });
             border.set_line_width(1.0 * dpx);
             canvas.stroke_path(&tile, &border);
@@ -986,7 +988,8 @@ impl View for ModSeqPaletteGrid {
         let pad = 2.0 * dpx;
         let gap = 2.0 * dpx;
         let active_shape = self.mod_ui.active_stamp();
-        let accent = subtab_accent(ModSeqSubTab::MSeq(self.seq_idx));
+        let pal = super::theme::current_palette(cx);
+        let accent = pal.mod_seq_rgb();
 
         for (idx, &shape) in ModSeqStepShape::PALETTE.iter().enumerate() {
             let (tx, ty, tw, th) = grid_tile_rect(bounds, idx, 9, 2, pad, gap);
@@ -998,26 +1001,26 @@ impl View for ModSeqPaletteGrid {
             canvas.fill_path(
                 &tile,
                 &vg::Paint::color(if is_active {
-                    vg::Color::rgb(73, 56, 38)
+                    super::theme::vg_color(&pal.surface_active, 255)
                 } else if hovered {
-                    vg::Color::rgb(53, 44, 36)
+                    super::theme::vg_color(&pal.surface_hover, 255)
                 } else {
-                    vg::Color::rgb(37, 31, 26)
+                    super::theme::vg_color(&pal.surface_dark, 255)
                 }),
             );
             let mut border = vg::Paint::color(if is_active {
-                vg::Color::rgb(245, 179, 73)
+                super::theme::vg_color(&pal.accent_primary, 255)
             } else if hovered {
-                vg::Color::rgb(180, 140, 95)
+                super::theme::vg_color(&pal.border_light, 255)
             } else {
-                vg::Color::rgb(68, 57, 48)
+                super::theme::vg_color(&pal.border_mid, 255)
             });
             border.set_line_width((if is_active { 1.25 } else { 0.9 }) * dpx);
             canvas.stroke_path(&tile, &border);
 
             let sub = shape.subdivision();
             if sub > 1 {
-                let mut div_paint = vg::Paint::color(vg::Color::rgba(155, 138, 120, 65));
+                let mut div_paint = vg::Paint::color(super::theme::vg_color(&pal.text_dim, 95));
                 div_paint.set_line_width(0.75 * dpx);
                 for k in 1..sub {
                     let dx = tx + (k as f32 / sub as f32) * tw;
@@ -1079,12 +1082,13 @@ impl View for AdsrPreviewScope {
             return;
         }
         let dpx = cx.scale_factor();
-        let (ar, ag, ab) = subtab_accent(ModSeqSubTab::Env(self.env_idx));
+        let pal = super::theme::current_palette(cx);
+        let (ar, ag, ab) = pal.mod_env_rgb();
 
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 4.0 * dpx);
-        canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(26, 21, 18)));
-        let mut border = vg::Paint::color(vg::Color::rgb(73, 62, 54));
+        canvas.fill_path(&bg, &vg::Paint::color(super::theme::vg_color(&pal.scope_bg, 255)));
+        let mut border = vg::Paint::color(super::theme::vg_color(&pal.border_mid, 255));
         border.set_line_width(1.0 * dpx);
         canvas.stroke_path(&bg, &border);
 
