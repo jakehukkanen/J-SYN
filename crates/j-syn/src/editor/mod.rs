@@ -47,7 +47,8 @@ mod widgets;
 use controls::{
     bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_flex_knob_cell_mod,
     build_flex_knob_cell_mod_dim, build_header_knob_cell, build_knob_cell, build_mini_pill_cell,
-    build_module_header, build_tab_button, build_ui_scale_dropdown,
+    build_module_header, build_tab_button, build_ui_scale_dropdown, ArrowDir, VectorArrow,
+    VectorCross,
 };
 use filter_panel::build_filter_panel;
 use insert_panel::build_insert_panel;
@@ -707,7 +708,7 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             Button::new(
                 cx,
                 |cx| cx.emit(UiEvent::StepPreset(-1)),
-                |cx| bold_label(cx, "<", "preset-btn-label").hoverable(false),
+                |cx| VectorArrow::new(cx, ArrowDir::Left, "preset-btn-label"),
             )
             .class("preset-btn")
             .width(Pixels(20.0))
@@ -764,7 +765,7 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             Button::new(
                 cx,
                 |cx| cx.emit(UiEvent::StepPreset(1)),
-                |cx| bold_label(cx, ">", "preset-btn-label").hoverable(false),
+                |cx| VectorArrow::new(cx, ArrowDir::Right, "preset-btn-label"),
             )
             .class("preset-btn")
             .width(Pixels(20.0))
@@ -1027,7 +1028,7 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(1.50))
+                        .width(Stretch(1.38))
                         .height(Stretch(1.0));
 
                         VStack::new(cx, {
@@ -1054,7 +1055,7 @@ fn build_bottom_tabs(
                                         .height(Pixels(24.0));
                                     })
                                     .row_between(Pixels(2.0))
-                                    .width(Pixels(70.0))
+                                    .width(Pixels(62.0))
                                     .height(Auto)
                                     .top(Stretch(1.0))
                                     .bottom(Stretch(1.0));
@@ -1066,6 +1067,28 @@ fn build_bottom_tabs(
                                         "PB RANGE",
                                         24,
                                         52.0,
+                                    );
+
+                                    LedToggleSwitch::new(
+                                        cx,
+                                        UiData::params,
+                                        |p| &p.mpe_enabled,
+                                        "MPE",
+                                        "MPE",
+                                        AMBER_RGB,
+                                    )
+                                    .width(Pixels(54.0))
+                                    .height(Pixels(22.0))
+                                    .top(Stretch(1.0))
+                                    .bottom(Stretch(1.0));
+
+                                    build_mini_pill_cell(
+                                        cx,
+                                        UiData::params,
+                                        |p| &p.mpe_pitch_bend_range,
+                                        "MPE PB",
+                                        48,
+                                        50.0,
                                     );
 
                                     build_flex_knob_cell_mod(
@@ -1092,7 +1115,7 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(0.85))
+                        .width(Stretch(1.04))
                         .height(Stretch(1.0));
 
                         VStack::new(cx, {
@@ -1131,7 +1154,7 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(0.95))
+                        .width(Stretch(0.88))
                         .height(Stretch(1.0));
                     })
                     .col_between(Pixels(6.0))
@@ -1441,11 +1464,7 @@ pub(crate) fn create(
                                         cx.emit(UiEvent::ModMenuRefresh);
                                     }
                                 },
-                                |cx| {
-                                    bold_label(cx, "x", "mod-context-btn-text")
-                                        .child_space(Stretch(1.0))
-                                        .hoverable(false)
-                                },
+                                |cx| VectorCross::new(cx, "mod-context-btn-text"),
                             )
                             .class("mod-context-btn")
                             .width(Pixels(20.0))

@@ -12,7 +12,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown,
     build_enum_dropdown_with_override, build_inline_pill_cell, build_prefixed_enum_dropdown,
-    ScrollDropdown,
+    ArrowDir, ScrollDropdown, VectorArrow,
 };
 use super::fx_scopes::{fx_accent_rgb, FxSlotVisualizer};
 use super::mod_bar::{ModUiState, FX_VIEW_TAG, MAIN_FX_A_TAG, MAIN_FX_B_TAG};
@@ -559,7 +559,7 @@ fn build_fx_slot_header(
                         cx.emit(UiEvent::ModUiChanged);
                     }
                 },
-                |cx| bold_label(cx, "▲", "fx-move-label").hoverable(false),
+                |cx| VectorArrow::new(cx, ArrowDir::Up, "fx-move-label"),
             )
             .class("fx-move-btn")
             .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 0))
@@ -577,7 +577,7 @@ fn build_fx_slot_header(
                         cx.emit(UiEvent::ModUiChanged);
                     }
                 },
-                |cx| bold_label(cx, "▼", "fx-move-label").hoverable(false),
+                |cx| VectorArrow::new(cx, ArrowDir::Down, "fx-move-label"),
             )
             .class("fx-move-btn")
             .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 7))

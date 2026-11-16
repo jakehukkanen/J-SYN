@@ -29,6 +29,180 @@ where
         .font_weight(FontWeightKeyword::Bold)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ArrowDir {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// Crisp, centroid-centered `femtovg` triangle icon (`2/3` tip, `1/3` base) for buttons and carets.
+pub(super) struct VectorArrow {
+    dir_fn: Box<dyn Fn(&mut DrawContext) -> ArrowDir>,
+    fixed_height_px: Option<f32>,
+}
+
+impl VectorArrow {
+    pub(super) fn new<'a>(
+        cx: &'a mut Context,
+        dir: ArrowDir,
+        class_name: &str,
+    ) -> Handle<'a, Self> {
+        Self {
+            dir_fn: Box::new(move |_| dir),
+            fixed_height_px: None,
+        }
+        .build(cx, |_| {})
+        .class(class_name)
+        .width(Percentage(100.0))
+        .height(Percentage(100.0))
+        .hoverable(false)
+    }
+
+    pub(super) fn reactive<'a, L, F>(
+        cx: &'a mut Context,
+        lens: L,
+        dir_fn: F,
+        class_name: &str,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens,
+        <L as Lens>::Target: Data,
+        F: 'static + Fn(&mut DrawContext) -> ArrowDir,
+    {
+        Self {
+            dir_fn: Box::new(dir_fn),
+            fixed_height_px: None,
+        }
+        .build(cx, |_| {})
+        .class(class_name)
+        .width(Percentage(100.0))
+        .height(Percentage(100.0))
+        .hoverable(false)
+        .bind(lens, |mut handle, _| handle.needs_redraw())
+    }
+
+    pub(super) fn caret<'a>(
+        cx: &'a mut Context,
+        dir: ArrowDir,
+        class_name: &str,
+    ) -> Handle<'a, Self> {
+        Self {
+            dir_fn: Box::new(move |_| dir),
+            fixed_height_px: Some(4.5),
+        }
+        .build(cx, |_| {})
+        .class(class_name)
+        .hoverable(false)
+    }
+}
+
+impl View for VectorArrow {
+    fn element(&self) -> Option<&'static str> {
+        Some("vector-arrow")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        use nih_plug_vizia::vizia::vg;
+
+        let bounds = cx.bounds();
+        if bounds.w <= 1.0 || bounds.h <= 1.0 {
+            return;
+        }
+        let fc = cx.font_color();
+        let color = if fc.a() == 0 {
+            let pal = super::theme::current_palette(cx);
+            super::theme::vg_color(&pal.text_primary, 255)
+        } else {
+            vg::Color::rgba(fc.r(), fc.g(), fc.b(), fc.a())
+        };
+
+        let scale = cx.scale_factor();
+        let cx_pt = bounds.x + bounds.w * 0.5;
+        let cy_pt = bounds.y + bounds.h * 0.5;
+        let h = match self.fixed_height_px {
+            Some(px) => px * scale,
+            None => bounds.h.min(bounds.w) * 0.36,
+        };
+        let half_base = h * 0.58;
+        let mut tri = vg::Path::new();
+
+        match (self.dir_fn)(cx) {
+            ArrowDir::Left => {
+                tri.move_to(cx_pt - h * 0.60, cy_pt);
+                tri.line_to(cx_pt + h * 0.40, cy_pt - half_base);
+                tri.line_to(cx_pt + h * 0.40, cy_pt + half_base);
+            }
+            ArrowDir::Right => {
+                tri.move_to(cx_pt + h * 0.60, cy_pt);
+                tri.line_to(cx_pt - h * 0.40, cy_pt - half_base);
+                tri.line_to(cx_pt - h * 0.40, cy_pt + half_base);
+            }
+            ArrowDir::Up => {
+                tri.move_to(cx_pt, cy_pt - h * 0.60);
+                tri.line_to(cx_pt - half_base, cy_pt + h * 0.40);
+                tri.line_to(cx_pt + half_base, cy_pt + h * 0.40);
+            }
+            ArrowDir::Down => {
+                tri.move_to(cx_pt, cy_pt + h * 0.60);
+                tri.line_to(cx_pt - half_base, cy_pt - h * 0.40);
+                tri.line_to(cx_pt + half_base, cy_pt - h * 0.40);
+            }
+        }
+        tri.close();
+        canvas.fill_path(&tri, &vg::Paint::color(color));
+    }
+}
+
+/// Crisp, mathematically centered close cross for compact icon buttons.
+pub(super) struct VectorCross;
+
+impl VectorCross {
+    pub(super) fn new<'a>(cx: &'a mut Context, class_name: &str) -> Handle<'a, Self> {
+        Self.build(cx, |_| {})
+            .class(class_name)
+            .width(Percentage(100.0))
+            .height(Percentage(100.0))
+            .hoverable(false)
+    }
+}
+
+impl View for VectorCross {
+    fn element(&self) -> Option<&'static str> {
+        Some("vector-cross")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        use nih_plug_vizia::vizia::vg;
+
+        let bounds = cx.bounds();
+        if bounds.w <= 1.0 || bounds.h <= 1.0 {
+            return;
+        }
+        let fc = cx.font_color();
+        let color = if fc.a() == 0 {
+            let pal = super::theme::current_palette(cx);
+            super::theme::vg_color(&pal.text_primary, 255)
+        } else {
+            vg::Color::rgba(fc.r(), fc.g(), fc.b(), fc.a())
+        };
+
+        let cx_p = bounds.x + bounds.w * 0.5;
+        let cy_p = bounds.y + bounds.h * 0.5;
+        let r = bounds.w.min(bounds.h) * 0.17;
+        let mut cross = vg::Path::new();
+        cross.move_to(cx_p - r, cy_p - r);
+        cross.line_to(cx_p + r, cy_p + r);
+        cross.move_to(cx_p + r, cy_p - r);
+        cross.line_to(cx_p - r, cy_p + r);
+        let mut paint = vg::Paint::color(color);
+        paint.set_line_width((1.5 * cx.scale_factor()).max(1.3));
+        paint.set_line_cap(vg::LineCap::Round);
+        canvas.stroke_path(&cross, &paint);
+    }
+}
+
 pub(super) fn build_dropdown_trigger_labels<T>(cx: &mut Context, text: impl Res<T> + Clone)
 where
     T: ToStringLocalized,
@@ -40,11 +214,9 @@ where
         .child_bottom(Stretch(1.0))
         .overflow(Overflow::Hidden)
         .hoverable(false);
-    bold_label(cx, "▾", "compact-pill-text")
+    VectorArrow::caret(cx, ArrowDir::Down, "compact-pill-text")
         .width(Pixels(10.0))
-        .height(Stretch(1.0))
-        .child_space(Stretch(1.0))
-        .hoverable(false);
+        .height(Stretch(1.0));
 }
 
 pub(super) struct ScrollDropdown {
@@ -433,11 +605,25 @@ pub(super) fn build_directory_tree_items<FFile, FFolder>(
             }
             for folder in &tree.folders {
                 let is_open = expanded_folder.as_deref() == Some(folder.name.as_str());
-                let arrow = if is_open { "▾" } else { "▸" };
-                let label = format!("{arrow} {} ({})", folder.name, folder.files.len());
+                let label = format!("{} ({})", folder.name, folder.files.len());
                 let folder_name = folder.name.clone();
                 let on_toggle = on_toggle_folder.clone();
-                let row = bold_label(cx, &label, "dropdown-folder").on_press(move |cx| {
+                let row = HStack::new(cx, move |cx| {
+                    VectorArrow::caret(
+                        cx,
+                        if is_open { ArrowDir::Down } else { ArrowDir::Right },
+                        "dropdown-folder",
+                    )
+                    .width(Pixels(10.0))
+                    .height(Stretch(1.0));
+                    bold_label(cx, &label, "dropdown-folder")
+                        .width(Stretch(1.0))
+                        .height(Auto)
+                        .hoverable(false);
+                })
+                .col_between(Pixels(3.0))
+                .class("dropdown-folder")
+                .on_press(move |cx| {
                     on_toggle(cx, &folder_name);
                 });
                 if is_open {

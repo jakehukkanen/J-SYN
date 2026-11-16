@@ -10,6 +10,12 @@ label {
   font-weight: bold;
 }
 
+/* Override Vizia's default 8px inner horizontal margin so compact arrow/close buttons stay centered */
+button > .inner {
+  min-left: 0px;
+  min-right: 0px;
+}
+
 .plugin-root {
   background-color: #2d2722;
   color: #f6efe6;

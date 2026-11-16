@@ -12,7 +12,7 @@ use j_syn_dsp::modseq::ModSeqStepShape;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 
-use super::controls::bold_label;
+use super::controls::{bold_label, VectorCross};
 use super::modseq_tab::ModSeqSubTab;
 use super::{BottomTab, UiData, UiEvent};
 use crate::JSynPluginParams;
@@ -915,15 +915,15 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
 
     let ui_for_pills = mod_ui.clone();
     HStack::new(cx, move |cx| {
-        for &src in &ModMatrixSource::ALL_ACTIVE[..12] {
+        for &src in &ModMatrixSource::ALL_ACTIVE[..13] {
             ModSourcePill::new(cx, src, ui_for_pills.clone())
-                .width(Pixels(36.0))
+                .width(Pixels(33.5))
                 .height(Pixels(18.0))
                 .top(Stretch(1.0))
                 .bottom(Stretch(1.0));
         }
     })
-    .col_between(Pixels(2.5))
+    .col_between(Pixels(2.0))
     .width(Auto)
     .height(Stretch(1.0));
 
@@ -1007,11 +1007,7 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                             ui_rem.remove_inspected_slot();
                             cx.emit(UiEvent::ModUiChanged);
                         },
-                        |cx| {
-                            bold_label(cx, "x", "mod-insp-btn-text")
-                                .child_space(Stretch(1.0))
-                                .hoverable(false)
-                        },
+                        |cx| VectorCross::new(cx, "mod-insp-btn-text"),
                     )
                     .class("mod-insp-del")
                     .width(Pixels(18.0))

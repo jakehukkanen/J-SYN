@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use serde::{Deserialize, Serialize};
 
 pub const NUM_MOD_SLOTS: usize = 32;
-pub const NUM_ACTIVE_SOURCES: usize = 20;
+pub const NUM_ACTIVE_SOURCES: usize = 21;
 pub const NUM_MOD_DESTS: usize = 198;
 
 /// Modulation sources assignable in any matrix slot.
@@ -34,6 +34,7 @@ pub enum ModMatrixSource {
     Macro6 = 18,
     Macro7 = 19,
     Macro8 = 20,
+    Slide = 21,
 }
 
 impl ModMatrixSource {
@@ -50,6 +51,7 @@ impl ModMatrixSource {
         Self::Keytrack,
         Self::ModWheel,
         Self::Aftertouch,
+        Self::Slide,
         Self::Macro1,
         Self::Macro2,
         Self::Macro3,
@@ -94,6 +96,7 @@ impl ModMatrixSource {
             18 => Self::Macro6,
             19 => Self::Macro7,
             20 => Self::Macro8,
+            21 => Self::Slide,
             _ => Self::None,
         }
     }
@@ -124,6 +127,7 @@ impl ModMatrixSource {
             Self::Keytrack => "KEY",
             Self::ModWheel => "MW",
             Self::Aftertouch => "AT",
+            Self::Slide => "SLD",
             Self::Macro1 => "M1",
             Self::Macro2 => "M2",
             Self::Macro3 => "M3",
@@ -151,6 +155,7 @@ impl ModMatrixSource {
             Self::Keytrack => "KEYTRACK",
             Self::ModWheel => "MOD WHEEL",
             Self::Aftertouch => "AFTERTOUCH",
+            Self::Slide => "SLIDE (CC74)",
             Self::Macro1 => "MACRO 1",
             Self::Macro2 => "MACRO 2",
             Self::Macro3 => "MACRO 3",
@@ -181,6 +186,7 @@ impl ModMatrixSource {
             Self::Keytrack => (255, 112, 96),
             Self::ModWheel => (255, 92, 130),
             Self::Aftertouch => (255, 126, 82),
+            Self::Slide => (255, 152, 108),
             // Macros: Warm Amber/Violet high-contrast family
             Self::Macro1 => (255, 200, 72),
             Self::Macro2 => (255, 178, 60),

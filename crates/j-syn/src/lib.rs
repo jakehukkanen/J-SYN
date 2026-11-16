@@ -128,6 +128,8 @@ impl Plugin for JSynPlugin {
             },
             glide_ms: self.params.glide_ms.value(),
             pitch_bend_range: self.params.pitch_bend_range.value() as f32,
+            mpe_enabled: self.params.mpe_enabled.value(),
+            mpe_pitch_bend_range: self.params.mpe_pitch_bend_range.value() as f32,
             amp_attack_s: self.params.amp_attack.value(),
             amp_decay_s: self.params.amp_decay.value(),
             amp_sustain: self.params.amp_sustain.value(),
@@ -274,21 +276,60 @@ impl Plugin for JSynPlugin {
                     } => {
                         self.engine.choke(channel, note, voice_id);
                     }
-                    NoteEvent::MidiPitchBend { value, .. } => {
-                        self.engine.set_pitch_bend(value);
+                    NoteEvent::MidiPitchBend { channel, value, .. } => {
+                        self.engine
+                            .set_pitch_bend_ch(channel, value, &synth_params);
                     }
-                    NoteEvent::MidiCC { cc, value, .. } => {
+                    NoteEvent::MidiCC {
+                        channel, cc, value, ..
+                    } => {
                         if cc == 1 {
-                            self.engine.set_mod_wheel(value);
+                            if !synth_params.mpe_enabled || channel == 0 {
+                                self.engine.set_mod_wheel(value);
+                            }
+                        } else if cc == 74 {
+                            self.engine.set_slide_ch(channel, value, &synth_params);
                         } else if cc == 120 && value >= 0.0 {
                             self.engine.all_sound_off();
                         } else if cc == 123 && value >= 0.0 {
                             self.engine.all_notes_off();
                         }
                     }
-                    NoteEvent::MidiChannelPressure { pressure, .. }
-                    | NoteEvent::PolyPressure { pressure, .. } => {
-                        self.engine.set_aftertouch(pressure);
+                    NoteEvent::MidiChannelPressure {
+                        channel, pressure, ..
+                    } => {
+                        self.engine
+                            .set_aftertouch_ch(channel, pressure, &synth_params);
+                    }
+                    NoteEvent::PolyPressure {
+                        voice_id,
+                        channel,
+                        note,
+                        pressure,
+                        ..
+                    } => {
+                        self.engine
+                            .set_poly_pressure(channel, note, voice_id, pressure);
+                    }
+                    NoteEvent::PolyTuning {
+                        voice_id,
+                        channel,
+                        note,
+                        tuning,
+                        ..
+                    } => {
+                        self.engine
+                            .set_poly_tuning(channel, note, voice_id, tuning);
+                    }
+                    NoteEvent::PolyBrightness {
+                        voice_id,
+                        channel,
+                        note,
+                        brightness,
+                        ..
+                    } => {
+                        self.engine
+                            .set_poly_brightness(channel, note, voice_id, brightness);
                     }
                     _ => {}
                 }
@@ -456,5 +497,7 @@ mod tests {
         assert!(decoded.params.contains_key("f1_out_bus"));
         assert!(decoded.params.contains_key("f2_out_bus"));
         assert!(decoded.params.contains_key("fx_bus_topo"));
+        assert!(decoded.params.contains_key("mpe_en"));
+        assert!(decoded.params.contains_key("mpe_pb"));
     }
 }

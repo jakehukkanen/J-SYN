@@ -2404,3 +2404,108 @@ fn fx_reverb_delay_chorus_eq_subtabs_and_bus_b_modulation() {
     }
     assert!(chorus_pk > 0.05 && chorus_pk < 3.0);
 }
+
+#[test]
+fn mpe_per_voice_pitch_bend_pressure_slide_and_master_broadcast() {
+    use j_syn_dsp::{
+        ModDestination, ModMatrixSource, ModSlot, SynthEngine, SynthParams, WavetableBank,
+    };
+
+    let bank = WavetableBank::new();
+    let sr = 48_000.0;
+    let mut p = SynthParams::default();
+    p.mpe_enabled = true;
+    p.mpe_pitch_bend_range = 48.0;
+    p.pitch_bend_range = 2.0;
+    p.amp_attack_s = 0.001;
+    p.oscs[0].enabled = true;
+    p.oscs[0].level = 0.8;
+    p.mod_matrix.slots[0] = ModSlot {
+        source: ModMatrixSource::Slide,
+        destination: ModDestination::Osc1Warp,
+        depth: 1.0,
+        bipolar: false,
+        enabled: true,
+        ..ModSlot::default()
+    };
+    p.mod_matrix.slots[1] = ModSlot {
+        source: ModMatrixSource::Aftertouch,
+        destination: ModDestination::Osc1Level,
+        depth: -0.5,
+        bipolar: false,
+        enabled: true,
+        ..ModSlot::default()
+    };
+
+    let mut eng = SynthEngine::new(sr);
+    // Note on Member Ch 2 (channel=1) and Member Ch 3 (channel=2)
+    eng.note_on(1, 60, 1.0, Some(101), &p);
+    eng.note_on(2, 60, 1.0, Some(102), &p);
+
+    // Bend ONLY Ch 2 (+24 st) and set Ch 2 Slide=1.0, Ch 3 Aftertouch=1.0
+    eng.set_pitch_bend_ch(1, 0.75, &p); // (0.75 * 2 - 1) = +0.5 * 48 = +24 st
+    eng.set_slide_ch(1, 1.0, &p);
+    eng.set_aftertouch_ch(2, 1.0, &p);
+
+    for _ in 0..1024 {
+        let _ = eng.process_sample(&p, &bank);
+    }
+
+    let v1 = eng
+        .voices
+        .iter()
+        .find(|v| v.active && v.channel == 1)
+        .expect("member ch 1 active");
+    let v2 = eng
+        .voices
+        .iter()
+        .find(|v| v.active && v.channel == 2)
+        .expect("member ch 2 active");
+
+    assert!(
+        (v1.pitch_bend_smoothed - 0.5).abs() < 1e-3,
+        "Member ch 1 pitch bend should smooth to +0.5: {}",
+        v1.pitch_bend_smoothed
+    );
+    assert!(
+        v2.pitch_bend_smoothed.abs() < 1e-4,
+        "Member ch 2 pitch bend must stay isolated at 0: {}",
+        v2.pitch_bend_smoothed
+    );
+    assert!(
+        v1.slide_smoothed > 0.99 && v2.slide_smoothed < 1e-4,
+        "Slide (CC74) must isolate per member channel: v1={}, v2={}",
+        v1.slide_smoothed,
+        v2.slide_smoothed
+    );
+    assert!(
+        v2.aftertouch_smoothed > 0.99 && v1.aftertouch_smoothed < 1e-4,
+        "Pressure (AT) must isolate per member channel: v1={}, v2={}",
+        v1.aftertouch_smoothed,
+        v2.aftertouch_smoothed
+    );
+    assert!(
+        v1.mod_offsets[ModDestination::Osc1Warp.index()] > 0.95
+            && v2.mod_offsets[ModDestination::Osc1Warp.index()].abs() < 1e-3,
+        "Slide mod matrix routing must only affect voice on ch 1"
+    );
+    assert!(
+        v2.mod_offsets[ModDestination::Osc1Level.index()] < -0.45
+            && v1.mod_offsets[ModDestination::Osc1Level.index()].abs() < 1e-3,
+        "Aftertouch mod matrix routing must only affect voice on ch 2"
+    );
+
+    // Master channel (channel=0) pitch bend broadcasts globally + PolyTuning targets voice_id
+    eng.set_pitch_bend_ch(0, 1.0, &p);
+    eng.set_poly_tuning(2, 60, Some(102), 7.0);
+    for _ in 0..1024 {
+        let (l, r) = eng.process_sample(&p, &bank);
+        assert!(l.is_finite() && r.is_finite());
+    }
+    let v2_after = eng
+        .voices
+        .iter()
+        .find(|v| v.active && v.channel == 2)
+        .unwrap();
+    assert!((v2_after.poly_tuning_smoothed - 7.0).abs() < 1e-2);
+}

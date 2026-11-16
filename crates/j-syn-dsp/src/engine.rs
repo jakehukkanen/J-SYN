@@ -121,6 +121,10 @@ pub struct SynthEngine {
     pitch_bend_smoothed: f32,
     mod_wheel: f32,
     aftertouch: f32,
+    slide: f32,
+    channel_pitch_bend: [f32; 16],
+    channel_pressure: [f32; 16],
+    channel_slide: [f32; 16],
     global_modseqs: [ModSeqState; 4],
     global_modseq_vals: [f32; 4],
     telemetry: Arc<ModUiTelemetry>,
@@ -161,6 +165,10 @@ impl SynthEngine {
             pitch_bend_smoothed: 0.0,
             mod_wheel: 0.0,
             aftertouch: 0.0,
+            slide: 0.0,
+            channel_pitch_bend: [0.0; 16],
+            channel_pressure: [0.0; 16],
+            channel_slide: [0.0; 16],
             global_modseqs: [ModSeqState::new(); 4],
             global_modseq_vals: [0.0; 4],
             telemetry: Arc::new(ModUiTelemetry::new()),
@@ -232,6 +240,10 @@ impl SynthEngine {
         self.pitch_bend_smoothed = 0.0;
         self.mod_wheel = 0.0;
         self.aftertouch = 0.0;
+        self.slide = 0.0;
+        self.channel_pitch_bend = [0.0; 16];
+        self.channel_pressure = [0.0; 16];
+        self.channel_slide = [0.0; 16];
         self.control_tick_counter = 0;
         self.idle_mod_offsets = [0.0; NUM_MOD_DESTS];
     }
@@ -242,6 +254,22 @@ impl SynthEngine {
     }
 
     #[inline]
+    pub fn set_pitch_bend_ch(&mut self, channel: u8, value_0_to_1: f32, params: &SynthParams) {
+        let norm = (value_0_to_1.clamp(0.0, 1.0) * 2.0) - 1.0;
+        let ch = (channel as usize) & 0x0F;
+        self.channel_pitch_bend[ch] = norm;
+        if !params.mpe_enabled || ch == 0 {
+            self.pitch_bend_norm = norm;
+        } else {
+            for v in &mut self.voices {
+                if v.active && v.channel == channel {
+                    v.pitch_bend_norm = norm;
+                }
+            }
+        }
+    }
+
+    #[inline]
     pub fn set_mod_wheel(&mut self, value_0_to_1: f32) {
         self.mod_wheel = value_0_to_1.clamp(0.0, 1.0);
     }
@@ -249,6 +277,96 @@ impl SynthEngine {
     #[inline]
     pub fn set_aftertouch(&mut self, value_0_to_1: f32) {
         self.aftertouch = value_0_to_1.clamp(0.0, 1.0);
+    }
+
+    #[inline]
+    pub fn set_aftertouch_ch(&mut self, channel: u8, value_0_to_1: f32, params: &SynthParams) {
+        let val = value_0_to_1.clamp(0.0, 1.0);
+        let ch = (channel as usize) & 0x0F;
+        self.channel_pressure[ch] = val;
+        if !params.mpe_enabled || ch == 0 {
+            self.aftertouch = val;
+        } else {
+            for v in &mut self.voices {
+                if v.active && v.channel == channel {
+                    v.aftertouch = val;
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub fn set_slide_ch(&mut self, channel: u8, value_0_to_1: f32, params: &SynthParams) {
+        let val = value_0_to_1.clamp(0.0, 1.0);
+        let ch = (channel as usize) & 0x0F;
+        self.channel_slide[ch] = val;
+        if !params.mpe_enabled || ch == 0 {
+            self.slide = val;
+        } else {
+            for v in &mut self.voices {
+                if v.active && v.channel == channel {
+                    v.slide = val;
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn for_matching_voices(
+        &mut self,
+        channel: u8,
+        note: u8,
+        voice_id: Option<i32>,
+        mut f: impl FnMut(&mut Voice),
+    ) {
+        for v in &mut self.voices {
+            if !v.active {
+                continue;
+            }
+            let matched = match (voice_id, v.voice_id) {
+                (Some(id), Some(vid)) => id == vid,
+                _ => v.channel == channel && v.note == note,
+            };
+            if matched {
+                f(v);
+            }
+        }
+    }
+
+    #[inline]
+    pub fn set_poly_pressure(
+        &mut self,
+        channel: u8,
+        note: u8,
+        voice_id: Option<i32>,
+        value_0_to_1: f32,
+    ) {
+        let val = value_0_to_1.clamp(0.0, 1.0);
+        self.for_matching_voices(channel, note, voice_id, |v| v.aftertouch = val);
+    }
+
+    #[inline]
+    pub fn set_poly_tuning(
+        &mut self,
+        channel: u8,
+        note: u8,
+        voice_id: Option<i32>,
+        tuning_semi: f32,
+    ) {
+        let semi = tuning_semi.clamp(-96.0, 96.0);
+        self.for_matching_voices(channel, note, voice_id, |v| v.poly_tuning_semi = semi);
+    }
+
+    #[inline]
+    pub fn set_poly_brightness(
+        &mut self,
+        channel: u8,
+        note: u8,
+        voice_id: Option<i32>,
+        brightness: f32,
+    ) {
+        let val = brightness.clamp(0.0, 1.0);
+        self.for_matching_voices(channel, note, voice_id, |v| v.slide = val);
     }
 
     pub fn telemetry(&self) -> Arc<ModUiTelemetry> {
@@ -327,6 +445,16 @@ impl SynthEngine {
             } else {
                 note as f32
             };
+            let ch = (channel as usize) & 0x0F;
+            let ch_expr = if params.mpe_enabled && ch > 0 {
+                (
+                    self.channel_pitch_bend[ch],
+                    self.channel_pressure[ch],
+                    self.channel_slide[ch],
+                )
+            } else {
+                (0.0, 0.0, 0.0)
+            };
             Self::init_voice(
                 &mut self.voices[0],
                 channel,
@@ -340,6 +468,8 @@ impl SynthEngine {
                 &self.global_modseq_vals,
                 self.mod_wheel,
                 self.aftertouch,
+                self.slide,
+                ch_expr,
                 &mut self.rng_state,
             );
             self.last_note = Some(note as f32);
@@ -362,6 +492,16 @@ impl SynthEngine {
             note as f32
         };
 
+        let ch = (channel as usize) & 0x0F;
+        let ch_expr = if params.mpe_enabled && ch > 0 {
+            (
+                self.channel_pitch_bend[ch],
+                self.channel_pressure[ch],
+                self.channel_slide[ch],
+            )
+        } else {
+            (0.0, 0.0, 0.0)
+        };
         Self::init_voice(
             &mut self.voices[slot],
             channel,
@@ -375,6 +515,8 @@ impl SynthEngine {
             &self.global_modseq_vals,
             self.mod_wheel,
             self.aftertouch,
+            self.slide,
+            ch_expr,
             &mut self.rng_state,
         );
         self.last_note = Some(note as f32);
@@ -551,6 +693,7 @@ impl SynthEngine {
                             &self.global_modseq_vals,
                             self.mod_wheel,
                             self.aftertouch,
+                            self.slide,
                             false,
                         );
                     }
@@ -581,6 +724,7 @@ impl SynthEngine {
                             &self.global_modseq_vals,
                             self.mod_wheel,
                             self.aftertouch,
+                            self.slide,
                             true,
                         );
                     }
@@ -718,6 +862,7 @@ impl SynthEngine {
         for m in 0..8 {
             idle_sources[12 + m] = params.macros[m].clamp(0.0, 1.0);
         }
+        idle_sources[20] = self.slide.clamp(0.0, 1.0);
         let mut idle_offsets = [0.0_f32; NUM_MOD_DESTS];
         params
             .mod_matrix
@@ -785,6 +930,7 @@ impl SynthEngine {
             for m in 0..8 {
                 idle_sources[12 + m] = params.macros[m].clamp(0.0, 1.0);
             }
+            idle_sources[20] = self.slide.clamp(0.0, 1.0);
             let mut idle_offsets = [0.0_f32; NUM_MOD_DESTS];
             params
                 .mod_matrix
@@ -822,6 +968,8 @@ impl SynthEngine {
         global_modseq_vals: &[f32; 4],
         mod_wheel: f32,
         aftertouch: f32,
+        slide: f32,
+        ch_expr: (f32, f32, f32),
         rng_state: &mut u32,
     ) {
         v.active = true;
@@ -833,6 +981,14 @@ impl SynthEngine {
         v.age = age;
         v.current_midi_note = start_note;
         v.target_midi_note = target_note;
+        v.pitch_bend_norm = ch_expr.0;
+        v.pitch_bend_smoothed = ch_expr.0;
+        v.poly_tuning_semi = 0.0;
+        v.poly_tuning_smoothed = 0.0;
+        v.aftertouch = ch_expr.1;
+        v.aftertouch_smoothed = ch_expr.1;
+        v.slide = ch_expr.2;
+        v.slide_smoothed = ch_expr.2;
         v.amp_env.reset_and_trigger();
         for env in &mut v.mod_envs {
             env.reset_and_trigger();
@@ -870,6 +1026,7 @@ impl SynthEngine {
             global_modseq_vals,
             mod_wheel,
             aftertouch,
+            slide,
             true,
         );
     }

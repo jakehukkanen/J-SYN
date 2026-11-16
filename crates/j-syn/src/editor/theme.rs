@@ -463,7 +463,8 @@ pub(super) fn mod_source_rgb(pal: &ThemePalette, src: ModMatrixSource) -> (u8, u
         ModMatrixSource::Velocity
         | ModMatrixSource::Keytrack
         | ModMatrixSource::ModWheel
-        | ModMatrixSource::Aftertouch => pal.mod_midi_rgb(),
+        | ModMatrixSource::Aftertouch
+        | ModMatrixSource::Slide => pal.mod_midi_rgb(),
         ModMatrixSource::None => hex_to_rgb(&pal.text_dim),
     }
 }

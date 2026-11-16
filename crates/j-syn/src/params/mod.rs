@@ -145,6 +145,12 @@ pub struct JSynPluginParams {
     #[id = "pb_range"]
     pub pitch_bend_range: IntParam,
 
+    #[id = "mpe_en"]
+    pub mpe_enabled: BoolParam,
+
+    #[id = "mpe_pb"]
+    pub mpe_pitch_bend_range: IntParam,
+
     #[id = "amp_atk"]
     pub amp_attack: FloatParam,
 
@@ -296,6 +302,15 @@ impl Default for JSynPluginParams {
                 "PB Range",
                 2,
                 IntRange::Linear { min: 1, max: 24 },
+            )
+            .with_unit(" st"),
+
+            mpe_enabled: BoolParam::new("MPE Enabled", false),
+
+            mpe_pitch_bend_range: IntParam::new(
+                "MPE PB Range",
+                48,
+                IntRange::Linear { min: 1, max: 96 },
             )
             .with_unit(" st"),
 

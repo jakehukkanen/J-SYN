@@ -5,11 +5,14 @@ use std::sync::Arc;
 use j_syn_dsp::mod_matrix::{ModMatrixSource, ModSlot, ALL_MOD_DESTINATIONS};
 use nih_plug_vizia::vizia::prelude::*;
 
-use super::controls::{bold_label, build_dropdown_trigger_labels, build_module_header};
+use super::controls::{
+    bold_label, build_dropdown_trigger_labels, build_module_header, ArrowDir, VectorArrow,
+    VectorCross,
+};
 use super::mod_bar::ModUiState;
 use super::{UiData, UiEvent};
 
-const ALL_MOD_SOURCES: [ModMatrixSource; 20] = [
+const ALL_MOD_SOURCES: [ModMatrixSource; 21] = [
     ModMatrixSource::Env1,
     ModMatrixSource::Env2,
     ModMatrixSource::Env3,
@@ -30,6 +33,7 @@ const ALL_MOD_SOURCES: [ModMatrixSource; 20] = [
     ModMatrixSource::Keytrack,
     ModMatrixSource::ModWheel,
     ModMatrixSource::Aftertouch,
+    ModMatrixSource::Slide,
 ];
 
 const CURVE_MODES: &[(&str, f32)] = &[
@@ -430,11 +434,7 @@ fn build_matrix_row(
                     ui_up.move_active_slot(slot_idx, -1);
                     cx.emit(UiEvent::ModUiChanged);
                 },
-                |cx| {
-                    bold_label(cx, "▲", "matrix-btn-text")
-                        .child_space(Stretch(1.0))
-                        .hoverable(false)
-                },
+                |cx| VectorArrow::new(cx, ArrowDir::Up, "matrix-btn-text"),
             )
             .class("matrix-btn")
             .width(Pixels(20.0))
@@ -446,11 +446,7 @@ fn build_matrix_row(
                     ui_dn.move_active_slot(slot_idx, 1);
                     cx.emit(UiEvent::ModUiChanged);
                 },
-                |cx| {
-                    bold_label(cx, "▼", "matrix-btn-text")
-                        .child_space(Stretch(1.0))
-                        .hoverable(false)
-                },
+                |cx| VectorArrow::new(cx, ArrowDir::Down, "matrix-btn-text"),
             )
             .class("matrix-btn")
             .width(Pixels(20.0))
@@ -468,11 +464,7 @@ fn build_matrix_row(
                 ui_del.remove_slot_at(slot_idx);
                 cx.emit(UiEvent::ModUiChanged);
             },
-            |cx| {
-                bold_label(cx, "x", "matrix-btn-text")
-                    .child_space(Stretch(1.0))
-                    .hoverable(false)
-            },
+            |cx| VectorCross::new(cx, "matrix-btn-text"),
         )
         .class("matrix-del-btn")
         .width(Pixels(26.0))

@@ -53,6 +53,8 @@ pub struct SynthParams {
     pub poly_mode: PolyMode,
     pub glide_ms: f32,
     pub pitch_bend_range: f32,
+    pub mpe_enabled: bool,
+    pub mpe_pitch_bend_range: f32,
     pub amp_attack_s: f32,
     pub amp_decay_s: f32,
     pub amp_sustain: f32,
@@ -86,6 +88,8 @@ impl Default for SynthParams {
             poly_mode: PolyMode::Poly,
             glide_ms: 0.0,
             pitch_bend_range: 2.0,
+            mpe_enabled: false,
+            mpe_pitch_bend_range: 48.0,
             amp_attack_s: 0.005,
             amp_decay_s: 0.25,
             amp_sustain: 1.0,
@@ -651,6 +655,14 @@ pub struct Voice {
     pub age: u64,
     pub current_midi_note: f32,
     pub target_midi_note: f32,
+    pub pitch_bend_norm: f32,
+    pub pitch_bend_smoothed: f32,
+    pub poly_tuning_semi: f32,
+    pub poly_tuning_smoothed: f32,
+    pub aftertouch: f32,
+    pub aftertouch_smoothed: f32,
+    pub slide: f32,
+    pub slide_smoothed: f32,
     pub oscillators: [OscillatorState; 4],
     pub noise: NoiseState,
     pub filters: [FilterState; 2],
@@ -685,6 +697,14 @@ impl Voice {
             age: 0,
             current_midi_note: 60.0,
             target_midi_note: 60.0,
+            pitch_bend_norm: 0.0,
+            pitch_bend_smoothed: 0.0,
+            poly_tuning_semi: 0.0,
+            poly_tuning_smoothed: 0.0,
+            aftertouch: 0.0,
+            aftertouch_smoothed: 0.0,
+            slide: 0.0,
+            slide_smoothed: 0.0,
             oscillators: [
                 OscillatorState::new(),
                 OscillatorState::new(),
@@ -712,6 +732,14 @@ impl Voice {
         self.releasing = false;
         self.voice_id = None;
         self.velocity = 0.0;
+        self.pitch_bend_norm = 0.0;
+        self.pitch_bend_smoothed = 0.0;
+        self.poly_tuning_semi = 0.0;
+        self.poly_tuning_smoothed = 0.0;
+        self.aftertouch = 0.0;
+        self.aftertouch_smoothed = 0.0;
+        self.slide = 0.0;
+        self.slide_smoothed = 0.0;
         self.amp_env.reset();
         for env in &mut self.mod_envs {
             env.reset();
@@ -753,11 +781,18 @@ impl Voice {
         params: &SynthParams,
         global_modseq_vals: &[f32; 4],
         mod_wheel: f32,
-        aftertouch: f32,
+        global_aftertouch: f32,
+        global_slide: f32,
         snap: bool,
     ) {
         if !self.active {
             return;
+        }
+        if snap && dt_seconds == 0.0 {
+            self.pitch_bend_smoothed = self.pitch_bend_norm;
+            self.poly_tuning_smoothed = self.poly_tuning_semi;
+            self.aftertouch_smoothed = self.aftertouch;
+            self.slide_smoothed = self.slide;
         }
         let mut sources = [0.0_f32; NUM_ACTIVE_SOURCES];
         sources[0] = self.amp_env.level();
@@ -798,10 +833,11 @@ impl Voice {
         sources[8] = self.velocity.clamp(0.0, 1.0);
         sources[9] = ((self.current_midi_note - 12.0) / 96.0).clamp(0.0, 1.0);
         sources[10] = mod_wheel.clamp(0.0, 1.0);
-        sources[11] = aftertouch.clamp(0.0, 1.0);
+        sources[11] = global_aftertouch.max(self.aftertouch_smoothed).clamp(0.0, 1.0);
         for m in 0..8 {
             sources[12 + m] = params.macros[m].clamp(0.0, 1.0);
         }
+        sources[20] = global_slide.max(self.slide_smoothed).clamp(0.0, 1.0);
 
         self.last_sources = sources;
         params
@@ -858,7 +894,21 @@ impl Voice {
             return VoiceBusOutput::default();
         }
 
-        let effective_note = self.current_midi_note + pitch_bend_semitones;
+        // 1.5 ms per-voice 1-pole smoothing for MPE pitch bend, tuning, pressure, and slide.
+        let expr_coeff = 1.0 - (-1.0 / (0.0015 * sample_rate.max(1000.0))).exp();
+        self.pitch_bend_smoothed += (self.pitch_bend_norm - self.pitch_bend_smoothed) * expr_coeff;
+        self.poly_tuning_smoothed +=
+            (self.poly_tuning_semi - self.poly_tuning_smoothed) * expr_coeff;
+        self.aftertouch_smoothed += (self.aftertouch - self.aftertouch_smoothed) * expr_coeff;
+        self.slide_smoothed += (self.slide - self.slide_smoothed) * expr_coeff;
+
+        let mpe_pb_semi = if params.mpe_enabled && self.channel > 0 {
+            self.pitch_bend_smoothed * params.mpe_pitch_bend_range
+        } else {
+            0.0
+        };
+        let effective_note =
+            self.current_midi_note + pitch_bend_semitones + mpe_pb_semi + self.poly_tuning_smoothed;
         let out = process_voice_bus(
             &mut self.oscillators,
             &mut self.osc_out,

@@ -10,7 +10,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown, build_flex_knob_cell_mod_dim,
     build_pitch_pill_cell, build_stacked_pill_cell, build_stacked_pill_cell_mod,
-    build_wavetable_dropdown, step_wavetable, ScrollDropdown,
+    build_wavetable_dropdown, step_wavetable, ArrowDir, ScrollDropdown, VectorArrow,
 };
 use super::mod_bar::ModUiState;
 use super::scope::WavetableScope;
@@ -143,7 +143,7 @@ pub(super) fn build_osc_panel(
                 Button::new(
                     cx,
                     move |_| step_wavetable(&p_prev, &g_prev, osc_idx, -1),
-                    move |cx| bold_label(cx, "<", "wt-step-label").hoverable(false),
+                    move |cx| VectorArrow::new(cx, ArrowDir::Left, "wt-step-label"),
                 )
                 .class("wt-step-btn")
                 .width(Pixels(18.0))
@@ -158,7 +158,7 @@ pub(super) fn build_osc_panel(
                 Button::new(
                     cx,
                     move |_| step_wavetable(&p_next, &g_next, osc_idx, 1),
-                    move |cx| bold_label(cx, ">", "wt-step-label").hoverable(false),
+                    move |cx| VectorArrow::new(cx, ArrowDir::Right, "wt-step-label"),
                 )
                 .class("wt-step-btn")
                 .width(Pixels(18.0))
@@ -303,15 +303,15 @@ pub(super) fn build_osc_panel(
                         setter.end_set_parameter(param);
                     },
                     move |cx| {
-                        let arrow_lens = UiData::params.map(move |_| {
-                            match p_ord_lbl.oscs[osc_idx].mod_order.value() {
-                                ModOrderParam::WarpThenPm => ">".to_string(),
-                                ModOrderParam::PmThenWarp => "<".to_string(),
-                            }
-                        });
-                        bold_label(cx, arrow_lens, "wt-step-label")
-                            .child_space(Stretch(1.0))
-                            .hoverable(false)
+                        VectorArrow::reactive(
+                            cx,
+                            UiData::params,
+                            move |_| match p_ord_lbl.oscs[osc_idx].mod_order.value() {
+                                ModOrderParam::WarpThenPm => ArrowDir::Right,
+                                ModOrderParam::PmThenWarp => ArrowDir::Left,
+                            },
+                            "wt-step-label",
+                        )
                     },
                 )
                 .class("wt-step-btn")
