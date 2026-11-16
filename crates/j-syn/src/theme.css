@@ -542,10 +542,10 @@ led-toggle:checked .switch-label {
   border-width: 1px;
   border-color: #4b4037;
   border-radius: 4px;
-  child-left: 2px;
-  child-right: 2px;
-  child-top: 1px;
-  child-bottom: 1px;
+  child-left: 3px;
+  child-right: 3px;
+  child-top: 2px;
+  child-bottom: 2px;
 }
 
 .view-switch-btn {

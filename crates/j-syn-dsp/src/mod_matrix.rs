@@ -811,10 +811,16 @@ impl ModMatrixState {
             }
             if let Some(src_idx) = slot.source.active_index() {
                 let mut raw = source_values[src_idx].clamp(0.0, 1.0);
-                let curve = slot.curve.clamp(-1.0, 1.0);
-                if curve.abs() > 1e-4 {
-                    let exp = (curve * 2.5).exp();
-                    raw = raw.powf(exp);
+                if (slot.curve - 2.0).abs() < 0.1 {
+                    raw = raw * raw * (3.0 - 2.0 * raw);
+                } else if (slot.curve - 3.0).abs() < 0.1 {
+                    raw = (raw * 4.0).floor() * 0.25;
+                } else {
+                    let curve = slot.curve.clamp(-1.0, 1.0);
+                    if curve.abs() > 1e-4 {
+                        let exp = (curve * 2.5).exp();
+                        raw = raw.powf(exp);
+                    }
                 }
                 let mut sig = if slot.bipolar {
                     raw * 2.0 - 1.0

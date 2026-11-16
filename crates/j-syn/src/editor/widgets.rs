@@ -357,7 +357,7 @@ impl View for RotaryKnob {
             WindowEvent::MouseOver => {
                 self.hovered = true;
                 let cursor = if self.is_on_mod_collar(cx, cx.mouse().cursorx, cx.mouse().cursory) {
-                    CursorIcon::NsResize
+                    CursorIcon::RowResize
                 } else {
                     CursorIcon::Default
                 };
@@ -394,7 +394,7 @@ impl View for RotaryKnob {
                             cx.capture();
                             cx.focus();
                             cx.set_active(true);
-                            cx.emit(WindowEvent::SetCursor(CursorIcon::Grabbing));
+                            cx.emit(WindowEvent::SetCursor(CursorIcon::RowResize));
                             cx.emit(UiEvent::ModUiChanged);
                             self.emit_tooltip(cx);
                             cx.needs_redraw();
@@ -453,7 +453,7 @@ impl View for RotaryKnob {
                             cx.mouse().cursorx,
                             cx.mouse().cursory,
                         ) {
-                            CursorIcon::NsResize
+                            CursorIcon::RowResize
                         } else {
                             CursorIcon::Default
                         };
@@ -482,7 +482,7 @@ impl View for RotaryKnob {
             }
             WindowEvent::MouseMove(x, y) => {
                 if handle_mod_depth_move(&mut self.mod_depth_drag, &self.mod_binding, cx, *y) {
-                    cx.emit(WindowEvent::SetCursor(CursorIcon::Grabbing));
+                    cx.emit(WindowEvent::SetCursor(CursorIcon::RowResize));
                     self.emit_tooltip(cx);
                     meta.consume();
                     return;
@@ -511,7 +511,7 @@ impl View for RotaryKnob {
                     meta.consume();
                 } else if self.hovered {
                     let cursor = if self.is_on_mod_collar(cx, *x, *y) {
-                        CursorIcon::NsResize
+                        CursorIcon::RowResize
                     } else {
                         CursorIcon::Default
                     };

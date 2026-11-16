@@ -12,7 +12,7 @@ use j_syn_dsp::modseq::ModSeqStepShape;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 
-use super::controls::{bold_label, build_module_header};
+use super::controls::{bold_label, build_dropdown_trigger_labels, build_module_header};
 use super::modseq_tab::ModSeqSubTab;
 use super::{BottomTab, UiData, UiEvent};
 use crate::JSynPluginParams;
@@ -595,45 +595,29 @@ impl ModUiState {
         }
         let mut mat = self.params.mod_matrix.snapshot();
         if mat.slots[slot_idx].enabled {
-            mat.slots[slot_idx].curve = curve.clamp(-1.0, 1.0);
+            mat.slots[slot_idx].curve = curve;
             self.params.mod_matrix.store_value(mat);
         }
     }
 
-    pub fn cycle_slot_aux_at(&self, slot_idx: usize, dir: isize) {
+    pub fn set_slot_source_at(&self, slot_idx: usize, source: ModMatrixSource) {
         if slot_idx >= NUM_MOD_SLOTS {
             return;
         }
-        const AUX_CHOICES: [ModMatrixSource; 21] = [
-            ModMatrixSource::None,
-            ModMatrixSource::ModWheel,
-            ModMatrixSource::Aftertouch,
-            ModMatrixSource::Velocity,
-            ModMatrixSource::Keytrack,
-            ModMatrixSource::Macro1,
-            ModMatrixSource::Macro2,
-            ModMatrixSource::Macro3,
-            ModMatrixSource::Macro4,
-            ModMatrixSource::Macro5,
-            ModMatrixSource::Macro6,
-            ModMatrixSource::Macro7,
-            ModMatrixSource::Macro8,
-            ModMatrixSource::Env1,
-            ModMatrixSource::Env2,
-            ModMatrixSource::Env3,
-            ModMatrixSource::Env4,
-            ModMatrixSource::ModSeq1,
-            ModMatrixSource::ModSeq2,
-            ModMatrixSource::ModSeq3,
-            ModMatrixSource::ModSeq4,
-        ];
         let mut mat = self.params.mod_matrix.snapshot();
         if mat.slots[slot_idx].enabled {
-            let cur = mat.slots[slot_idx].aux_source;
-            let pos = AUX_CHOICES.iter().position(|&s| s == cur).unwrap_or(0) as isize;
-            let len = AUX_CHOICES.len() as isize;
-            let next = ((pos + dir) % len + len) % len;
-            mat.slots[slot_idx].aux_source = AUX_CHOICES[next as usize];
+            mat.slots[slot_idx].source = source;
+            self.params.mod_matrix.store_value(mat);
+        }
+    }
+
+    pub fn set_slot_aux_at(&self, slot_idx: usize, aux: ModMatrixSource) {
+        if slot_idx >= NUM_MOD_SLOTS {
+            return;
+        }
+        let mut mat = self.params.mod_matrix.snapshot();
+        if mat.slots[slot_idx].enabled {
+            mat.slots[slot_idx].aux_source = aux;
             self.params.mod_matrix.store_value(mat);
         }
     }
@@ -1016,10 +1000,54 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     .bottom(Stretch(1.0));
 }
 
+const ALL_MOD_SOURCES: [ModMatrixSource; 20] = [
+    ModMatrixSource::Env1,
+    ModMatrixSource::Env2,
+    ModMatrixSource::Env3,
+    ModMatrixSource::Env4,
+    ModMatrixSource::ModSeq1,
+    ModMatrixSource::ModSeq2,
+    ModMatrixSource::ModSeq3,
+    ModMatrixSource::ModSeq4,
+    ModMatrixSource::Macro1,
+    ModMatrixSource::Macro2,
+    ModMatrixSource::Macro3,
+    ModMatrixSource::Macro4,
+    ModMatrixSource::Macro5,
+    ModMatrixSource::Macro6,
+    ModMatrixSource::Macro7,
+    ModMatrixSource::Macro8,
+    ModMatrixSource::Velocity,
+    ModMatrixSource::Keytrack,
+    ModMatrixSource::ModWheel,
+    ModMatrixSource::Aftertouch,
+];
+
+const CURVE_MODES: &[(&str, f32)] = &[
+    ("LIN", 0.0),
+    ("EXP", 0.55),
+    ("LOG", -0.55),
+    ("S-CURVE", 2.0),
+    ("STEP", 3.0),
+];
+
+fn curve_mode_label(curve: f32) -> &'static str {
+    if (curve - 2.0).abs() < 0.1 {
+        "S-CURVE"
+    } else if (curve - 3.0).abs() < 0.1 {
+        "STEP"
+    } else if curve > 0.05 {
+        "EXP"
+    } else if curve < -0.05 {
+        "LOG"
+    } else {
+        "LIN"
+    }
+}
+
 #[derive(Clone, Copy)]
 enum MatrixField {
     Depth,
-    Curve,
 }
 
 struct MatrixDragBox {
@@ -1048,17 +1076,10 @@ impl MatrixDragBox {
             start_val: 0.0,
         }
         .build(cx, move |cx| {
-            let text_lens = UiData::mod_ui_rev.map(move |_| {
+            let text_lens = UiData::mod_val_rev.map(move |_| {
                 let slot = ui_lbl.params.mod_matrix.snapshot().slots[slot_idx];
                 match field {
                     MatrixField::Depth => format!("{:+.0}%", slot.depth * 100.0),
-                    MatrixField::Curve => {
-                        if slot.curve.abs() < 0.01 {
-                            "LIN".to_string()
-                        } else {
-                            format!("{:+.0}%", slot.curve * 100.0)
-                        }
-                    }
                 }
             });
             bold_label(cx, text_lens, "matrix-depth-val")
@@ -1072,14 +1093,12 @@ impl MatrixDragBox {
         let slot = self.mod_ui.params.mod_matrix.snapshot().slots[self.slot_idx];
         match self.field {
             MatrixField::Depth => slot.depth,
-            MatrixField::Curve => slot.curve,
         }
     }
 
     fn apply_val(&self, val: f32) {
         match self.field {
             MatrixField::Depth => self.mod_ui.set_slot_depth_at(self.slot_idx, val),
-            MatrixField::Curve => self.mod_ui.set_slot_curve_at(self.slot_idx, val),
         }
     }
 }
@@ -1101,10 +1120,9 @@ impl View for MatrixDragBox {
             WindowEvent::MouseDoubleClick(MouseButton::Left) => {
                 let default_v = match self.field {
                     MatrixField::Depth => 0.25,
-                    MatrixField::Curve => 0.0,
                 };
                 self.apply_val(default_v);
-                cx.emit(UiEvent::ModUiChanged);
+                cx.emit(UiEvent::ModValChanged);
                 meta.consume();
             }
             WindowEvent::MouseMove(_, y) if self.dragging => {
@@ -1115,18 +1133,19 @@ impl View for MatrixDragBox {
                 };
                 let delta = (self.start_y - *y) / sens;
                 self.apply_val((self.start_val + delta).clamp(-1.0, 1.0));
-                cx.emit(UiEvent::ModUiChanged);
+                cx.emit(UiEvent::ModValChanged);
                 meta.consume();
             }
             WindowEvent::MouseUp(MouseButton::Left) if self.dragging => {
                 self.dragging = false;
                 cx.release();
+                cx.emit(UiEvent::ModUiChanged);
                 meta.consume();
             }
             WindowEvent::MouseScroll(_, y) => {
                 let step = if *y > 0.0 { 0.02 } else { -0.02 };
                 self.apply_val((self.current_val() + step).clamp(-1.0, 1.0));
-                cx.emit(UiEvent::ModUiChanged);
+                cx.emit(UiEvent::ModValChanged);
                 meta.consume();
             }
             _ => {}
@@ -1148,6 +1167,7 @@ fn build_matrix_row(
     let pol_text = if slot.bipolar { "BIP" } else { "UNI" };
     let aux_text = mod_ui.aux_short_label(slot.aux_source);
 
+    let ui_src = mod_ui.clone();
     let ui_depth = mod_ui.clone();
     let ui_curve = mod_ui.clone();
     let ui_pol = mod_ui.clone();
@@ -1162,22 +1182,63 @@ fn build_matrix_row(
             .height(Stretch(1.0))
             .child_space(Stretch(1.0));
 
-        HStack::new(cx, move |cx| {
-            Element::new(cx)
-                .width(Pixels(4.0))
-                .height(Pixels(14.0))
-                .top(Stretch(1.0))
-                .bottom(Stretch(1.0))
-                .background_color(Color::rgb(r, g, b));
-            bold_label(cx, &src_text, "matrix-cell-src")
+        let ui_src_trig = ui_src.clone();
+        let src_text_c = src_text.clone();
+        Dropdown::new(
+            cx,
+            move |cx| {
+                let ui_s = ui_src_trig.clone();
+                let s_txt = src_text_c.clone();
+                HStack::new(cx, move |cx| {
+                    Element::new(cx)
+                        .width(Pixels(4.0))
+                        .height(Pixels(12.0))
+                        .top(Stretch(1.0))
+                        .bottom(Stretch(1.0))
+                        .background_color(Color::rgb(r, g, b));
+                    build_dropdown_trigger_labels(
+                        cx,
+                        UiData::mod_ui_rev.map(move |_| {
+                            let s = ui_s.params.mod_matrix.snapshot().slots[slot_idx];
+                            if s.enabled {
+                                ui_s.source_display_name(s.source)
+                            } else {
+                                s_txt.clone()
+                            }
+                        }),
+                    );
+                })
+                .col_between(Pixels(4.0))
                 .width(Stretch(1.0))
                 .height(Stretch(1.0))
-                .child_top(Stretch(1.0))
-                .child_bottom(Stretch(1.0));
-        })
-        .col_between(Pixels(6.0))
+                .child_top(Pixels(0.0))
+                .child_bottom(Pixels(0.0))
+                .overflow(Overflow::Hidden)
+            },
+            move |cx| {
+                let ui_src_list = ui_src.clone();
+                ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+                    let ui_src_inner = ui_src_list.clone();
+                    VStack::new(cx, move |cx| {
+                        for src in ALL_MOD_SOURCES {
+                            let ui_set = ui_src_inner.clone();
+                            let label = ui_set.source_display_name(src);
+                            bold_label(cx, &label, "dropdown-item").on_press(move |cx| {
+                                ui_set.set_slot_source_at(slot_idx, src);
+                                cx.emit(UiEvent::ModUiChanged);
+                                cx.emit(PopupEvent::Close);
+                            });
+                        }
+                    })
+                    .class("dropdown-scroll-content");
+                })
+                .class("dropdown-scroll");
+            },
+        )
         .width(Pixels(130.0))
-        .height(Stretch(1.0));
+        .height(Pixels(20.0))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0));
 
         bold_label(cx, "->", "matrix-cell-arrow")
             .width(Pixels(20.0))
@@ -1196,11 +1257,41 @@ fn build_matrix_row(
             .top(Stretch(1.0))
             .bottom(Stretch(1.0));
 
-        MatrixDragBox::new(cx, slot_idx, MatrixField::Curve, ui_curve)
-            .width(Pixels(56.0))
-            .height(Pixels(20.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
+        let ui_curve_trig = ui_curve.clone();
+        Dropdown::new(
+            cx,
+            move |cx| {
+                let ui_c = ui_curve_trig.clone();
+                HStack::new(cx, move |cx| {
+                    build_dropdown_trigger_labels(
+                        cx,
+                        UiData::mod_ui_rev.map(move |_| {
+                            let s = ui_c.params.mod_matrix.snapshot().slots[slot_idx];
+                            curve_mode_label(s.curve).to_string()
+                        }),
+                    );
+                })
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .child_top(Pixels(0.0))
+                .child_bottom(Pixels(0.0))
+                .overflow(Overflow::Hidden)
+            },
+            move |cx| {
+                for &(label, val) in CURVE_MODES {
+                    let ui_set = ui_curve.clone();
+                    bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                        ui_set.set_slot_curve_at(slot_idx, val);
+                        cx.emit(UiEvent::ModUiChanged);
+                        cx.emit(PopupEvent::Close);
+                    });
+                }
+            },
+        )
+        .width(Pixels(68.0))
+        .height(Pixels(20.0))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0));
 
         Button::new(
             cx,
@@ -1221,21 +1312,59 @@ fn build_matrix_row(
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
 
-        Button::new(
+        let ui_aux_trig = ui_aux.clone();
+        let aux_text_c = aux_text.clone();
+        Dropdown::new(
             cx,
             move |cx| {
-                ui_aux.cycle_slot_aux_at(slot_idx, 1);
-                cx.emit(UiEvent::ModUiChanged);
+                let ui_a = ui_aux_trig.clone();
+                let a_txt = aux_text_c.clone();
+                HStack::new(cx, move |cx| {
+                    build_dropdown_trigger_labels(
+                        cx,
+                        UiData::mod_ui_rev.map(move |_| {
+                            let s = ui_a.params.mod_matrix.snapshot().slots[slot_idx];
+                            if s.enabled {
+                                ui_a.aux_short_label(s.aux_source)
+                            } else {
+                                a_txt.clone()
+                            }
+                        }),
+                    );
+                })
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .child_top(Pixels(0.0))
+                .child_bottom(Pixels(0.0))
+                .overflow(Overflow::Hidden)
             },
             move |cx| {
-                bold_label(cx, &aux_text, "matrix-btn-text")
-                    .child_space(Stretch(1.0))
-                    .hoverable(false)
+                let ui_aux_list = ui_aux.clone();
+                ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+                    let ui_aux_inner = ui_aux_list.clone();
+                    VStack::new(cx, move |cx| {
+                        let ui_none = ui_aux_inner.clone();
+                        bold_label(cx, "None", "dropdown-item").on_press(move |cx| {
+                            ui_none.set_slot_aux_at(slot_idx, ModMatrixSource::None);
+                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(PopupEvent::Close);
+                        });
+                        for src in ALL_MOD_SOURCES {
+                            let ui_set = ui_aux_inner.clone();
+                            let label = ui_set.source_display_name(src);
+                            bold_label(cx, &label, "dropdown-item").on_press(move |cx| {
+                                ui_set.set_slot_aux_at(slot_idx, src);
+                                cx.emit(UiEvent::ModUiChanged);
+                                cx.emit(PopupEvent::Close);
+                            });
+                        }
+                    })
+                    .class("dropdown-scroll-content");
+                })
+                .class("dropdown-scroll");
             },
         )
-        .class("matrix-btn")
-        .checked(slot.aux_source != ModMatrixSource::None)
-        .width(Pixels(68.0))
+        .width(Pixels(78.0))
         .height(Pixels(20.0))
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
@@ -1377,7 +1506,7 @@ pub(crate) fn build_matrix_view(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 .height(Stretch(1.0))
                 .child_space(Stretch(1.0));
             bold_label(cx, "CURVE", "matrix-col-title")
-                .width(Pixels(56.0))
+                .width(Pixels(68.0))
                 .height(Stretch(1.0))
                 .child_space(Stretch(1.0));
             bold_label(cx, "POL", "matrix-col-title")
@@ -1385,7 +1514,7 @@ pub(crate) fn build_matrix_view(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 .height(Stretch(1.0))
                 .child_space(Stretch(1.0));
             bold_label(cx, "AUX", "matrix-col-title")
-                .width(Pixels(68.0))
+                .width(Pixels(78.0))
                 .height(Stretch(1.0))
                 .child_space(Stretch(1.0));
             bold_label(cx, "ORD", "matrix-col-title")

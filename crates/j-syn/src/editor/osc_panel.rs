@@ -4,13 +4,13 @@ use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::WavetableBank;
-use nih_plug::prelude::{FloatParam, GuiContext};
+use nih_plug::prelude::{FloatParam, GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
-    bold_label, build_enum_dropdown, build_flex_knob_cell_mod_dim, build_pitch_pill_cell,
-    build_stacked_pill_cell, build_stacked_pill_cell_mod, build_wavetable_dropdown,
-    step_wavetable,
+    bold_label, build_dropdown_trigger_labels, build_enum_dropdown, build_flex_knob_cell_mod_dim,
+    build_pitch_pill_cell, build_stacked_pill_cell, build_stacked_pill_cell_mod,
+    build_wavetable_dropdown, step_wavetable,
 };
 use super::mod_bar::ModUiState;
 use super::scope::WavetableScope;
@@ -59,18 +59,16 @@ pub(super) fn build_osc_panel(
         ("Bend+", WarpModeParam::BendPlus),
         ("Spectrum", WarpModeParam::Spectrum),
     ];
-    const MOD_SRC_ITEMS: &[(&str, ModSourceParam)] = &[
-        ("Off", ModSourceParam::Off),
-        ("Osc 1", ModSourceParam::Osc1),
-        ("Osc 2", ModSourceParam::Osc2),
-        ("Osc 3", ModSourceParam::Osc3),
-        ("Osc 4", ModSourceParam::Osc4),
-    ];
-    const MOD_TYPE_ITEMS: &[(&str, ModTypeParam)] =
-        &[("PM", ModTypeParam::Pm), ("RM", ModTypeParam::Rm)];
-    const MOD_ORDER_ITEMS: &[(&str, ModOrderParam)] = &[
-        ("PM>W", ModOrderParam::PmThenWarp),
-        ("W>PM", ModOrderParam::WarpThenPm),
+    const UNIFIED_MOD_ITEMS: &[(&str, ModSourceParam, ModTypeParam)] = &[
+        ("Off", ModSourceParam::Off, ModTypeParam::Pm),
+        ("PM Osc 1", ModSourceParam::Osc1, ModTypeParam::Pm),
+        ("PM Osc 2", ModSourceParam::Osc2, ModTypeParam::Pm),
+        ("PM Osc 3", ModSourceParam::Osc3, ModTypeParam::Pm),
+        ("PM Osc 4", ModSourceParam::Osc4, ModTypeParam::Pm),
+        ("RM Osc 1", ModSourceParam::Osc1, ModTypeParam::Rm),
+        ("RM Osc 2", ModSourceParam::Osc2, ModTypeParam::Rm),
+        ("RM Osc 3", ModSourceParam::Osc3, ModTypeParam::Rm),
+        ("RM Osc 4", ModSourceParam::Osc4, ModTypeParam::Rm),
     ];
 
     let osc_label = match osc_idx {
@@ -170,81 +168,18 @@ pub(super) fn build_osc_panel(
             .width(Stretch(1.0))
             .height(Pixels(20.0));
 
-            WavetableScope::new(cx, osc_idx, bank_center, p_center.clone(), ui_scope)
+            WavetableScope::new(cx, osc_idx, bank_center, p_center, ui_scope)
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
-
-            let p_warp = p_center.clone();
-            let g_warp = gui_left.clone();
-            HStack::new(cx, move |cx| {
-                bold_label(cx, "WARP", "mini-label")
-                    .width(Pixels(32.0))
-                    .height(Stretch(1.0))
-                    .child_top(Stretch(1.0))
-                    .child_bottom(Stretch(1.0));
-
-                build_enum_dropdown(
-                    cx,
-                    p_warp,
-                    g_warp,
-                    move |p| &get_osc(p, osc_idx).warp_mode,
-                    WARP_ITEMS,
-                )
-                .width(Stretch(1.0))
-                .height(Pixels(20.0));
-            })
-            .col_between(Pixels(4.0))
-            .width(Stretch(1.0))
-            .height(Pixels(20.0));
-
-            HStack::new(cx, move |cx| {
-                bold_label(cx, "MOD", "mini-label")
-                    .width(Pixels(24.0))
-                    .height(Stretch(1.0))
-                    .child_top(Stretch(1.0))
-                    .child_bottom(Stretch(1.0));
-
-                build_enum_dropdown(
-                    cx,
-                    p_center.clone(),
-                    gui_left.clone(),
-                    move |p| &get_osc(p, osc_idx).mod_source,
-                    MOD_SRC_ITEMS,
-                )
-                .width(Stretch(1.0))
-                .height(Pixels(20.0));
-
-                build_enum_dropdown(
-                    cx,
-                    p_center.clone(),
-                    gui_left.clone(),
-                    move |p| &get_osc(p, osc_idx).mod_type,
-                    MOD_TYPE_ITEMS,
-                )
-                .width(Pixels(40.0))
-                .height(Pixels(20.0));
-
-                build_enum_dropdown(
-                    cx,
-                    p_center,
-                    gui_left,
-                    move |p| &get_osc(p, osc_idx).mod_order,
-                    MOD_ORDER_ITEMS,
-                )
-                .width(Pixels(54.0))
-                .height(Pixels(20.0));
-            })
-            .col_between(Pixels(2.0))
-            .width(Stretch(1.0))
-            .height(Pixels(20.0));
         })
         .width(Pixels(184.0))
         .height(Stretch(1.0))
-        .row_between(Pixels(3.0));
+        .row_between(Pixels(4.0));
 
-        // Column 3: Stacked PHASE / UNI / DETUNE / SPREAD pills over 4 large 46px knobs
+        // Column 3: Stacked PHASE / UNI / DETUNE / SPREAD pills over 4 knobs + WARP/arrow/MOD row
         let p_right = params.clone();
         let ui_right = mod_ui.clone();
+        let gui_right = gui_context.clone();
         VStack::new(cx, move |cx| {
             let p_pills = p_right.clone();
             let ui_pills = ui_right.clone();
@@ -304,6 +239,7 @@ pub(super) fn build_osc_panel(
             .width(Stretch(1.0))
             .height(Pixels(33.0));
 
+            let p_knobs = p_right.clone();
             HStack::new(cx, move |cx| {
                 let add_knob = |cx: &mut Context,
                                 field: fn(&OscPluginParams) -> &FloatParam,
@@ -316,11 +252,11 @@ pub(super) fn build_osc_panel(
                         title,
                         false,
                         accent,
-                        52.0,
+                        44.0,
                         dest,
                         ui_right.clone(),
                         0,
-                        p_right.clone(),
+                        p_knobs.clone(),
                         osc_check,
                     );
                 };
@@ -333,10 +269,119 @@ pub(super) fn build_osc_panel(
             .col_between(Pixels(6.0))
             .width(Stretch(1.0))
             .height(Stretch(1.0));
+
+            let p_bot = p_right;
+            let g_bot = gui_right;
+            HStack::new(cx, move |cx| {
+                Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
+
+                build_enum_dropdown(
+                    cx,
+                    p_bot.clone(),
+                    g_bot.clone(),
+                    move |p| &get_osc(p, osc_idx).warp_mode,
+                    WARP_ITEMS,
+                )
+                .width(Stretch(1.0))
+                .height(Pixels(18.0));
+
+                let p_ord = p_bot.clone();
+                let g_ord = g_bot.clone();
+                let p_ord_lbl = p_bot.clone();
+                Button::new(
+                    cx,
+                    move |_| {
+                        let cur = p_ord.oscs[osc_idx].mod_order.value();
+                        let next = match cur {
+                            ModOrderParam::WarpThenPm => ModOrderParam::PmThenWarp,
+                            ModOrderParam::PmThenWarp => ModOrderParam::WarpThenPm,
+                        };
+                        let setter = ParamSetter::new(g_ord.as_ref());
+                        let param = &p_ord.oscs[osc_idx].mod_order;
+                        setter.begin_set_parameter(param);
+                        setter.set_parameter(param, next);
+                        setter.end_set_parameter(param);
+                    },
+                    move |cx| {
+                        let arrow_lens = UiData::params.map(move |_| {
+                            match p_ord_lbl.oscs[osc_idx].mod_order.value() {
+                                ModOrderParam::WarpThenPm => "->".to_string(),
+                                ModOrderParam::PmThenWarp => "<-".to_string(),
+                            }
+                        });
+                        bold_label(cx, arrow_lens, "wt-step-label")
+                            .child_space(Stretch(1.0))
+                            .hoverable(false)
+                    },
+                )
+                .class("wt-step-btn")
+                .width(Pixels(20.0))
+                .height(Pixels(18.0));
+
+                let p_mod_trig = p_bot.clone();
+                let p_mod_pop = p_bot;
+                let g_mod_pop = g_bot;
+                Dropdown::new(
+                    cx,
+                    move |cx| {
+                        let p_m = p_mod_trig.clone();
+                        HStack::new(cx, move |cx| {
+                            build_dropdown_trigger_labels(
+                                cx,
+                                UiData::params.map(move |_| {
+                                    let osc = &p_m.oscs[osc_idx];
+                                    let src = osc.mod_source.value();
+                                    let ty = osc.mod_type.value();
+                                    let prefix = match ty {
+                                        ModTypeParam::Pm => "PM",
+                                        ModTypeParam::Rm => "RM",
+                                    };
+                                    match src {
+                                        ModSourceParam::Off => "Off".to_string(),
+                                        ModSourceParam::Osc1 => format!("{prefix} Osc 1"),
+                                        ModSourceParam::Osc2 => format!("{prefix} Osc 2"),
+                                        ModSourceParam::Osc3 => format!("{prefix} Osc 3"),
+                                        ModSourceParam::Osc4 => format!("{prefix} Osc 4"),
+                                    }
+                                }),
+                            );
+                        })
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0))
+                        .child_top(Pixels(0.0))
+                        .child_bottom(Pixels(0.0))
+                        .overflow(Overflow::Hidden)
+                    },
+                    move |cx| {
+                        for &(label, src, ty) in UNIFIED_MOD_ITEMS {
+                            let p_set = p_mod_pop.clone();
+                            let g_set = g_mod_pop.clone();
+                            bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                                let setter = ParamSetter::new(g_set.as_ref());
+                                let osc = &p_set.oscs[osc_idx];
+                                setter.begin_set_parameter(&osc.mod_type);
+                                setter.set_parameter(&osc.mod_type, ty);
+                                setter.end_set_parameter(&osc.mod_type);
+                                setter.begin_set_parameter(&osc.mod_source);
+                                setter.set_parameter(&osc.mod_source, src);
+                                setter.end_set_parameter(&osc.mod_source);
+                                cx.emit(PopupEvent::Close);
+                            });
+                        }
+                    },
+                )
+                .width(Stretch(1.0))
+                .height(Pixels(18.0));
+
+                Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
+            })
+            .col_between(Pixels(3.0))
+            .width(Stretch(1.0))
+            .height(Pixels(18.0));
         })
         .width(Stretch(1.0))
         .height(Stretch(1.0))
-        .row_between(Pixels(4.0));
+        .row_between(Pixels(2.0));
     })
     .class("hardware-module")
     .toggle_class(

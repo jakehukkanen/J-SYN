@@ -120,6 +120,7 @@ pub(crate) enum UiEvent {
     SelectTab(BottomTab),
     SelectModSeqSubTab(ModSeqSubTab),
     ModUiChanged,
+    ModValChanged,
     SetUiScale(u32),
     SetMacroName(usize, String),
     InitPatch,
@@ -151,6 +152,7 @@ pub(crate) struct UiData {
     pub active_tab: BottomTab,
     pub modseq_subtab: ModSeqSubTab,
     pub mod_ui_rev: u64,
+    pub mod_val_rev: u64,
     pub ui_scale_pct: u32,
     pub macro_names: [String; 8],
     pub current_preset_name: String,
@@ -192,6 +194,11 @@ impl Model for UiData {
             }
             UiEvent::ModUiChanged => {
                 self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
+                self.mod_val_rev = self.mod_val_rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiEvent::ModValChanged => {
+                self.mod_val_rev = self.mod_val_rev.wrapping_add(1);
                 meta.consume();
             }
             UiEvent::SetUiScale(pct) => {
@@ -515,7 +522,7 @@ impl View for GearIcon {
 
         let cx_p = bounds.x + bounds.w * 0.5;
         let cy_p = bounds.y + bounds.h * 0.5;
-        let r_outer = bounds.w.min(bounds.h) * 0.49;
+        let r_outer = bounds.w.min(bounds.h) * 0.50;
         let r_inner = r_outer * 0.68;
         let r_hole = r_outer * 0.31;
         let teeth = 6usize;
@@ -574,7 +581,7 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Main))
             .width(Pixels(48.0))
-            .height(Pixels(22.0));
+            .height(Pixels(24.0));
 
             Button::new(
                 cx,
@@ -584,7 +591,7 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Fx))
             .width(Pixels(38.0))
-            .height(Pixels(22.0));
+            .height(Pixels(24.0));
 
             Button::new(
                 cx,
@@ -594,7 +601,7 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Matrix))
             .width(Pixels(56.0))
-            .height(Pixels(22.0));
+            .height(Pixels(24.0));
 
             Button::new(
                 cx,
@@ -608,13 +615,14 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             )
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Settings))
-            .width(Pixels(34.0))
-            .height(Pixels(24.0));
+            .width(Pixels(36.0))
+            .height(Pixels(24.0))
+            .child_space(Pixels(0.0));
         })
         .class("view-switch-group")
         .col_between(Pixels(3.0))
         .width(Auto)
-        .height(Pixels(24.0))
+        .height(Pixels(30.0))
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
 
@@ -1098,6 +1106,7 @@ pub(crate) fn create(
             active_tab: BottomTab::VoiceEnv,
             modseq_subtab: ModSeqSubTab::MSeq(0),
             mod_ui_rev: 0,
+            mod_val_rev: 0,
             ui_scale_pct: initial_scale_pct,
             macro_names: initial_macro_names,
             current_preset_name: "INIT".to_string(),
