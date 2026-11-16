@@ -1,0 +1,195 @@
+name: Build VST3 & CLAP Plugins
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact_name: J-SYN-macOS-arm64
+          - os: windows-latest
+            artifact_name: J-SYN-Windows-x64
+          - os: ubuntu-22.04
+            artifact_name: J-SYN-Linux-x64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libjack-jackd2-dev \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-dri2-0-dev \
+            libxcb-icccm4-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-shape0-dev \
+            libxcb-util-dev \
+            libxcb-xfixes0-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run unit tests
+        run: cargo test --workspace
+
+      - name: Build release plugin library
+        env:
+          RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=."
+        run: cargo build --release -p j-syn
+
+      - name: Package VST3 & CLAP bundles (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            FULL_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            FULL_VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n1)"
+          fi
+          BUNDLE_VERSION="${FULL_VERSION%%-*}"
+          BUNDLE_VERSION="${BUNDLE_VERSION%%+*}"
+          if ! [[ "$BUNDLE_VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error::Cannot derive a numeric bundle version from '$FULL_VERSION'"
+            exit 1
+          fi
+          echo "Bundle version: $BUNDLE_VERSION (from '$FULL_VERSION')"
+
+          mkdir -p "dist/J-SYN.vst3/Contents/MacOS"
+          mkdir -p "dist/J-SYN.clap/Contents/MacOS"
+          cp target/release/libj_syn.dylib "dist/J-SYN.vst3/Contents/MacOS/J-SYN"
+          cp target/release/libj_syn.dylib "dist/J-SYN.clap/Contents/MacOS/J-SYN"
+
+          cat > "dist/J-SYN.vst3/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>English</string>
+            <key>CFBundleExecutable</key>
+            <string>J-SYN</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.jakehukkanen.j-syn.vst3</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>J-SYN</string>
+            <key>CFBundlePackageType</key>
+            <string>BNDL</string>
+            <key>CFBundleSignature</key>
+            <string>????</string>
+            <key>CFBundleVersion</key>
+            <string>${BUNDLE_VERSION}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${BUNDLE_VERSION}</string>
+            <key>CSResourcesFileMapped</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          cp "dist/J-SYN.vst3/Contents/Info.plist" "dist/J-SYN.clap/Contents/Info.plist"
+          echo -n "BNDL????" > "dist/J-SYN.vst3/Contents/PkgInfo"
+          echo -n "BNDL????" > "dist/J-SYN.clap/Contents/PkgInfo"
+
+          codesign --force --deep --sign - "dist/J-SYN.vst3"
+          codesign --force --deep --sign - "dist/J-SYN.clap"
+
+      - name: Package VST3 & CLAP bundles (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "dist/J-SYN.vst3/Contents/x86_64-win"
+          cp target/release/j_syn.dll "dist/J-SYN.vst3/Contents/x86_64-win/J-SYN.vst3"
+          cp target/release/j_syn.dll "dist/J-SYN.clap"
+
+      - name: Package VST3 & CLAP bundles (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "dist/J-SYN.vst3/Contents/x86_64-linux"
+          cp target/release/libj_syn.so "dist/J-SYN.vst3/Contents/x86_64-linux/J-SYN.so"
+          cp target/release/libj_syn.so "dist/J-SYN.clap"
+
+      - name: Create release archive (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p release/stage
+          cp -R "dist/J-SYN.vst3" "dist/J-SYN.clap" release/stage/
+          cp README.md docs/USER_GUIDE.md release/stage/
+          cd release
+          ditto -c -k --sequesterRsrc stage "${{ matrix.artifact_name }}.zip"
+          rm -rf stage
+
+      - name: Create release archive (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p release
+          cp README.md docs/USER_GUIDE.md dist/
+          cd dist && 7z a -tzip "../release/${{ matrix.artifact_name }}.zip" ./*
+
+      - name: Create release archive (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p release
+          cp README.md docs/USER_GUIDE.md dist/
+          cd dist && zip -r -y "../release/${{ matrix.artifact_name }}.zip" ./*
+
+      - name: Upload plugin bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: release/${{ matrix.artifact_name }}.zip
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all platform archives
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List release assets
+        run: ls -la artifacts
+
+      - name: Publish versioned release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: J-SYN ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: artifacts/*.zip
+          fail_on_unmatched_files: true

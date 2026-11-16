@@ -11,6 +11,8 @@
 # Reference repositories
 J-SAT/
 tube-resonator/
+CrushClone-rs/
+Scream/
 
 # Local scratch / audio renders
 *.pyc
