@@ -11,14 +11,17 @@ use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown,
-    build_enum_dropdown_with_override, build_inline_pill_cell, ScrollDropdown,
+    build_enum_dropdown_with_override, build_inline_pill_cell, build_prefixed_enum_dropdown,
+    ScrollDropdown,
 };
-use super::filter_panel::FILTER_MODE_ITEMS;
 use super::fx_scopes::{fx_accent_rgb, FxSlotVisualizer};
 use super::mod_bar::{ModUiState, FX_VIEW_TAG, MAIN_FX_A_TAG, MAIN_FX_B_TAG};
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
 use super::{AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData, UiEvent};
-use crate::{DiopserStagesParam, FilterModeParam, FxFilterSlopeParam, FxTypeParam, JSynPluginParams};
+use crate::{
+    DiopserStagesParam, FilterModeParam, FxBusTopologyParam, FxFilterSlopeParam, FxTypeParam,
+    JSynPluginParams,
+};
 
 const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Empty", FxTypeParam::Off),
@@ -30,13 +33,31 @@ const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Reverb", FxTypeParam::Reverb),
     ("Clipper", FxTypeParam::JSatClipper),
     ("Filter", FxTypeParam::Filter),
-    ("Diopser", FxTypeParam::Diopser),
+    ("Dispersion", FxTypeParam::Diopser),
+];
+
+const FX_FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
+    ("LP", FilterModeParam::Lp),
+    ("BP", FilterModeParam::Bp),
+    ("HP", FilterModeParam::Hp),
+    ("NTCH", FilterModeParam::Notch),
+    ("BREJ", FilterModeParam::Bandreject),
+    ("PEAK", FilterModeParam::Peak),
+    ("SCRM", FilterModeParam::Scream),
+    ("DAFT", FilterModeParam::Daft),
+    ("COMB", FilterModeParam::Comb),
+    ("HP+P", FilterModeParam::HpPeak),
+    ("HP+N", FilterModeParam::HpNotch),
+    ("LP+N", FilterModeParam::LpNotch),
+    ("LP+P", FilterModeParam::LpPeak),
+    ("PK+P", FilterModeParam::PeakPeak),
+    ("NT+N", FilterModeParam::NotchNotch),
 ];
 
 const FX_FILTER_SLOPE_ITEMS: &[(&str, FxFilterSlopeParam)] = &[
-    ("12 dB", FxFilterSlopeParam::Db12),
-    ("24 dB", FxFilterSlopeParam::Db24),
-    ("48 dB", FxFilterSlopeParam::Db48),
+    ("12", FxFilterSlopeParam::Db12),
+    ("24", FxFilterSlopeParam::Db24),
+    ("48", FxFilterSlopeParam::Db48),
 ];
 
 const DIOPSER_STAGE_ITEMS: &[(&str, DiopserStagesParam)] = &[
@@ -579,10 +600,11 @@ fn build_fx_scope_zstack(
 ) {
     ZStack::new(cx, move |cx| {
         FxSlotVisualizer::new(cx, bus_idx, slot_idx, params.clone(), mod_ui.clone())
+            .hoverable(false)
             .width(Stretch(1.0))
             .height(Stretch(1.0));
 
-        // Translucent floating top-corner scope controls
+        // Ghost-translucent floating top-corner scope controls (declared after visualizer)
         let p_top = params.clone();
         let g_top = gui_context.clone();
         let m_top = mod_ui.clone();
@@ -605,10 +627,10 @@ fn build_fx_scope_zstack(
                                 p_ov.clone(),
                                 g_ov.clone(),
                                 move |p| &p.fx_bus_slots(bus_idx)[slot_idx].filter_mode,
-                                FILTER_MODE_ITEMS,
+                                FX_FILTER_MODE_ITEMS,
                             )
                             .class("fx-scope-dd")
-                            .width(Pixels(92.0))
+                            .width(Pixels(52.0))
                             .height(Pixels(17.0));
 
                             build_enum_dropdown_with_override(
@@ -620,40 +642,24 @@ fn build_fx_scope_zstack(
                                 move |p| {
                                     let mode: j_syn_dsp::FilterMode =
                                         p.fx_bus_slots(bus_idx)[slot_idx].filter_mode.value().into();
-                                    mode.has_fixed_12db_slope().then_some("12 dB")
+                                    mode.has_fixed_12db_slope().then_some("12")
                                 },
                             )
                             .class("fx-scope-dd")
-                            .width(Pixels(54.0))
+                            .width(Pixels(36.0))
                             .height(Pixels(17.0));
                         }
                         FxTypeParam::Diopser => {
-                            HStack::new(cx, {
-                                let p_d = p_ov.clone();
-                                let g_d = g_ov.clone();
-                                move |cx| {
-                                    bold_label(cx, "STAGES", "fx-scope-pill-lbl")
-                                        .width(Auto)
-                                        .height(Stretch(1.0))
-                                        .child_top(Stretch(1.0))
-                                        .child_bottom(Stretch(1.0));
-                                    build_enum_dropdown(
-                                        cx,
-                                        p_d,
-                                        g_d,
-                                        move |p| &p.fx_bus_slots(bus_idx)[slot_idx].diopser_stages,
-                                        DIOPSER_STAGE_ITEMS,
-                                    )
-                                    .class("fx-scope-diopser")
-                                    .width(Pixels(44.0))
-                                    .height(Pixels(15.0));
-                                }
-                            })
-                            .class("fx-scope-pill")
-                            .col_between(Pixels(4.0))
-                            .child_left(Pixels(5.0))
-                            .child_right(Pixels(2.0))
-                            .width(Auto)
+                            build_prefixed_enum_dropdown(
+                                cx,
+                                p_ov.clone(),
+                                g_ov.clone(),
+                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].diopser_stages,
+                                DIOPSER_STAGE_ITEMS,
+                                "STG ",
+                            )
+                            .class("fx-scope-dd")
+                            .width(Pixels(56.0))
                             .height(Pixels(17.0));
                         }
                         _ => {}
@@ -707,7 +713,8 @@ fn build_fx_scope_zstack(
                     }
                 })
                 .col_between(Pixels(4.0))
-                .hoverable(false)
+                .position_type(PositionType::SelfDirected)
+                .z_index(10)
                 .width(Stretch(1.0))
                 .height(Pixels(17.0))
                 .top(Pixels(4.0))
@@ -856,81 +863,164 @@ fn build_compact_bar_knob<P, FMap>(
 trait FloatParamTag: nih_plug::prelude::Param {}
 impl FloatParamTag for FloatParam {}
 
-fn build_sub_bus_banner(
+fn set_fx_bus_topology(
+    params: &JSynPluginParams,
+    gui_context: &Arc<dyn GuiContext>,
+    topo: FxBusTopologyParam,
+) {
+    let setter = ParamSetter::new(gui_context.as_ref());
+    setter.begin_set_parameter(&params.fx_bus_topology);
+    setter.set_parameter(&params.fx_bus_topology, topo);
+    setter.end_set_parameter(&params.fx_bus_topology);
+}
+
+fn build_fx_top_banner(
     cx: &mut Context,
     params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
+    let no_dim: Option<fn(&JSynPluginParams) -> bool> = None;
+    let p_sub = params.clone();
+    let p_topo = params;
+
     HStack::new(cx, move |cx| {
-        LedToggleSwitch::new(
-            cx,
-            UiData::params,
-            |p| &p.sub_bus.enabled,
-            "SUB OFF",
-            "SUB BUS",
-            CORAL_RGB,
-        )
-        .width(Pixels(82.0))
-        .height(Pixels(22.0))
-        .top(Stretch(1.0))
-        .bottom(Stretch(1.0));
+        // Left Half: SUB / DIRECT BUS
+        HStack::new(cx, move |cx| {
+            LedToggleSwitch::new(
+                cx,
+                UiData::params,
+                |p| &p.sub_bus.enabled,
+                "SUB OFF",
+                "SUB FX",
+                CORAL_RGB,
+            )
+            .width(Pixels(72.0))
+            .height(Pixels(21.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
 
-        build_compact_bar_knob(
-            cx,
-            params.clone(),
-            |p| &p.sub_bus.cutoff,
-            "LP CUTOFF",
-            58.0,
-            28.0,
-            false,
-            GOLD_RGB,
-            ModDestination::SubCutoff,
-            mod_ui.clone(),
-            Some(sub_bus_enabled),
-        );
+            build_compact_bar_knob(
+                cx,
+                p_sub.clone(),
+                |p| &p.sub_bus.cutoff,
+                "LP CUTOFF",
+                56.0,
+                26.0,
+                false,
+                GOLD_RGB,
+                ModDestination::SubCutoff,
+                mod_ui.clone(),
+                Some(sub_bus_enabled),
+            );
 
-        build_compact_bar_knob(
-            cx,
-            params.clone(),
-            |p| &p.sub_bus.drive,
-            "CLIP DRIVE",
-            62.0,
-            28.0,
-            false,
-            CORAL_RGB,
-            ModDestination::SubDrive,
-            mod_ui.clone(),
-            Some(sub_bus_enabled),
-        );
+            build_compact_bar_knob(
+                cx,
+                p_sub.clone(),
+                |p| &p.sub_bus.drive,
+                "CLIP DRIVE",
+                60.0,
+                26.0,
+                false,
+                CORAL_RGB,
+                ModDestination::SubDrive,
+                mod_ui.clone(),
+                Some(sub_bus_enabled),
+            );
 
-        build_compact_bar_knob(
-            cx,
-            params,
-            |p| &p.sub_bus.level,
-            "LEVEL",
-            36.0,
-            28.0,
-            false,
-            AMBER_RGB,
-            ModDestination::SubLevel,
-            mod_ui,
-            Some(sub_bus_enabled),
-        );
-
-        Element::new(cx).width(Stretch(1.0));
-
-        bold_label(
-            cx,
-            "DIRECT SUB / LP + CLIPPER BYPASSES BUS A & BUS B -> MASTER",
-            "fx-rack-sub",
-        )
-        .width(Auto)
+            build_compact_bar_knob(
+                cx,
+                p_sub,
+                |p| &p.sub_bus.level,
+                "LEVEL",
+                36.0,
+                26.0,
+                false,
+                AMBER_RGB,
+                ModDestination::SubLevel,
+                mod_ui,
+                no_dim,
+            );
+        })
+        .class("fx-rack-banner")
+        .col_between(Pixels(12.0))
         .height(Stretch(1.0))
-        .child_top(Stretch(1.0))
-        .child_bottom(Stretch(1.0));
+        .width(Stretch(1.0));
+
+        // Right Half: BUS ROUTING (Parallel A | B vs Serial A -> B)
+        HStack::new(cx, move |cx| {
+            bold_label(cx, "BUS ROUTING", "module-title")
+                .width(Auto)
+                .height(Stretch(1.0))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0));
+
+            bold_label(
+                cx,
+                "SUB BYPASSES FX -> DIRECT OUT",
+                "fx-rack-sub",
+            )
+            .width(Auto)
+            .height(Stretch(1.0))
+            .child_top(Stretch(1.0))
+            .child_bottom(Stretch(1.0));
+
+            Element::new(cx).width(Stretch(1.0));
+
+            HStack::new(cx, {
+                let p_par = p_topo.clone();
+                let g_par = gui_context.clone();
+                let p_ser = p_topo.clone();
+                let g_ser = gui_context;
+                move |cx| {
+                    Button::new(
+                        cx,
+                        move |cx| {
+                            set_fx_bus_topology(&p_par, &g_par, FxBusTopologyParam::Parallel);
+                            cx.emit(UiEvent::ModUiChanged);
+                        },
+                        |cx| bold_label(cx, "PARALLEL (A | B)", "fx-subtab-lbl").hoverable(false),
+                    )
+                    .class("fx-subtab-btn")
+                    .toggle_class(
+                        "fx-subtab-active",
+                        UiData::params
+                            .map(|p| p.fx_bus_topology.value() == FxBusTopologyParam::Parallel),
+                    )
+                    .width(Pixels(108.0))
+                    .height(Stretch(1.0));
+
+                    Button::new(
+                        cx,
+                        move |cx| {
+                            set_fx_bus_topology(&p_ser, &g_ser, FxBusTopologyParam::Serial);
+                            cx.emit(UiEvent::ModUiChanged);
+                        },
+                        |cx| bold_label(cx, "SERIAL (A -> B)", "fx-subtab-lbl").hoverable(false),
+                    )
+                    .class("fx-subtab-btn")
+                    .toggle_class(
+                        "fx-subtab-active",
+                        UiData::params
+                            .map(|p| p.fx_bus_topology.value() == FxBusTopologyParam::Serial),
+                    )
+                    .width(Pixels(102.0))
+                    .height(Stretch(1.0));
+                }
+            })
+            .class("fx-bus-switch")
+            .col_between(Pixels(2.0))
+            .width(Auto)
+            .height(Pixels(22.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+        })
+        .class("fx-rack-banner")
+        .col_between(Pixels(10.0))
+        .height(Stretch(1.0))
+        .width(Stretch(1.0));
     })
-    .class("fx-rack-banner")
-    .col_between(Pixels(14.0))
+    .col_between(Pixels(10.0))
     .height(Pixels(38.0))
     .width(Stretch(1.0));
 }
@@ -997,54 +1087,69 @@ fn build_bus_column_fx_grid(
         .height(Pixels(28.0))
         .width(Stretch(1.0));
 
-        for row in 0..4 {
-            let p_row = params.clone();
-            let g_row = gui_context.clone();
-            let m_row = mod_ui.clone();
-            HStack::new(cx, move |cx| {
-                for col in 0..2 {
-                    let slot_idx = row * 2 + col;
-                    let p_card = p_row.clone();
-                    let g_card = g_row.clone();
-                    let m_card = m_row.clone();
-                    let p_dim = p_row.clone();
-                    VStack::new(cx, move |cx| {
-                        build_fx_slot_header(
-                            cx,
-                            bus_idx,
-                            slot_idx,
-                            p_card.clone(),
-                            g_card.clone(),
-                            m_card.clone(),
-                            true,
-                        );
+        // Column-major 2x4 grid: FX 1..4 down the left column, FX 5..8 down the right column.
+        HStack::new(cx, move |cx| {
+            for col in 0..2 {
+                let p_col = params.clone();
+                let g_col = gui_context.clone();
+                let m_col = mod_ui.clone();
+                VStack::new(cx, move |cx| {
+                    for row in 0..4 {
+                        let slot_idx = col * 4 + row;
+                        let p_card = p_col.clone();
+                        let g_card = g_col.clone();
+                        let m_card = m_col.clone();
+                        let p_dim = p_col.clone();
+                        VStack::new(cx, move |cx| {
+                            build_fx_slot_header(
+                                cx,
+                                bus_idx,
+                                slot_idx,
+                                p_card.clone(),
+                                g_card.clone(),
+                                m_card.clone(),
+                                true,
+                            );
 
-                        build_fx_scope_zstack(
-                            cx,
-                            bus_idx,
-                            slot_idx,
-                            p_card.clone(),
-                            g_card,
-                            m_card.clone(),
-                        );
+                            build_fx_scope_zstack(
+                                cx,
+                                bus_idx,
+                                slot_idx,
+                                p_card.clone(),
+                                g_card,
+                                m_card.clone(),
+                            );
 
-                        build_fx_knob_row(cx, bus_idx, slot_idx, p_card, m_card, 27.0, FX_VIEW_TAG);
-                    })
-                    .class("hardware-module")
-                    .class("fx-full-card")
-                    .toggle_class(
-                        "module-disabled",
-                        UiData::mod_ui_rev.map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
-                    )
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0))
-                    .row_between(Pixels(3.0));
-                }
-            })
-            .col_between(Pixels(4.0))
-            .width(Stretch(1.0))
-            .height(Stretch(1.0));
-        }
+                            build_fx_knob_row(
+                                cx,
+                                bus_idx,
+                                slot_idx,
+                                p_card,
+                                m_card,
+                                27.0,
+                                FX_VIEW_TAG,
+                            );
+                        })
+                        .class("hardware-module")
+                        .class("fx-full-card")
+                        .toggle_class(
+                            "module-disabled",
+                            UiData::mod_ui_rev
+                                .map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
+                        )
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0))
+                        .row_between(Pixels(3.0));
+                    }
+                })
+                .row_between(Pixels(4.0))
+                .width(Stretch(1.0))
+                .height(Stretch(1.0));
+            }
+        })
+        .col_between(Pixels(4.0))
+        .width(Stretch(1.0))
+        .height(Stretch(1.0));
     })
     .row_between(Pixels(4.0))
     .width(Stretch(1.0))
@@ -1173,7 +1278,7 @@ pub(crate) fn build_fx_rack_view(
     mod_ui: Arc<ModUiState>,
 ) {
     VStack::new(cx, move |cx| {
-        build_sub_bus_banner(cx, params.clone(), mod_ui.clone());
+        build_fx_top_banner(cx, params.clone(), gui_context.clone(), mod_ui.clone());
 
         HStack::new(cx, move |cx| {
             build_bus_column_fx_grid(

@@ -647,6 +647,7 @@ impl SynthEngine {
         let rack = FxRackParams {
             buses: [params.fx_bus_a, params.fx_bus_b],
             sub: params.sub_bus,
+            topology: params.fx_bus_topology,
         };
         let (fx_l, fx_r) = self.fx_rack.process_buses_sample(
             (sum_a_l * HEADROOM, sum_a_r * HEADROOM),

@@ -2088,8 +2088,8 @@ fn fx_phaser_processes_stereo_and_idle_recovery() {
 #[test]
 fn parallel_fx_buses_and_sub_bus_routing_and_modulation() {
     use j_syn_dsp::{
-        DirectDest, FilterBusDest, FilterRouting, FxSlotParams, FxType, ModDestination,
-        ModMatrixSource, ModSlot, SynthEngine, SynthParams, WavetableBank,
+        DirectDest, FilterBusDest, FilterRouting, FxBusTopology, FxSlotParams, FxType,
+        ModDestination, ModMatrixSource, ModSlot, SynthEngine, SynthParams, WavetableBank,
     };
 
     let bank = WavetableBank::new();
@@ -2125,7 +2125,7 @@ fn parallel_fx_buses_and_sub_bus_routing_and_modulation() {
     let rms_sub_open = run_sub(2_000.0, 0.0, true);
     let rms_sub_driven = run_sub(2_000.0, 24.0, true);
     let rms_sub_low = run_sub(80.0, 0.0, true);
-    let rms_sub_off = run_sub(2_000.0, 0.0, false);
+    let rms_sub_off = run_sub(80.0, 24.0, false);
     assert!(
         rms_sub_open > 0.01,
         "Sub bus should carry bright C5 direct signal: open={rms_sub_open}, low={rms_sub_low}, off={rms_sub_off}"
@@ -2135,7 +2135,10 @@ fn parallel_fx_buses_and_sub_bus_routing_and_modulation() {
         "Sub Clipper +24 dB drive must saturate & boost RMS cleanly: dry={rms_sub_open}, driven={rms_sub_driven}"
     );
     assert!(rms_sub_low < rms_sub_open * 0.25, "Sub LP 80 Hz must attenuate C5: {rms_sub_low} vs {rms_sub_open}");
-    assert_eq!(rms_sub_off, 0.0, "Disabled Sub bus should output silence when Buses A & B muted");
+    assert!(
+        rms_sub_off > rms_sub_low * 3.0 && rms_sub_off < rms_sub_driven * 0.7,
+        "Disabled Sub bus must bypass LP & clipper and pass clean Direct Out through: off={rms_sub_off}, low={rms_sub_low}, driven={rms_sub_driven}"
+    );
 
     // 2. Parallel Filter routing: Filter 1 -> Bus A (panned Left), Filter 2 -> Bus B (panned Right)
     let mut mp = SynthParams::default();
@@ -2189,6 +2192,46 @@ fn parallel_fx_buses_and_sub_bus_routing_and_modulation() {
         mr_sq += r * r;
     }
     assert!(ml_sq < 1e-6 && mr_sq > 0.01, "Expected Bus A muted on L while Bus B remains on R: l={ml_sq}, r={mr_sq}");
+
+    // 3. Serial Bus Topology (A -> B): Bus A output feeds Bus B, and FilterBusDest::Both avoids double-feeding Bus B.
+    let run_serial = |f1_dest: FilterBusDest, bus_b_level: f32| -> (f32, f32) {
+        let mut sp = SynthParams::default();
+        sp.amp_attack_s = 0.001;
+        sp.oscs[0].enabled = true;
+        sp.oscs[0].level = 0.8;
+        sp.routing.osc_filter_balance[0] = -1.0;
+        sp.routing.filter_out_bus[0] = f1_dest;
+        sp.fx_bus_topology = FxBusTopology::Serial;
+        sp.fx_bus_a.level = 1.0;
+        sp.fx_bus_b.level = bus_b_level;
+        sp.fx_bus_b.pan = 1.0; // hard right: only Bus B output reaches master
+
+        let mut eng_s = SynthEngine::new(sample_rate);
+        eng_s.note_on(0, 57, 1.0, None, &sp);
+        let (mut sl_sq, mut sr_sq) = (0.0_f32, 0.0_f32);
+        for _ in 0..2048 {
+            let (l, r) = eng_s.process_sample(&sp, &bank);
+            sl_sq += l * l;
+            sr_sq += r * r;
+        }
+        (sl_sq, sr_sq)
+    };
+
+    let (ser_a_l, ser_a_r) = run_serial(FilterBusDest::BusA, 1.0);
+    let (ser_both_l, ser_both_r) = run_serial(FilterBusDest::Both, 1.0);
+    let (ser_muted_l, ser_muted_r) = run_serial(FilterBusDest::BusA, 0.0);
+    assert!(
+        ser_a_l < 1e-6 && ser_a_r > 0.01,
+        "Serial A -> B must feed Bus A into Bus B (panned hard right): l={ser_a_l}, r={ser_a_r}"
+    );
+    assert!(
+        ser_muted_l < 1e-6 && ser_muted_r < 1e-6,
+        "Serial A -> B must mute master output when Bus B level is 0: l={ser_muted_l}, r={ser_muted_r}"
+    );
+    assert!(
+        (ser_both_r - ser_a_r).abs() < 1e-5 && ser_both_l < 1e-6,
+        "Serial FilterBusDest::Both must route via Bus A -> Bus B once without double-feeding: both_r={ser_both_r}, bus_a_r={ser_a_r}"
+    );
 }
 
 #[test]

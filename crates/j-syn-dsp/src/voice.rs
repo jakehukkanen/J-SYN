@@ -2,7 +2,7 @@ use crate::envelope::{AdsrParams, AmpAdsr};
 use crate::filter::{
     cutoff_hz_to_norm, cutoff_norm_to_hz, FilterParams, FilterState, FilterSvfCore,
 };
-use crate::fx::{FxBusParams, FxSlotParams, SubBusParams};
+use crate::fx::{FxBusParams, FxBusTopology, FxSlotParams, SubBusParams};
 use crate::insert::{
     DirectDest, FilterBusDest, FilterRouting, InsertPosition, InsertShaperState, RoutingParams,
     VoiceFeedbackState,
@@ -68,6 +68,7 @@ pub struct SynthParams {
     pub macros: [f32; 8],
     pub fx_bus_a: FxBusParams,
     pub fx_bus_b: FxBusParams,
+    pub fx_bus_topology: FxBusTopology,
     pub sub_bus: SubBusParams,
     pub tempo_bpm: f32,
     pub dc_blocker: bool,
@@ -111,6 +112,7 @@ impl Default for SynthParams {
                 level: 1.0,
                 pan: 0.0,
             },
+            fx_bus_topology: FxBusTopology::Parallel,
             sub_bus: SubBusParams::default(),
             tempo_bpm: 120.0,
             dc_blocker: true,
@@ -304,7 +306,13 @@ fn route_direct_to_bus(out: &mut VoiceBusOutput, dest: DirectDest, l: f32, r: f3
 }
 
 #[inline]
-fn route_filter_to_bus(out: &mut VoiceBusOutput, dest: FilterBusDest, l: f32, r: f32) {
+fn route_filter_to_bus(
+    out: &mut VoiceBusOutput,
+    dest: FilterBusDest,
+    topology: FxBusTopology,
+    l: f32,
+    r: f32,
+) {
     match dest {
         FilterBusDest::BusA => {
             out.bus_a_l += l;
@@ -317,8 +325,11 @@ fn route_filter_to_bus(out: &mut VoiceBusOutput, dest: FilterBusDest, l: f32, r:
         FilterBusDest::Both => {
             out.bus_a_l += l;
             out.bus_a_r += r;
-            out.bus_b_l += l;
-            out.bus_b_r += r;
+            // In Serial (A -> B), Bus A already feeds Bus B, so send A+B to Bus A only.
+            if topology == FxBusTopology::Parallel {
+                out.bus_b_l += l;
+                out.bus_b_r += r;
+            }
         }
         FilterBusDest::Sub => {
             out.sub_l += l;
@@ -552,7 +563,7 @@ fn process_voice_bus<F: StereoFilterStage>(
                 post_r,
             );
             feedback.store_post_filter(post_l, post_r);
-            route_filter_to_bus(&mut bus_out, out_dest, post_l, post_r);
+            route_filter_to_bus(&mut bus_out, out_dest, params.fx_bus_topology, post_l, post_r);
         }
         FilterRouting::Parallel => {
             let (out2_l, out2_r) = filters[1].process_filter(
@@ -583,6 +594,7 @@ fn process_voice_bus<F: StereoFilterStage>(
                 route_filter_to_bus(
                     &mut bus_out,
                     mod_routing.filter_out_bus[0],
+                    params.fx_bus_topology,
                     post_l,
                     post_r,
                 );
@@ -609,12 +621,14 @@ fn process_voice_bus<F: StereoFilterStage>(
                 route_filter_to_bus(
                     &mut bus_out,
                     mod_routing.filter_out_bus[0],
+                    params.fx_bus_topology,
                     post1_l,
                     post1_r,
                 );
                 route_filter_to_bus(
                     &mut bus_out,
                     mod_routing.filter_out_bus[1],
+                    params.fx_bus_topology,
                     post2_l,
                     post2_r,
                 );

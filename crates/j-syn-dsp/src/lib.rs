@@ -23,7 +23,7 @@ pub use filter::{
 pub use fx::{
     diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, filter_response_db_from_slot,
     fx_high_cut_hz, fx_low_cut_hz, sub_cutoff_hz_to_norm, sub_cutoff_norm_to_hz, FxBusParams,
-    FxFilterSlope, FxRackParams, FxRackState, FxSlotParams, FxType, SubBusParams,
+    FxBusTopology, FxFilterSlope, FxRackParams, FxRackState, FxSlotParams, FxType, SubBusParams,
     DELAY_SYNC_LABELS, DIOPSER_STAGE_COUNTS, MAX_FX_STACK, NUM_FX_BUSES, NUM_FX_SLOTS,
 };
 pub use insert::{

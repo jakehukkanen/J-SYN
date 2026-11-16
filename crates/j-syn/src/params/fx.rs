@@ -1,6 +1,6 @@
 //! Parallel Dual-Bus FX, Sub Bus, and FX slot parameters.
 
-use j_syn_dsp::{FxFilterSlope, SubBusParams};
+use j_syn_dsp::{FxBusTopology, FxFilterSlope, SubBusParams};
 use nih_plug::prelude::*;
 
 use super::{bipolar_percentage_param, fx_level_param, FilterModeParam};
@@ -96,7 +96,7 @@ pub enum FxTypeParam {
     Filter,
     #[name = "Phaser"]
     Phaser,
-    #[name = "Diopser"]
+    #[name = "Dispersion"]
     Diopser,
 }
 
@@ -160,6 +160,32 @@ impl From<FxFilterSlope> for FxFilterSlopeParam {
             FxFilterSlope::Db12 => Self::Db12,
             FxFilterSlope::Db24 => Self::Db24,
             FxFilterSlope::Db48 => Self::Db48,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FxBusTopologyParam {
+    #[name = "Parallel (A | B)"]
+    Parallel,
+    #[name = "Serial (A -> B)"]
+    Serial,
+}
+
+impl From<FxBusTopologyParam> for FxBusTopology {
+    fn from(v: FxBusTopologyParam) -> Self {
+        match v {
+            FxBusTopologyParam::Parallel => Self::Parallel,
+            FxBusTopologyParam::Serial => Self::Serial,
+        }
+    }
+}
+
+impl From<FxBusTopology> for FxBusTopologyParam {
+    fn from(v: FxBusTopology) -> Self {
+        match v {
+            FxBusTopology::Parallel => Self::Parallel,
+            FxBusTopology::Serial => Self::Serial,
         }
     }
 }
@@ -247,7 +273,7 @@ impl FxSlotPluginParams {
             p8: FloatParam::new("Param 8", init.eq_params[3], FloatRange::Linear { min: 0.0, max: 1.0 }),
             filter_mode: EnumParam::new("Filter Mode", FilterModeParam::Lp),
             filter_slope: EnumParam::new("Filter Slope", FxFilterSlopeParam::Db12),
-            diopser_stages: EnumParam::new("Diopser Stages", DiopserStagesParam::S32),
+            diopser_stages: EnumParam::new("Dispersion Stages", DiopserStagesParam::S32),
         }
     }
 

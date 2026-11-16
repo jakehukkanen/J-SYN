@@ -89,7 +89,7 @@ impl FxType {
             Self::JSatClipper => "Clipper",
             Self::Filter => "Filter",
             Self::Phaser => "Phaser",
-            Self::Diopser => "Diopser",
+            Self::Diopser => "Dispersion",
         }
     }
 
@@ -104,7 +104,7 @@ impl FxType {
             Self::JSatClipper => "J-SAT",
             Self::Filter => "FILTER",
             Self::Phaser => "PHASER",
-            Self::Diopser => "DIOP",
+            Self::Diopser => "DISP",
         }
     }
 
@@ -285,11 +285,23 @@ pub fn sub_cutoff_hz_to_norm(hz: f32) -> f32 {
     (hz.clamp(20.0, 2_000.0) / 20.0).log(100.0).clamp(0.0, 1.0)
 }
 
-/// Full parallel FX Rack (`Bus A` + `Bus B` + `Sub Bus`).
+/// How `Bus A` and `Bus B` connect inside the Master FX Rack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum FxBusTopology {
+    /// Parallel: `Bus A` and `Bus B` process independently and sum into Master.
+    #[default]
+    Parallel = 0,
+    /// Serial: `Bus A` output feeds directly into `Bus B` input (`A -> B -> Master`).
+    Serial = 1,
+}
+
+/// Full FX Rack (`Bus A` + `Bus B` + `Sub Bus` + `FxBusTopology`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FxRackParams {
     pub buses: [FxBusParams; NUM_FX_BUSES],
     pub sub: SubBusParams,
+    pub topology: FxBusTopology,
 }
 
 #[inline]
@@ -701,8 +713,10 @@ impl SubBusProcessor {
         sub: &SubBusParams,
         mod_offsets: &[f32; NUM_MOD_DESTS],
     ) -> (f32, f32) {
+        let level = (sub.level + mod_offsets[ModDestination::SubLevel.index()] * 2.0).clamp(0.0, 2.0);
         if !sub.enabled {
-            return (0.0, 0.0);
+            // Sub FX bypassed: pass raw direct signal straight through scaled by SUB LEVEL.
+            return (flush_denormal(in_l * level), flush_denormal(in_r * level));
         }
         if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 256 {
             return (0.0, 0.0);
@@ -714,7 +728,6 @@ impl SubBusProcessor {
         let cutoff_hz = sub_cutoff_norm_to_hz(cutoff_norm);
         let drive_db =
             (sub.clip_drive_db + mod_offsets[ModDestination::SubDrive.index()] * 24.0).clamp(0.0, 24.0);
-        let level = (sub.level + mod_offsets[ModDestination::SubLevel.index()] * 2.0).clamp(0.0, 2.0);
 
         if (cutoff_hz - self.last_cutoff_hz).abs() > 0.25
             || (self.sample_rate - self.last_sr).abs() > 0.5
@@ -820,9 +833,13 @@ impl FxRackState {
             tempo_bpm,
             telemetry,
         );
+        let (b_in_l, b_in_r, out_a_l, out_a_r) = match rack.topology {
+            FxBusTopology::Parallel => (bus_b_in.0, bus_b_in.1, al, ar),
+            FxBusTopology::Serial => (bus_b_in.0 + al, bus_b_in.1 + ar, 0.0, 0.0),
+        };
         let (bl, br) = self.buses[1].process_sample(
-            bus_b_in.0,
-            bus_b_in.1,
+            b_in_l,
+            b_in_r,
             &rack.buses[1],
             mod_offsets,
             tempo_bpm,
@@ -832,6 +849,9 @@ impl FxRackState {
             .sub_bus
             .process_sample(sub_in.0, sub_in.1, &rack.sub, mod_offsets);
 
-        (flush_denormal(al + bl + sl), flush_denormal(ar + br + sr))
+        (
+            flush_denormal(out_a_l + bl + sl),
+            flush_denormal(out_a_r + br + sr),
+        )
     }
 }

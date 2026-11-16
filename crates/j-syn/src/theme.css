@@ -958,28 +958,45 @@ led-toggle:checked .switch-label {
 }
 
 .fx-scope-pill {
-  background-color: #211c17d1;
+  background-color: #211c1738;
   border-width: 1px;
-  border-color: #463b32;
+  border-color: #463b3259;
   border-radius: 3px;
 }
 
 .fx-scope-dd dropdown {
-  background-color: #211c17d1;
-  border-color: #463b32;
+  background-color: #211c1738;
+  border-color: #463b3259;
   border-width: 1px;
   border-radius: 3px;
 }
 
-.fx-scope-dd dropdown:hover {
-  background-color: #322a23;
-  border-color: #f5b349;
+.fx-scope-dd dropdown:hover,
+.fx-scope-dd dropdown:checked,
+.fx-scope-dd dropdown:active {
+  background-color: #322a23e6;
+  border-color: #f5b349e6;
+}
+
+.fx-scope-dd .compact-pill-text {
+  font-size: 8;
+  color: #f0e4d666;
+}
+
+.fx-scope-dd dropdown:hover .compact-pill-text,
+.fx-scope-dd dropdown:checked .compact-pill-text,
+.fx-scope-dd dropdown:active .compact-pill-text {
+  color: #fff6e6e6;
 }
 
 .fx-scope-dd.dropdown-disabled dropdown,
 .fx-scope-dd.dropdown-disabled dropdown:hover {
-  background-color: #211c17d1;
-  border-color: #39312a;
+  background-color: #211c1728;
+  border-color: #39312a40;
+}
+
+.fx-scope-dd.dropdown-disabled .compact-pill-text {
+  color: #84786c59;
 }
 
 .fx-scope-dd dropdown .title {
@@ -987,25 +1004,13 @@ led-toggle:checked .switch-label {
   child-right: 4px;
 }
 
-.fx-scope-pill dropdown .dropdown-text,
-.fx-scope-dd dropdown .dropdown-text {
-  font-size: 8;
-}
-
-.fx-scope-diopser dropdown,
-.fx-scope-diopser dropdown:hover {
-  background-color: transparent;
-  border-width: 0px;
-}
-
-.fx-scope-pill-lbl {
-  font-size: 7.5;
-  font-weight: bold;
-  color: #a99582;
-}
-
 .fx-scope-subtabs {
   child-space: 1px;
+}
+
+.fx-scope-subtabs:hover {
+  background-color: #211c17e6;
+  border-color: #f5b349b8;
 }
 
 .fx-subtab-btn {
@@ -1030,6 +1035,34 @@ led-toggle:checked .switch-label {
 
 .fx-subtab-btn.fx-subtab-active .fx-subtab-lbl {
   color: #ffd382;
+}
+
+.fx-scope-subtabs .fx-subtab-lbl {
+  color: #a9958259;
+}
+
+.fx-scope-subtabs .fx-subtab-btn.fx-subtab-active {
+  background-color: #59463159;
+}
+
+.fx-scope-subtabs .fx-subtab-btn.fx-subtab-active .fx-subtab-lbl {
+  color: #ffd38280;
+}
+
+.fx-scope-subtabs:hover .fx-subtab-lbl {
+  color: #a99582e6;
+}
+
+.fx-scope-subtabs:hover .fx-subtab-btn:hover {
+  background-color: #473828e6;
+}
+
+.fx-scope-subtabs:hover .fx-subtab-btn.fx-subtab-active {
+  background-color: #594631e6;
+}
+
+.fx-scope-subtabs:hover .fx-subtab-btn.fx-subtab-active .fx-subtab-lbl {
+  color: #ffd382e6;
 }
 
 .routing-pill-active dropdown {

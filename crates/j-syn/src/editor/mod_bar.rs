@@ -127,6 +127,7 @@ impl ModUiState {
         Self::fnv1a_mix(&mut h, params.routing.inserts[0].mode.value() as u64);
         Self::fnv1a_mix(&mut h, params.routing.inserts[1].mode.value() as u64);
         Self::fnv1a_mix(&mut h, params.sub_bus.enabled.value() as u64);
+        Self::fnv1a_mix(&mut h, params.fx_bus_topology.value() as u64);
         for bus in 0..2 {
             for fx in params.fx_bus_slots(bus) {
                 let packed = (fx.enabled.value() as u64)

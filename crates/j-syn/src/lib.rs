@@ -171,6 +171,7 @@ impl Plugin for JSynPlugin {
                 level: self.params.fx_bus_b.level.value(),
                 pan: self.params.fx_bus_b.pan.value(),
             },
+            fx_bus_topology: self.params.fx_bus_topology.value().into(),
             sub_bus: self.params.sub_bus.to_dsp(),
             tempo_bpm,
             dc_blocker: self.params.dc_blocker.value(),
@@ -454,5 +455,6 @@ mod tests {
         assert!(decoded.params.contains_key("fx_diop_s_1"));
         assert!(decoded.params.contains_key("f1_out_bus"));
         assert!(decoded.params.contains_key("f2_out_bus"));
+        assert!(decoded.params.contains_key("fx_bus_topo"));
     }
 }
