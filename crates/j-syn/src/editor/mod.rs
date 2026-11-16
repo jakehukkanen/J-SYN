@@ -39,6 +39,7 @@ mod osc_panel;
 mod routing_tab;
 mod scope;
 mod settings_view;
+mod theme;
 mod widgets;
 
 use controls::{
@@ -58,7 +59,6 @@ use widgets::LedToggleSwitch;
 
 const BASE_WIDTH: u32 = 1160;
 const BASE_HEIGHT: u32 = 778;
-const DEFAULT_SCALE: f64 = 1.0;
 
 pub(super) const AMBER_RGB: (u8, u8, u8) = (245, 179, 73);
 pub(super) const GOLD_RGB: (u8, u8, u8) = (242, 203, 97);
@@ -136,6 +136,7 @@ pub(crate) enum UiEvent {
     ModUiChanged,
     ModValChanged,
     SetUiScale(u32),
+    SelectTheme(String),
     SetMacroName(usize, String),
     InitPatch,
     SavePatch,
@@ -171,6 +172,12 @@ pub(crate) struct UiData {
     pub mod_ui_rev: u64,
     pub mod_val_rev: u64,
     pub ui_scale_pct: u32,
+    pub theme_name: String,
+    pub themes_rev: u64,
+    #[lens(ignore)]
+    pub active_theme: theme::ThemePalette,
+    #[lens(ignore)]
+    pub dynamic_css: Arc<std::sync::RwLock<String>>,
     pub macro_names: [String; 8],
     pub current_preset_name: String,
     pub presets_dir_rev: u64,
@@ -221,6 +228,23 @@ impl Model for UiData {
             }
             UiEvent::SetUiScale(pct) => {
                 self.ui_scale_pct = *pct;
+                let mut cfg = crate::presets::JSynConfig::load();
+                cfg.ui_scale = *pct;
+                let _ = cfg.save();
+                meta.consume();
+            }
+            UiEvent::SelectTheme(name) => {
+                let pal = theme::find_theme_by_name(name);
+                if let Ok(mut guard) = self.dynamic_css.write() {
+                    *guard = pal.render_css();
+                }
+                let mut cfg = crate::presets::JSynConfig::load();
+                cfg.theme = pal.name.clone();
+                let _ = cfg.save();
+                self.theme_name = pal.name.clone();
+                self.active_theme = pal;
+                let _ = _cx.reload_styles();
+                _cx.needs_redraw();
                 meta.consume();
             }
             UiEvent::SetMacroName(idx, name) => {
@@ -404,6 +428,7 @@ impl Model for UiData {
                 self.expanded_wt_folder = None;
                 self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
                 self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
+                self.themes_rev = self.themes_rev.wrapping_add(1);
                 meta.consume();
             }
             UiEvent::ToggleWtFolder(folder) => {
@@ -527,7 +552,9 @@ pub(super) fn notify_baseview_resize_macos() {
 }
 
 pub(crate) fn default_state() -> Arc<ViziaState> {
-    ViziaState::new_with_default_scale_factor(|| (BASE_WIDTH, BASE_HEIGHT), DEFAULT_SCALE)
+    let cfg = crate::presets::JSynConfig::load();
+    let scale = (cfg.ui_scale.clamp(85, 200) as f64) / 100.0;
+    ViziaState::new_with_default_scale_factor(|| (BASE_WIDTH, BASE_HEIGHT), scale)
 }
 
 struct GearIcon;
@@ -551,10 +578,11 @@ impl View for GearIcon {
             return;
         }
         let active = UiData::view_mode.get(cx) == MainViewMode::Settings;
+        let pal = theme::current_palette(cx);
         let color = if active {
-            vg::Color::rgb(245, 179, 73)
+            theme::vg_color(&pal.accent_primary, 255)
         } else {
-            vg::Color::rgb(208, 196, 184)
+            theme::vg_color(&pal.text_muted, 255)
         };
 
         let cx_p = bounds.x + bounds.w * 0.5;
@@ -1127,16 +1155,18 @@ pub(crate) fn create(
         cx.add_font_mem(include_bytes!("../../assets/fonts/PlusJakartaSans-Bold.ttf"));
         cx.set_default_font(&["Plus Jakarta Sans"]);
 
-        let _ = cx.add_stylesheet(include_style!("src/theme.css"));
+        let initial_cfg = crate::presets::JSynConfig::load();
+        let initial_scale_pct = initial_cfg.ui_scale.clamp(85, 200);
+        let initial_theme = theme::find_theme_by_name(&initial_cfg.theme);
+        let dynamic_css = Arc::new(std::sync::RwLock::new(initial_theme.render_css()));
+        let _ = cx.add_stylesheet(theme::DynamicCssSource(dynamic_css.clone()));
 
         let mod_ui = Arc::new(ModUiState::new(params.clone(), telemetry.clone()));
-        let initial_scale_pct = (cx.user_scale_factor() * 100.0).round() as u32;
         let initial_macro_names = params
             .macro_names
             .lock()
             .map(|g| g.clone())
             .unwrap_or_else(|_| std::array::from_fn(|i| format!("MACRO {}", i + 1)));
-        let initial_cfg = crate::presets::JSynConfig::load();
         UiData {
             params: params.clone(),
             mod_ui: mod_ui.clone(),
@@ -1148,6 +1178,10 @@ pub(crate) fn create(
             mod_ui_rev: 0,
             mod_val_rev: 0,
             ui_scale_pct: initial_scale_pct,
+            theme_name: initial_theme.name.clone(),
+            themes_rev: 0,
+            active_theme: initial_theme,
+            dynamic_css,
             macro_names: initial_macro_names,
             current_preset_name: "INIT".to_string(),
             presets_dir_rev: 0,

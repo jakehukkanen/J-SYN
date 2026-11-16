@@ -8,7 +8,9 @@ use nih_plug_vizia::vizia::prelude::*;
 
 use crate::JSynPluginParams;
 
-use super::controls::{bold_label, build_bool_dropdown, build_module_header};
+use super::controls::{
+    bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_module_header,
+};
 use super::widgets::LedToggleSwitch;
 use super::{UiData, UiEvent, AMBER_RGB, CORAL_RGB};
 
@@ -25,6 +27,52 @@ pub(super) fn build_settings_view(
             build_module_header(cx, "ENGINE & SAFETY DSP", 22.0);
 
             VStack::new(cx, move |cx| {
+                HStack::new(cx, |cx| {
+                    Dropdown::new(
+                        cx,
+                        |cx| {
+                            HStack::new(cx, |cx| {
+                                build_dropdown_trigger_labels(cx, UiData::theme_name);
+                            })
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0))
+                            .child_top(Pixels(0.0))
+                            .child_bottom(Pixels(0.0))
+                            .overflow(Overflow::Hidden)
+                        },
+                        |cx| {
+                            Binding::new(cx, UiData::themes_rev, |cx, _| {
+                                for theme in super::theme::load_all_themes() {
+                                    let name = theme.name.clone();
+                                    bold_label(cx, &theme.name, "dropdown-item").on_press(
+                                        move |cx| {
+                                            cx.emit(UiEvent::SelectTheme(name.clone()));
+                                            cx.emit(PopupEvent::Close);
+                                        },
+                                    );
+                                }
+                            });
+                        },
+                    )
+                    .width(Pixels(142.0))
+                    .height(Pixels(26.0))
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0));
+
+                    bold_label(
+                        cx,
+                        "Active UI color theme (built-in presets + custom .json files in config themes folder).",
+                        "setting-desc",
+                    )
+                    .width(Stretch(1.0))
+                    .height(Auto)
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0));
+                })
+                .col_between(Pixels(14.0))
+                .width(Stretch(1.0))
+                .height(Pixels(34.0));
+
                 HStack::new(cx, move |cx| {
                     build_bool_dropdown(
                         cx,

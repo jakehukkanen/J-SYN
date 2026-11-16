@@ -107,14 +107,15 @@ impl View for WavetableScope {
         let osc = &self.params.oscs[self.osc_idx];
         let enabled = self.params.oscs[self.osc_idx].enabled.value();
 
+        let pal = super::theme::current_palette(cx);
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
         canvas.fill_path(
             &bg,
             &vg::Paint::color(if enabled {
-                vg::Color::rgb(22, 19, 16)
+                super::theme::vg_color(&pal.scope_bg, 255)
             } else {
-                vg::Color::rgb(18, 16, 14)
+                super::theme::vg_color(&pal.scope_bg, 180)
             }),
         );
 
@@ -124,9 +125,9 @@ impl View for WavetableScope {
         zero_line.move_to(bounds.x + 3.0 * dpx, mid_y);
         zero_line.line_to(bounds.x + bounds.w - 3.0 * dpx, mid_y);
         let mut zero_paint = vg::Paint::color(if enabled {
-            vg::Color::rgba(95, 82, 68, 100)
+            super::theme::vg_color(&pal.scope_grid, 180)
         } else {
-            vg::Color::rgba(75, 66, 58, 55)
+            super::theme::vg_color(&pal.scope_grid, 90)
         });
         zero_paint.set_line_width(1.0 * dpx);
         canvas.stroke_path(&zero_line, &zero_paint);
@@ -276,9 +277,9 @@ impl View for WavetableScope {
         }
 
         let mut wave_paint = vg::Paint::color(if enabled {
-            vg::Color::rgba(245, 179, 73, 240)
+            super::theme::vg_color(&pal.scope_trace, 240)
         } else {
-            vg::Color::rgba(92, 84, 76, 95)
+            super::theme::vg_color(&pal.text_dim, 95)
         });
         wave_paint.set_line_width(1.6 * dpx);
         canvas.stroke_path(&wave, &wave_paint);
@@ -286,9 +287,9 @@ impl View for WavetableScope {
         let mut border = vg::Path::new();
         border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
         let mut border_paint = vg::Paint::color(if enabled {
-            vg::Color::rgb(68, 58, 50)
+            super::theme::vg_color(&pal.border_mid, 255)
         } else {
-            vg::Color::rgb(48, 42, 36)
+            super::theme::vg_color(&pal.border_dark, 255)
         });
         border_paint.set_line_width(1.0 * dpx);
         canvas.stroke_path(&border, &border_paint);

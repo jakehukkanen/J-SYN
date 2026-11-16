@@ -87,6 +87,7 @@ pub struct FilterResponseScope {
     filter_idx: usize,
     params: Arc<JSynPluginParams>,
     mod_ui: Arc<ModUiState>,
+    #[allow(dead_code)]
     accent: (u8, u8, u8),
 }
 
@@ -185,13 +186,14 @@ impl View for FilterResponseScope {
         let enabled = dsp_params.enabled;
 
         let mut bg = vg::Path::new();
+        let pal = super::theme::current_palette(cx);
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
         canvas.fill_path(
             &bg,
             &vg::Paint::color(if enabled {
-                vg::Color::rgb(22, 19, 16)
+                super::theme::vg_color(&pal.scope_bg, 255)
             } else {
-                vg::Color::rgb(18, 16, 14)
+                super::theme::vg_color(&pal.scope_bg, 180)
             }),
         );
 
@@ -204,8 +206,10 @@ impl View for FilterResponseScope {
         let inner_bottom = inner_y + inner_h;
 
         // Vertical logarithmic frequency grid (100 Hz, 1 kHz, 10 kHz)
-        let mut grid_paint =
-            vg::Paint::color(vg::Color::rgba(95, 82, 68, if enabled { 70 } else { 30 }));
+        let mut grid_paint = vg::Paint::color(super::theme::vg_color(
+            &pal.scope_grid,
+            if enabled { 170 } else { 75 },
+        ));
         grid_paint.set_line_width(1.0 * dpx);
         for freq in [100.0_f32, 1_000.0_f32, 10_000.0_f32] {
             let x = inner_x + freq_to_norm(freq) * inner_w;
@@ -289,7 +293,11 @@ impl View for FilterResponseScope {
             prev_raw_y = raw_y;
         }
 
-        let (r, g, b) = self.accent;
+        let (r, g, b) = if self.filter_idx == 0 {
+            pal.accent_rgb()
+        } else {
+            pal.secondary_rgb()
+        };
         let fill_color = if enabled {
             vg::Color::rgba(r, g, b, 30)
         } else {

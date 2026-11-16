@@ -11,15 +11,41 @@ use serde::{Deserialize, Serialize};
 
 use crate::{JSynPluginParams, WavetableChoice};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+fn default_theme_name() -> String {
+    "Studio Amber".to_string()
+}
+
+fn default_ui_scale() -> u32 {
+    100
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JSynConfig {
     #[serde(default)]
     pub presets_dir: Option<String>,
     #[serde(default)]
     pub wavetables_dir: Option<String>,
+    #[serde(default = "default_theme_name")]
+    pub theme: String,
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: u32,
+}
+
+impl Default for JSynConfig {
+    fn default() -> Self {
+        Self {
+            presets_dir: None,
+            wavetables_dir: None,
+            theme: default_theme_name(),
+            ui_scale: default_ui_scale(),
+        }
+    }
 }
 
 impl JSynConfig {
+    pub fn themes_dir() -> Option<PathBuf> {
+        Self::config_file_path().and_then(|p| p.parent().map(|d| d.join("themes")))
+    }
     pub fn config_file_path() -> Option<PathBuf> {
         #[cfg(target_os = "macos")]
         {

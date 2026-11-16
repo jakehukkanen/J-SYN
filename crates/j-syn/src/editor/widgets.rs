@@ -127,6 +127,7 @@ pub struct RotaryKnob {
     scrolled_lines: f32,
     hovered: bool,
     bipolar: bool,
+    #[allow(dead_code)]
     accent_rgb: (u8, u8, u8),
     mod_binding: Option<ModTargetBinding>,
     value_formatter: Option<ValueFormatter>,
@@ -157,7 +158,8 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)]
+    accent_rgb: (u8, u8, u8),
     ) -> Handle<'a, Self>
     where
         L: Lens<Target = Params> + Clone,
@@ -173,7 +175,8 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)]
+    accent_rgb: (u8, u8, u8),
         dest: ModDestination,
         mod_ui: Arc<ModUiState>,
         tab_tag: u8,
@@ -204,7 +207,8 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)]
+    accent_rgb: (u8, u8, u8),
         dest: ModDestination,
         mod_ui: Arc<ModUiState>,
         tab_tag: u8,
@@ -236,7 +240,8 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)]
+    accent_rgb: (u8, u8, u8),
         mod_binding: Option<ModTargetBinding>,
         value_formatter: Option<ValueFormatter>,
     ) -> Handle<'a, Self>
@@ -594,6 +599,7 @@ impl View for RotaryKnob {
             }
         }
 
+        let pal = super::theme::current_palette(cx);
         let is_enabled = self
             .enabled_state
             .as_ref()
@@ -611,14 +617,14 @@ impl View for RotaryKnob {
             let is_major = i == 0 || i == num_ticks - 1 || i == num_ticks / 2;
             let mut paint = if is_enabled {
                 if is_major {
-                    vg::Paint::color(vg::Color::rgba(218, 198, 175, 200))
+                    vg::Paint::color(super::theme::vg_color(&pal.text_muted, 200))
                 } else {
-                    vg::Paint::color(vg::Color::rgba(155, 138, 120, 135))
+                    vg::Paint::color(super::theme::vg_color(&pal.text_dim, 145))
                 }
             } else if is_major {
-                vg::Paint::color(vg::Color::rgba(115, 105, 95, 85))
+                vg::Paint::color(super::theme::vg_color(&pal.text_dim, 85))
             } else {
-                vg::Paint::color(vg::Color::rgba(90, 82, 74, 55))
+                vg::Paint::color(super::theme::vg_color(&pal.text_dim, 55))
             };
             paint.set_line_width((if is_major { 1.1 } else { 0.8 }) * dpx);
             canvas.stroke_path(&tick, &paint);
@@ -626,15 +632,15 @@ impl View for RotaryKnob {
 
         let mut track_path = vg::Path::new();
         track_path.arc(center_x, center_y, arc_r, start_angle, end_angle, vg::Solidity::Hole);
-        let mut track_paint = vg::Paint::color(vg::Color::rgba(30, 25, 21, 245));
+        let mut track_paint = vg::Paint::color(super::theme::vg_color(&pal.knob_track, 245));
         track_paint.set_line_width(2.8 * dpx);
         track_paint.set_line_cap(vg::LineCap::Round);
         canvas.stroke_path(&track_path, &track_paint);
 
         let (ar, ag, ab) = if is_enabled {
-            self.accent_rgb
+            pal.accent_rgb()
         } else {
-            (92, 84, 78)
+            super::theme::hex_to_rgb(&pal.text_dim)
         };
         let (arc_a0, arc_a1) = if self.bipolar {
             let mid_angle = start_angle + 0.5 * sweep_angle;
@@ -770,9 +776,9 @@ impl View for RotaryKnob {
                 for slot in slots.iter().take(count) {
                     let arc_active = is_enabled && !slot.bypassed;
                     let (sr, sg, sb) = if arc_active {
-                        slot.source.color_rgb()
+                        super::theme::mod_source_rgb(&pal, slot.source)
                     } else {
-                        (110, 100, 92)
+                        super::theme::hex_to_rgb(&pal.text_dim)
                     };
                     let target_norm = (base_norm + slot.depth).clamp(0.0, 1.0);
                     let (lo_norm, hi_norm) = if slot.bipolar {
@@ -865,6 +871,7 @@ impl View for RotaryKnob {
 /// Skeuomorphic illuminated hardware push-button / LED switch.
 pub struct LedToggleSwitch {
     param_base: ParamWidgetBase,
+    #[allow(dead_code)]
     accent_rgb: (u8, u8, u8),
     hovered: bool,
 }
@@ -876,7 +883,8 @@ impl LedToggleSwitch {
         params_to_param: FMap,
         off_label: &'static str,
         on_label: &'static str,
-        accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)]
+    accent_rgb: (u8, u8, u8),
     ) -> Handle<'a, Self>
     where
         L: Lens<Target = Params> + Clone,
