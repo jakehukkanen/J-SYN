@@ -308,16 +308,109 @@ fn paint_clipper_scope(
     let mut post = [0.0_f32; FX_SCOPE_LEN];
     let gr_act = mod_ui.telemetry.fx_scopes[slot_idx].read_snapshot(&mut pre, &mut post);
 
-    let ceil_norm = params.fx_slots[slot_idx].p2.value().clamp(0.0, 1.0);
+    let slot = &params.fx_slots[slot_idx];
+    let tel = &mod_ui.telemetry;
+    let drive_norm =
+        (slot.p1.value() + tel.dest_offset(ModDestination::fx_param(slot_idx, 0))).clamp(0.0, 1.0);
+    let ceil_norm =
+        (slot.p2.value() + tel.dest_offset(ModDestination::fx_param(slot_idx, 1))).clamp(0.0, 1.0);
+    let drive_lin = 10.0_f32.powf((drive_norm * 24.0) * 0.05);
     let ceil_db = -18.0 + ceil_norm * 18.0;
     let ceil_lin = 10.0_f32.powf(ceil_db * 0.05).clamp(0.05, 1.0);
     let y_scale = 1.25_f32;
 
+    let mut pre_driven = [0.0_f32; FX_SCOPE_LEN];
+    for i in 0..FX_SCOPE_LEN {
+        pre_driven[i] = pre[i] * drive_lin;
+    }
+
     let pre_rgb = scope_trace_rgb((245, 179, 73), pal, enabled);
     let post_rgb = scope_trace_rgb((245, 86, 86), pal, enabled);
+    let dim_base = theme::lerp_rgb(
+        theme::hex_to_rgb(&pal.text_dim),
+        theme::hex_to_rgb(&pal.text_muted),
+        0.25,
+    );
+    let grey_rgb = if enabled {
+        dim_base
+    } else {
+        theme::hex_to_rgb(&pal.text_dim)
+    };
 
-    // Ceiling line
     let ceil_y = bottom - (ceil_lin / y_scale).clamp(0.0, 1.0) * ih;
+    let split_y = ceil_y.clamp(iy, bottom);
+
+    // Region above the ceiling: any pre-clip or post overshoot is greyed out
+    if split_y > iy {
+        canvas.save();
+        canvas.intersect_scissor(bounds.x, iy, bounds.w, (split_y - iy).max(0.0));
+        paint_filled_waveform_trace(
+            canvas,
+            &pre_driven,
+            ix,
+            iy,
+            iw,
+            ih,
+            y_scale,
+            grey_rgb,
+            if enabled { 52 } else { 16 },
+            if enabled { 22 } else { 6 },
+            if enabled { 140 } else { 60 },
+            1.15 * dpx,
+        );
+        paint_filled_waveform_trace(
+            canvas,
+            &post,
+            ix,
+            iy,
+            iw,
+            ih,
+            y_scale,
+            grey_rgb,
+            if enabled { 58 } else { 18 },
+            if enabled { 24 } else { 6 },
+            if enabled { 155 } else { 65 },
+            1.3 * dpx,
+        );
+        canvas.restore();
+    }
+
+    // Region at/below the ceiling: active colored pre-clip & clipped post-clip waveforms
+    if bottom > split_y {
+        canvas.save();
+        canvas.intersect_scissor(bounds.x, split_y, bounds.w, (bottom - split_y).max(0.0));
+        paint_filled_waveform_trace(
+            canvas,
+            &pre_driven,
+            ix,
+            iy,
+            iw,
+            ih,
+            y_scale,
+            pre_rgb,
+            if enabled { 24 } else { 0 },
+            if enabled { 4 } else { 0 },
+            if enabled { 125 } else { 55 },
+            1.0 * dpx,
+        );
+        paint_filled_waveform_trace(
+            canvas,
+            &post,
+            ix,
+            iy,
+            iw,
+            ih,
+            y_scale,
+            post_rgb,
+            if enabled { 96 } else { 24 },
+            if enabled { 14 } else { 4 },
+            if enabled { 235 } else { 110 },
+            1.5 * dpx,
+        );
+        canvas.restore();
+    }
+
+    // Ceiling line drawn cleanly along the split boundary
     let mut ceil_path = vg::Path::new();
     ceil_path.move_to(ix, ceil_y);
     ceil_path.line_to(ix + iw, ceil_y);
@@ -325,42 +418,10 @@ fn paint_clipper_scope(
         post_rgb.0,
         post_rgb.1,
         post_rgb.2,
-        if enabled { 185 } else { 85 },
+        if enabled { 195 } else { 90 },
     ));
-    ceil_paint.set_line_width(1.1 * dpx);
+    ceil_paint.set_line_width(1.2 * dpx);
     canvas.stroke_path(&ceil_path, &ceil_paint);
-
-    // Pre-clip waveform (soft amber glow fill + crisp peak overshoot trace)
-    paint_filled_waveform_trace(
-        canvas,
-        &pre,
-        ix,
-        iy,
-        iw,
-        ih,
-        y_scale,
-        pre_rgb,
-        if enabled { 28 } else { 0 },
-        if enabled { 4 } else { 0 },
-        if enabled { 145 } else { 65 },
-        1.1 * dpx,
-    );
-
-    // Post-clip waveform (rich gradient fill + bright crimson edge)
-    paint_filled_waveform_trace(
-        canvas,
-        &post,
-        ix,
-        iy,
-        iw,
-        ih,
-        y_scale,
-        post_rgb,
-        if enabled { 96 } else { 24 },
-        if enabled { 14 } else { 4 },
-        if enabled { 235 } else { 110 },
-        1.5 * dpx,
-    );
 
     // Compact GR activity bar along right edge
     if gr_act > 0.005 && enabled {
