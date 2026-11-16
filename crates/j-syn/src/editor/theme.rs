@@ -426,10 +426,11 @@ pub fn load_all_themes() -> Vec<ThemePalette> {
 }
 
 pub fn find_theme_by_name(name: &str) -> ThemePalette {
+    let target = name.trim();
     let themes = load_all_themes();
     themes
         .into_iter()
-        .find(|t| t.name.eq_ignore_ascii_case(name.trim()))
+        .find(|t| t.name.eq_ignore_ascii_case(target))
         .unwrap_or_else(ThemePalette::studio_amber)
 }
 

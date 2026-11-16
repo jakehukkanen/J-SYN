@@ -31,14 +31,14 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 
 ## 3. Filters & Insert FX
 - **Dual Multimode Filters (`FILTER 1` & `FILTER 2`):**
-  - Modes: `LP`, `BP`, `HP` (`6/12/24/36/48 dB` slopes), `Scream`, `Daft`, `Comb`, `HP+Peak`, `HP+Notch`, `LP+Notch`, `LP+Peak`, with a live post-modulation frequency response scope.
+  - Modes: `LP`, `BP`, `HP`, `Notch`, `Peak`, `HP + Peak`, `HP + Notch`, `LP + Notch`, `LP + Peak`, `Peak + Peak`, and `Notch + Notch` (`6/12/24/36/48 dB` slopes), plus fixed `12 dB` `Bandreject`, `Scream`, `Daft`, and `Comb` modes (slope selector automatically locks/dims to `12 dB`), with a live post-modulation frequency response scope.
 - **`INSERT FX` (`INS 1` & `INS 2`):**
   - Per-voice waveshapers (`Tube`, `Mech`, `Tube -> Mech`, `Mech -> Tube`, `Sine`, `Parabolic`, `SoftClip`, `Bitcrush`) selectable pre-F1, between F1→F2, or post-F2.
 
 ---
 
 ## 4. Master FX Rack (`FX 1` – `FX 8`)
-- Available slots: `Empty`, `OTT`, `Distortion`, `Chorus`, `Delay`, `Reverb`, `Clipper`, `Filter`.
+- Available slots: `Empty`, `OTT`, `Distortion`, `Chorus`, `Phaser`, `Delay`, `Reverb`, `Clipper`, `Filter`.
 - Each slot has an `ON/OFF` toggle, `STACK 1..4` multiplier, live `150 Hz` pre/post scope, and `▲`/`▼` slot-swapping buttons in the `FX` view.
 - Empty slots default to `ON` with `Mix = 100%`; cards only dim when toggled `OFF`.
 
@@ -48,7 +48,7 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 - **Modulation Pills (`E1`–`E4`, `MS1`–`MS4`, `VEL`, `KEY`, `MW`, `AT`):**
   - **Drag** any pill onto a knob or value pill to assign modulation.
   - **Click** `E1`–`E4` or `MS1`–`MS4` to open its editor in the `MODSEQ` / `ENV` view.
-  - **Collar Handle:** Hover/drag the radial modulation arc around a knob (`RowResize` cursor) to adjust depth.
+  - **Collar Handle:** Hover/drag the radial modulation arc around a knob to adjust depth.
   - **Right-Click** any modulated control to open a quick menu to **Bypass (`ON`/`BYP`)**, toggle **Polarity (`UNI`/`BIP`)**, or **Remove (`x`)** each routing.
 - **`VOICE` Tab:** `F1/F2 KEYTRK`, `OSC 1`–`OSC 4` keytrack toggles, `VOICING` (`Poly`/`Mono`, `PB RANGE`, `GLIDE`), and `OSCILLATOR PAN`.
 - **`MODSEQ` Tab:**

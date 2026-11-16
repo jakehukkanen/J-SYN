@@ -48,10 +48,10 @@ On **Linux**, copy them to `~/.vst3/` and `~/.clap/`.
    - `OSC 1`–`OSC 4` with `±48 st` pitch, phase, up to 8-voice unison (`UNI`, `DETUNE`, `SPREAD`), `WARP` (`None`, `B-`, `B+`, `SP`), cross-oscillator `PM`/`RM` with switchable `>` / `<` warp-mod routing order, and custom `.wav` wavetable import (`2048`-sample frame slicing & mip-maps).
    - `Dirty` (2007-style table lookup) and `Clean` (band-limited mip-map interpolation) engine modes, voice `auto_sleep`, and per-voice stereo `White`/`Pink`/`Brown` noise.
 2. **Dual ZDF Multimode Filters & Insert FX:**
-   - `FILTER 1` & `FILTER 2` with `LP`/`BP`/`HP` (`6/12/24/36/48 dB`), `Scream`, `Daft`, `Comb`, `HP+Peak`, `HP+Notch`, `LP+Notch`, and `LP+Peak`, plus live post-modulation response scopes.
+   - `FILTER 1` & `FILTER 2` with `LP`/`BP`/`HP`/`Notch`/`Peak`/`HP+Peak`/`HP+Notch`/`LP+Notch`/`LP+Peak`/`Peak+Peak`/`Notch+Notch` (`6/12/24/36/48 dB`), plus fixed `12 dB` `Bandreject`, `Scream`, `Daft`, and `Comb` modes with live post-modulation response scopes.
    - `INSERT FX` (`INS 1` & `INS 2`: `Tube`, `Mech`, `Tube -> Mech`, `Mech -> Tube`, `Sine`, `Parabolic`, `SoftClip`, `Bitcrush`), `Serial`/`Parallel` filter routing, `Direct Out` bypass, and feedback bus.
 3. **8-Slot Serial Master FX Rack & Safety Stage:**
-   - Swappable `FX 1`–`FX 8` slots (`Empty`, `OTT`, `Distortion`, `Chorus`, `Delay`, `Reverb`, `Clipper`, `Filter`) with `STACK 1..4`, live 150 Hz pre/post scopes, `f64`-precision `~2.5 Hz` DC blocker, optional `-0.1 dBFS` brickwall safety limiter, and stereo Peak/RMS meter.
+   - Swappable `FX 1`–`FX 8` slots (`Empty`, `OTT`, `Distortion`, `Chorus`, `Phaser`, `Delay`, `Reverb`, `Clipper`, `Filter`) with `STACK 1..4`, live 150 Hz pre/post scopes, `f64`-precision `~2.5 Hz` DC blocker, optional `-0.1 dBFS` brickwall safety limiter, and stereo Peak/RMS meter.
 4. **32-Slot Modulation Matrix, `MODSEQ` / `LFO` / `ENV` & Multi-Theme UI:**
    - Drag-and-drop `E1`–`E4`, `MS1`–`MS4`, `VEL`, `KEY`, `MW`, `AT`, and custom-named `M1`–`M8` macros onto knobs/pills, with radial modulation collars, right-click bypass/polarity/remove menus, and a full `MATRIX` table (`LIN`/`EXP`/`LOG`/`S-CURVE`/`STEP`, `AUX`, `UNI`/`BIP`).
    - 5 built-in themes (`Studio Amber`, `Arctic Slate`, `Midnight Violet`, `Phosphor`, `Daylight Studio`) + custom `.json` themes, persistent `UI SCALE` (`85%`–`200%`), and collapsible subfolder category menus for presets and wavetables.
