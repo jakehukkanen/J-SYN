@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use j_syn_dsp::filter::{cutoff_norm_to_hz, evaluate_filter_response_db};
+use j_syn_dsp::filter::cutoff_norm_to_hz;
 use j_syn_dsp::mod_matrix::{ModDestination, FX_SCOPE_LEN};
 use j_syn_dsp::{FxRackState, FxType};
 use nih_plug::prelude::{GuiContext, ParamSetter};
@@ -15,8 +15,12 @@ use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_inline_pill_cell, ScrollDropdown,
 };
 use super::mod_bar::{ModUiState, FX_VIEW_TAG};
+use super::scope::{
+    paint_filled_waveform_trace, paint_filter_freq_grid, paint_filter_response_curve,
+    paint_scope_bg, paint_scope_border, paint_vertical_gradient_fill, scope_trace_rgb,
+};
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
-use super::{UiData, UiEvent};
+use super::{theme, theme::ThemePalette, UiData, UiEvent};
 use crate::{FxTypeParam, JSynPluginParams};
 
 const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
@@ -286,12 +290,11 @@ fn paint_clipper_scope(
     slot_idx: usize,
     params: &JSynPluginParams,
     mod_ui: &ModUiState,
+    pal: &ThemePalette,
 ) {
     let radius = 3.5 * dpx;
     let enabled = fx_slot_enabled_fn(slot_idx)(params);
-    let mut bg = vg::Path::new();
-    bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(20, 17, 14)));
+    paint_scope_bg(canvas, bounds, radius, pal, enabled);
 
     let pad_x = 4.0 * dpx;
     let pad_y = 3.0 * dpx;
@@ -310,57 +313,54 @@ fn paint_clipper_scope(
     let ceil_lin = 10.0_f32.powf(ceil_db * 0.05).clamp(0.05, 1.0);
     let y_scale = 1.25_f32;
 
-    let to_y = |peak: f32| -> f32 {
-        let norm = (peak / y_scale).clamp(0.0, 1.0);
-        bottom - norm * ih
-    };
+    let pre_rgb = scope_trace_rgb((245, 179, 73), pal, enabled);
+    let post_rgb = scope_trace_rgb((245, 86, 86), pal, enabled);
 
     // Ceiling line
-    let ceil_y = to_y(ceil_lin);
+    let ceil_y = bottom - (ceil_lin / y_scale).clamp(0.0, 1.0) * ih;
     let mut ceil_path = vg::Path::new();
     ceil_path.move_to(ix, ceil_y);
     ceil_path.line_to(ix + iw, ceil_y);
     let mut ceil_paint = vg::Paint::color(vg::Color::rgba(
-        245,
-        86,
-        86,
-        if enabled { 185 } else { 70 },
+        post_rgb.0,
+        post_rgb.1,
+        post_rgb.2,
+        if enabled { 185 } else { 85 },
     ));
     ceil_paint.set_line_width(1.1 * dpx);
     canvas.stroke_path(&ceil_path, &ceil_paint);
 
-    // Pre-clip waveform (amber) and Post-clip waveform (crimson)
-    let mut pre_path = vg::Path::new();
-    let mut post_path = vg::Path::new();
-    for i in 0..FX_SCOPE_LEN {
-        let x = ix + (i as f32 / (FX_SCOPE_LEN - 1) as f32) * iw;
-        let py = to_y(pre[i]);
-        let cy = to_y(post[i]);
-        if i == 0 {
-            pre_path.move_to(x, py);
-            post_path.move_to(x, cy);
-        } else {
-            pre_path.line_to(x, py);
-            post_path.line_to(x, cy);
-        }
-    }
-    let mut pre_paint = vg::Paint::color(vg::Color::rgba(
-        245,
-        179,
-        73,
-        if enabled { 145 } else { 55 },
-    ));
-    pre_paint.set_line_width(1.1 * dpx);
-    canvas.stroke_path(&pre_path, &pre_paint);
+    // Pre-clip waveform (soft amber glow fill + crisp peak overshoot trace)
+    paint_filled_waveform_trace(
+        canvas,
+        &pre,
+        ix,
+        iy,
+        iw,
+        ih,
+        y_scale,
+        pre_rgb,
+        if enabled { 28 } else { 0 },
+        if enabled { 4 } else { 0 },
+        if enabled { 145 } else { 65 },
+        1.1 * dpx,
+    );
 
-    let mut post_paint = vg::Paint::color(vg::Color::rgba(
-        245,
-        86,
-        86,
-        if enabled { 235 } else { 85 },
-    ));
-    post_paint.set_line_width(1.5 * dpx);
-    canvas.stroke_path(&post_path, &post_paint);
+    // Post-clip waveform (rich gradient fill + bright crimson edge)
+    paint_filled_waveform_trace(
+        canvas,
+        &post,
+        ix,
+        iy,
+        iw,
+        ih,
+        y_scale,
+        post_rgb,
+        if enabled { 96 } else { 24 },
+        if enabled { 14 } else { 4 },
+        if enabled { 235 } else { 110 },
+        1.5 * dpx,
+    );
 
     // Compact GR activity bar along right edge
     if gr_act > 0.005 && enabled {
@@ -371,16 +371,7 @@ fn paint_clipper_scope(
         canvas.fill_path(&bar, &vg::Paint::color(vg::Color::rgba(255, 110, 90, 210)));
     }
 
-    let mut border = vg::Path::new();
-    border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    let mut b_paint = vg::Paint::color(vg::Color::rgba(
-        90,
-        74,
-        62,
-        if enabled { 160 } else { 75 },
-    ));
-    b_paint.set_line_width(1.0 * dpx);
-    canvas.stroke_path(&border, &b_paint);
+    paint_scope_border(canvas, bounds, dpx, radius, pal, enabled);
 }
 
 #[inline]
@@ -391,12 +382,11 @@ fn paint_filter_scope(
     slot_idx: usize,
     params: &JSynPluginParams,
     mod_ui: &ModUiState,
+    pal: &ThemePalette,
 ) {
     let radius = 3.5 * dpx;
     let enabled = fx_slot_enabled_fn(slot_idx)(params);
-    let mut bg = vg::Path::new();
-    bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(20, 17, 14)));
+    paint_scope_bg(canvas, bounds, radius, pal, enabled);
 
     let pad_x = 4.0 * dpx;
     let pad_y = 3.0 * dpx;
@@ -413,91 +403,41 @@ fn paint_filter_scope(
         (slot.p3.value() + tel.dest_offset(ModDestination::fx_param(slot_idx, 2))).clamp(0.0, 1.0),
         (slot.p4.value() + tel.dest_offset(ModDestination::fx_param(slot_idx, 3))).clamp(0.0, 1.0),
     ];
-    let fp = FxRackState::filter_params_from_fx(eff);
+    let mut fp = FxRackState::filter_params_from_fx(eff);
+    fp.enabled = enabled;
 
-    // 0 dB reference line
-    let zero_y = iy + (18.0 / 42.0) * ih;
-    let mut zero_line = vg::Path::new();
-    zero_line.move_to(ix, zero_y);
-    zero_line.line_to(ix + iw, zero_y);
-    let mut zero_paint = vg::Paint::color(vg::Color::rgba(95, 82, 68, if enabled { 95 } else { 40 }));
-    zero_paint.set_line_width(1.0 * dpx);
-    canvas.stroke_path(&zero_line, &zero_paint);
+    const DB_MIN: f32 = -24.0;
+    const DB_MAX: f32 = 18.0;
+    paint_filter_freq_grid(
+        canvas,
+        ix,
+        iy,
+        iw,
+        ih,
+        dpx,
+        pal,
+        enabled,
+        &[(0.0, 165, 75)],
+        DB_MIN,
+        DB_MAX,
+    );
+    paint_filter_response_curve(
+        canvas,
+        &fp,
+        ix,
+        iy,
+        iw,
+        ih,
+        DB_MIN,
+        DB_MAX,
+        64,
+        dpx,
+        1.6 * dpx,
+        fx_accent_rgb(FxTypeParam::Filter),
+        pal,
+    );
 
-    // Frequency response curve (20 Hz .. 20 kHz log scale), clipped cleanly above bottom floor
-    const PTS: usize = 64;
-    let floor_y = iy + ih - 1.5 * dpx;
-    let mut curve = vg::Path::new();
-    let mut prev_x = ix;
-    let mut prev_raw_y = floor_y;
-    for i in 0..PTS {
-        let t = i as f32 / (PTS - 1) as f32;
-        let freq_hz = 20.0 * 1000.0_f32.powf(t);
-        let db = evaluate_filter_response_db(&fp, freq_hz);
-        let y_norm = ((18.0 - db) / 42.0).max(0.0);
-        let x = ix + t * iw;
-        let raw_y = iy + y_norm * ih;
-        if i == 0 {
-            if raw_y < floor_y {
-                curve.move_to(x, raw_y);
-            }
-        } else {
-            let prev_in = prev_raw_y < floor_y;
-            let curr_in = raw_y < floor_y;
-            match (prev_in, curr_in) {
-                (true, true) => curve.line_to(x, raw_y),
-                (true, false) => {
-                    let denom = raw_y - prev_raw_y;
-                    let frac = if denom.abs() > 1e-6 {
-                        ((floor_y - prev_raw_y) / denom).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-                    curve.line_to(prev_x + frac * (x - prev_x), floor_y);
-                }
-                (false, true) => {
-                    let denom = raw_y - prev_raw_y;
-                    let frac = if denom.abs() > 1e-6 {
-                        ((floor_y - prev_raw_y) / denom).clamp(0.0, 1.0)
-                    } else {
-                        1.0
-                    };
-                    curve.move_to(prev_x + frac * (x - prev_x), floor_y);
-                    curve.line_to(x, raw_y);
-                }
-                (false, false) => {}
-            }
-        }
-        prev_x = x;
-        prev_raw_y = raw_y;
-    }
-    let mut curve_paint = vg::Paint::color(vg::Color::rgba(
-        112,
-        224,
-        154,
-        if enabled { 235 } else { 85 },
-    ));
-    curve_paint.set_line_width(1.6 * dpx);
-    canvas.stroke_path(&curve, &curve_paint);
-
-    // Live cutoff marker dot
-    let fc_t = ((fp.cutoff_hz.clamp(20.0, 20_000.0) / 20.0).ln() / 1000.0_f32.ln()).clamp(0.0, 1.0);
-    let fc_db = evaluate_filter_response_db(&fp, fp.cutoff_hz);
-    let fc_y = iy + ((18.0 - fc_db) / 42.0).max(0.0) * ih;
-    if fc_y < floor_y {
-        let mut dot = vg::Path::new();
-        dot.circle(ix + fc_t * iw, fc_y, 2.5 * dpx);
-        canvas.fill_path(
-            &dot,
-            &vg::Paint::color(vg::Color::rgba(112, 224, 154, if enabled { 245 } else { 95 })),
-        );
-    }
-
-    let mut border = vg::Path::new();
-    border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    let mut b_paint = vg::Paint::color(vg::Color::rgba(90, 74, 62, if enabled { 160 } else { 75 }));
-    b_paint.set_line_width(1.0 * dpx);
-    canvas.stroke_path(&border, &b_paint);
+    paint_scope_border(canvas, bounds, dpx, radius, pal, enabled);
 }
 
 #[inline]
@@ -508,12 +448,11 @@ fn paint_ott_scope(
     slot_idx: usize,
     params: &JSynPluginParams,
     mod_ui: &ModUiState,
+    pal: &ThemePalette,
 ) {
     let radius = 3.5 * dpx;
     let enabled = fx_slot_enabled_fn(slot_idx)(params);
-    let mut bg = vg::Path::new();
-    bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(20, 17, 14)));
+    paint_scope_bg(canvas, bounds, radius, pal, enabled);
 
     let pad_x = 5.0 * dpx;
     let pad_y = 4.0 * dpx;
@@ -534,7 +473,10 @@ fn paint_ott_scope(
     let mut zero_line = vg::Path::new();
     zero_line.move_to(ix, mid_y);
     zero_line.line_to(ix + iw, mid_y);
-    let mut zero_paint = vg::Paint::color(vg::Color::rgba(95, 82, 68, if enabled { 110 } else { 45 }));
+    let mut zero_paint = vg::Paint::color(theme::vg_color(
+        &pal.scope_grid,
+        if enabled { 170 } else { 70 },
+    ));
     zero_paint.set_line_width(1.0 * dpx);
     canvas.stroke_path(&zero_line, &zero_paint);
 
@@ -546,12 +488,14 @@ fn paint_ott_scope(
         (activity * 0.8 - pre_pk * 0.45) * depth,
         (post_pk * 0.9 - pre_pk * 0.65) * depth,
     ];
-    for (b, &(r, g, bl)) in band_colors.iter().enumerate() {
+    let slot_back = theme::vg_lerp(&pal.scope_bg, &pal.panel_bg, 0.35, 200);
+    for (b, &base_rgb) in band_colors.iter().enumerate() {
         let bx = ix + (b as f32) * (band_w + 4.0 * dpx);
         let mut slot_bg = vg::Path::new();
         slot_bg.rounded_rect(bx, iy, band_w, ih, 2.0 * dpx);
-        canvas.fill_path(&slot_bg, &vg::Paint::color(vg::Color::rgba(32, 27, 22, 200)));
+        canvas.fill_path(&slot_bg, &vg::Paint::color(slot_back));
 
+        let (r, g, bl) = scope_trace_rgb(base_rgb, pal, enabled);
         let delta = band_deltas[b].clamp(-1.0, 1.0);
         let bar_h = (delta.abs() * (ih * 0.48)).max(if enabled { 2.0 * dpx } else { 0.0 });
         let bar_y = if delta >= 0.0 { mid_y - bar_h } else { mid_y };
@@ -559,15 +503,11 @@ fn paint_ott_scope(
         bar.rounded_rect(bx + 1.0 * dpx, bar_y, (band_w - 2.0 * dpx).max(1.0), bar_h, 1.5 * dpx);
         canvas.fill_path(
             &bar,
-            &vg::Paint::color(vg::Color::rgba(r, g, bl, if enabled { 220 } else { 75 })),
+            &vg::Paint::color(vg::Color::rgba(r, g, bl, if enabled { 220 } else { 95 })),
         );
     }
 
-    let mut border = vg::Path::new();
-    border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    let mut b_paint = vg::Paint::color(vg::Color::rgba(80, 68, 56, if enabled { 150 } else { 70 }));
-    b_paint.set_line_width(1.0 * dpx);
-    canvas.stroke_path(&border, &b_paint);
+    paint_scope_border(canvas, bounds, dpx, radius, pal, enabled);
 }
 
 #[inline]
@@ -578,12 +518,11 @@ fn paint_distortion_scope(
     slot_idx: usize,
     params: &JSynPluginParams,
     mod_ui: &ModUiState,
+    pal: &ThemePalette,
 ) {
     let radius = 3.5 * dpx;
     let enabled = fx_slot_enabled_fn(slot_idx)(params);
-    let mut bg = vg::Path::new();
-    bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(20, 17, 14)));
+    paint_scope_bg(canvas, bounds, radius, pal, enabled);
 
     let pad_x = 5.0 * dpx;
     let pad_y = 4.0 * dpx;
@@ -591,26 +530,39 @@ fn paint_distortion_scope(
     let iy = bounds.y + pad_y;
     let iw = (bounds.w - 2.0 * pad_x).max(1.0);
     let ih = (bounds.h - 2.0 * pad_y).max(1.0);
-    let bottom = iy + ih;
+
+    // Subtle 0-level reference axis
+    let mid_y = iy + ih * 0.5;
+    let mut mid_line = vg::Path::new();
+    mid_line.move_to(ix, mid_y);
+    mid_line.line_to(ix + iw, mid_y);
+    let mut mid_paint = vg::Paint::color(theme::vg_color(
+        &pal.scope_grid,
+        if enabled { 130 } else { 55 },
+    ));
+    mid_paint.set_line_width(1.0 * dpx);
+    canvas.stroke_path(&mid_line, &mid_paint);
 
     let mut pre = [0.0_f32; FX_SCOPE_LEN];
     let mut post = [0.0_f32; FX_SCOPE_LEN];
     let _ = mod_ui.telemetry.fx_scopes[slot_idx].read_snapshot(&mut pre, &mut post);
 
-    // Live post waveform background trace
-    let mut post_path = vg::Path::new();
-    for i in 0..FX_SCOPE_LEN {
-        let x = ix + (i as f32 / (FX_SCOPE_LEN - 1) as f32) * iw;
-        let cy = bottom - (post[i] / 1.25).clamp(0.0, 1.0) * ih;
-        if i == 0 {
-            post_path.move_to(x, cy);
-        } else {
-            post_path.line_to(x, cy);
-        }
-    }
-    let mut post_paint = vg::Paint::color(vg::Color::rgba(235, 118, 62, if enabled { 95 } else { 35 }));
-    post_paint.set_line_width(1.1 * dpx);
-    canvas.stroke_path(&post_path, &post_paint);
+    // Live post waveform filled silhouette behind waveshaper curve
+    let wave_rgb = scope_trace_rgb(fx_accent_rgb(FxTypeParam::Distortion), pal, enabled);
+    paint_filled_waveform_trace(
+        canvas,
+        &post,
+        ix,
+        iy,
+        iw,
+        ih,
+        1.25,
+        wave_rgb,
+        if enabled { 64 } else { 18 },
+        if enabled { 10 } else { 4 },
+        if enabled { 110 } else { 45 },
+        1.1 * dpx,
+    );
 
     // Live transfer curve from DRIVE & TYPE
     let submode = (params.fx_slots[slot_idx].p1.value() * 3.99) as usize;
@@ -635,18 +587,21 @@ fn paint_distortion_scope(
             xfer.line_to(px, py);
         }
     }
-    let mut xfer_paint = vg::Paint::color(vg::Color::rgba(255, 162, 92, if enabled { 235 } else { 85 }));
+    let curve_rgb = scope_trace_rgb((255, 162, 92), pal, enabled);
+    let mut xfer_paint = vg::Paint::color(vg::Color::rgba(
+        curve_rgb.0,
+        curve_rgb.1,
+        curve_rgb.2,
+        if enabled { 235 } else { 105 },
+    ));
     xfer_paint.set_line_width(1.6 * dpx);
     canvas.stroke_path(&xfer, &xfer_paint);
 
-    let mut border = vg::Path::new();
-    border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    let mut b_paint = vg::Paint::color(vg::Color::rgba(80, 68, 56, if enabled { 150 } else { 70 }));
-    b_paint.set_line_width(1.0 * dpx);
-    canvas.stroke_path(&border, &b_paint);
+    paint_scope_border(canvas, bounds, dpx, radius, pal, enabled);
 }
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn paint_time_fx_scope(
     canvas: &mut Canvas,
     bounds: BoundingBox,
@@ -655,14 +610,13 @@ fn paint_time_fx_scope(
     fx_ty: FxTypeParam,
     params: &JSynPluginParams,
     mod_ui: &ModUiState,
+    pal: &ThemePalette,
 ) {
     let radius = 3.5 * dpx;
     let enabled = fx_slot_enabled_fn(slot_idx)(params);
-    let mut bg = vg::Path::new();
-    bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(20, 17, 14)));
+    paint_scope_bg(canvas, bounds, radius, pal, enabled);
 
-    let (ar, ag, ab) = fx_accent_rgb(fx_ty);
+    let (ar, ag, ab) = scope_trace_rgb(fx_accent_rgb(fx_ty), pal, enabled);
     let pad_x = 5.0 * dpx;
     let pad_y = 4.0 * dpx;
     let ix = bounds.x + pad_x;
@@ -680,7 +634,7 @@ fn paint_time_fx_scope(
     let p2 = slot.p2.value().clamp(0.0, 1.0);
     let p3 = slot.p3.value().clamp(0.0, 1.0);
 
-    // Structural FX envelope (Delay taps, Reverb decay tail, Chorus dual LFO)
+    // Structural FX envelope (Delay taps, Reverb decay tail, Chorus dual LFO, Phaser notch sweep)
     match fx_ty {
         FxTypeParam::Delay => {
             let spacing = (0.08 + p1 * 0.14) * iw;
@@ -691,7 +645,7 @@ fn paint_time_fx_scope(
                 let mut tap = vg::Path::new();
                 tap.move_to(x, bottom);
                 tap.line_to(x, bottom - amp);
-                let mut tp = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 130 } else { 45 }));
+                let mut tp = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 130 } else { 55 }));
                 tp.set_line_width(2.0 * dpx);
                 canvas.stroke_path(&tap, &tp);
                 x += spacing;
@@ -709,7 +663,16 @@ fn paint_time_fx_scope(
             }
             tail.line_to(ix + iw, bottom);
             tail.close();
-            canvas.fill_path(&tail, &vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 42 } else { 14 })));
+            paint_vertical_gradient_fill(
+                canvas,
+                &tail,
+                ix,
+                iy,
+                bottom,
+                (ar, ag, ab),
+                if enabled { 36 } else { 12 },
+                if enabled { 6 } else { 2 },
+            );
         }
         FxTypeParam::Chorus => {
             let mid_y = iy + ih * 0.5;
@@ -719,9 +682,13 @@ fn paint_time_fx_scope(
             for i in 0..48 {
                 let t = i as f32 / 47.0;
                 let y = mid_y + (t * cycles * std::f32::consts::TAU).sin() * amp;
-                if i == 0 { lfo.move_to(ix + t * iw, y); } else { lfo.line_to(ix + t * iw, y); }
+                if i == 0 {
+                    lfo.move_to(ix + t * iw, y);
+                } else {
+                    lfo.line_to(ix + t * iw, y);
+                }
             }
-            let mut lp = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 115 } else { 40 }));
+            let mut lp = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 115 } else { 50 }));
             lp.set_line_width(1.2 * dpx);
             canvas.stroke_path(&lfo, &lp);
         }
@@ -730,44 +697,57 @@ fn paint_time_fx_scope(
             let shift = 0.25 + p2 * 0.45;
             let amp = (0.28 + p3 * 0.32) * ih;
             let mut notch_curve = vg::Path::new();
+            let mut notch_fill = vg::Path::new();
+            notch_fill.move_to(ix, bottom);
             for i in 0..48 {
                 let t = i as f32 / 47.0;
                 let phase = (t * 3.0 + shift) * std::f32::consts::PI;
                 let dip = 1.0 - phase.sin().powi(4);
-                let y = mid_y + (0.6 - dip) * amp;
+                let y = (mid_y + (0.6 - dip) * amp).clamp(iy, bottom);
+                let x = ix + t * iw;
+                notch_fill.line_to(x, y);
                 if i == 0 {
-                    notch_curve.move_to(ix + t * iw, y);
+                    notch_curve.move_to(x, y);
                 } else {
-                    notch_curve.line_to(ix + t * iw, y);
+                    notch_curve.line_to(x, y);
                 }
             }
-            let mut np = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 130 } else { 45 }));
+            notch_fill.line_to(ix + iw, bottom);
+            notch_fill.close();
+            paint_vertical_gradient_fill(
+                canvas,
+                &notch_fill,
+                ix,
+                iy,
+                bottom,
+                (ar, ag, ab),
+                if enabled { 30 } else { 10 },
+                if enabled { 4 } else { 2 },
+            );
+            let mut np = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 130 } else { 55 }));
             np.set_line_width(1.25 * dpx);
             canvas.stroke_path(&notch_curve, &np);
         }
         _ => {}
     }
 
-    // Live post waveform trace
-    let mut post_path = vg::Path::new();
-    for i in 0..FX_SCOPE_LEN {
-        let x = ix + (i as f32 / (FX_SCOPE_LEN - 1) as f32) * iw;
-        let cy = bottom - (post[i] / 1.25).clamp(0.0, 1.0) * ih;
-        if i == 0 {
-            post_path.move_to(x, cy);
-        } else {
-            post_path.line_to(x, cy);
-        }
-    }
-    let mut post_paint = vg::Paint::color(vg::Color::rgba(ar, ag, ab, if enabled { 225 } else { 75 }));
-    post_paint.set_line_width(1.4 * dpx);
-    canvas.stroke_path(&post_path, &post_paint);
+    // Live filled post waveform trace
+    paint_filled_waveform_trace(
+        canvas,
+        &post,
+        ix,
+        iy,
+        iw,
+        ih,
+        1.25,
+        (ar, ag, ab),
+        if enabled { 92 } else { 24 },
+        if enabled { 12 } else { 4 },
+        if enabled { 225 } else { 105 },
+        1.4 * dpx,
+    );
 
-    let mut border = vg::Path::new();
-    border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-    let mut b_paint = vg::Paint::color(vg::Color::rgba(80, 68, 56, if enabled { 150 } else { 70 }));
-    b_paint.set_line_width(1.0 * dpx);
-    canvas.stroke_path(&border, &b_paint);
+    paint_scope_border(canvas, bounds, dpx, radius, pal, enabled);
 }
 
 /// Multi-FX live waveform, filter curve, & activity visualizer used in `MAIN` and `FX` views.
@@ -812,25 +792,67 @@ impl View for FxSlotVisualizer {
             return;
         }
         let dpx = cx.scale_factor();
+        let pal = theme::current_palette(cx);
         let fx_ty = self.params.fx_slots[self.slot_idx].fx_type.value();
         match fx_ty {
             FxTypeParam::JSatClipper => {
-                paint_clipper_scope(canvas, bounds, dpx, self.slot_idx, &self.params, &self.mod_ui);
+                paint_clipper_scope(
+                    canvas,
+                    bounds,
+                    dpx,
+                    self.slot_idx,
+                    &self.params,
+                    &self.mod_ui,
+                    &pal,
+                );
             }
             FxTypeParam::Filter => {
-                paint_filter_scope(canvas, bounds, dpx, self.slot_idx, &self.params, &self.mod_ui);
+                paint_filter_scope(
+                    canvas,
+                    bounds,
+                    dpx,
+                    self.slot_idx,
+                    &self.params,
+                    &self.mod_ui,
+                    &pal,
+                );
             }
             FxTypeParam::Ott => {
-                paint_ott_scope(canvas, bounds, dpx, self.slot_idx, &self.params, &self.mod_ui);
+                paint_ott_scope(
+                    canvas,
+                    bounds,
+                    dpx,
+                    self.slot_idx,
+                    &self.params,
+                    &self.mod_ui,
+                    &pal,
+                );
             }
             FxTypeParam::Distortion => {
-                paint_distortion_scope(canvas, bounds, dpx, self.slot_idx, &self.params, &self.mod_ui);
+                paint_distortion_scope(
+                    canvas,
+                    bounds,
+                    dpx,
+                    self.slot_idx,
+                    &self.params,
+                    &self.mod_ui,
+                    &pal,
+                );
             }
             FxTypeParam::Delay
             | FxTypeParam::Chorus
             | FxTypeParam::Reverb
             | FxTypeParam::Phaser => {
-                paint_time_fx_scope(canvas, bounds, dpx, self.slot_idx, fx_ty, &self.params, &self.mod_ui);
+                paint_time_fx_scope(
+                    canvas,
+                    bounds,
+                    dpx,
+                    self.slot_idx,
+                    fx_ty,
+                    &self.params,
+                    &self.mod_ui,
+                    &pal,
+                );
             }
             FxTypeParam::Off => {}
         }

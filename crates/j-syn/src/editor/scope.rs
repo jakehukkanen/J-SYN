@@ -10,8 +10,302 @@ use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::RawParamEvent;
 
 use super::mod_bar::ModUiState;
+use super::theme::{self, ThemePalette};
 use super::UiData;
 use crate::{JSynPluginParams, ModSourceParam, ModTypeParam, OscPluginParams};
+
+#[inline]
+pub(super) fn paint_scope_bg(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    radius: f32,
+    pal: &ThemePalette,
+    enabled: bool,
+) {
+    let mut bg = vg::Path::new();
+    bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
+    canvas.fill_path(
+        &bg,
+        &vg::Paint::color(theme::vg_color(
+            &pal.scope_bg,
+            if enabled { 255 } else { 180 },
+        )),
+    );
+}
+
+#[inline]
+pub(super) fn paint_scope_border(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    dpx: f32,
+    radius: f32,
+    pal: &ThemePalette,
+    enabled: bool,
+) {
+    let mut border = vg::Path::new();
+    border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
+    let mut bp = vg::Paint::color(theme::vg_color(
+        if enabled { &pal.border_mid } else { &pal.border_dark },
+        255,
+    ));
+    bp.set_line_width(1.0 * dpx);
+    canvas.stroke_path(&border, &bp);
+}
+
+#[inline]
+pub(super) fn scope_trace_rgb(
+    rgb: (u8, u8, u8),
+    pal: &ThemePalette,
+    enabled: bool,
+) -> (u8, u8, u8) {
+    if enabled {
+        rgb
+    } else {
+        theme::lerp_rgb(rgb, theme::hex_to_rgb(&pal.text_dim), 0.60)
+    }
+}
+
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn paint_vertical_gradient_fill(
+    canvas: &mut Canvas,
+    path: &vg::Path,
+    x: f32,
+    top_y: f32,
+    bottom_y: f32,
+    rgb: (u8, u8, u8),
+    top_alpha: u8,
+    bot_alpha: u8,
+) {
+    let paint = vg::Paint::linear_gradient(
+        x,
+        top_y,
+        x,
+        bottom_y,
+        vg::Color::rgba(rgb.0, rgb.1, rgb.2, top_alpha),
+        vg::Color::rgba(rgb.0, rgb.1, rgb.2, bot_alpha),
+    );
+    canvas.fill_path(path, &paint);
+}
+
+/// Renders a unipolar scrolling/amplitude waveform slice anchored at the bottom with
+/// a vertical gradient area fill and optional top trace stroke.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn paint_filled_waveform_trace(
+    canvas: &mut Canvas,
+    samples: &[f32],
+    ix: f32,
+    iy: f32,
+    iw: f32,
+    ih: f32,
+    y_scale: f32,
+    rgb: (u8, u8, u8),
+    fill_top_alpha: u8,
+    fill_bot_alpha: u8,
+    stroke_alpha: u8,
+    stroke_w: f32,
+) {
+    if samples.len() < 2 {
+        return;
+    }
+    let bottom = iy + ih;
+    let denom = (samples.len() - 1) as f32;
+    let scale = y_scale.max(1e-4);
+
+    let mut fill = vg::Path::new();
+    let mut stroke = vg::Path::new();
+    fill.move_to(ix, bottom);
+    for (i, &val) in samples.iter().enumerate() {
+        let x = ix + (i as f32 / denom) * iw;
+        let cy = bottom - (val / scale).clamp(0.0, 1.0) * ih;
+        fill.line_to(x, cy);
+        if i == 0 {
+            stroke.move_to(x, cy);
+        } else {
+            stroke.line_to(x, cy);
+        }
+    }
+    fill.line_to(ix + iw, bottom);
+    fill.close();
+
+    if fill_top_alpha > 0 {
+        paint_vertical_gradient_fill(canvas, &fill, ix, iy, bottom, rgb, fill_top_alpha, fill_bot_alpha);
+    }
+    if stroke_alpha > 0 {
+        let mut paint = vg::Paint::color(vg::Color::rgba(rgb.0, rgb.1, rgb.2, stroke_alpha));
+        paint.set_line_width(stroke_w);
+        paint.set_line_join(vg::LineJoin::Round);
+        canvas.stroke_path(&stroke, &paint);
+    }
+}
+
+#[inline]
+pub(super) fn filter_freq_to_norm(freq_hz: f32) -> f32 {
+    ((freq_hz.clamp(20.0, 20_000.0) / 20.0).ln() / 1000.0_f32.ln()).clamp(0.0, 1.0)
+}
+
+#[inline]
+pub(super) fn filter_db_to_raw_y(
+    db: f32,
+    inner_top: f32,
+    inner_h: f32,
+    db_min: f32,
+    db_max: f32,
+) -> f32 {
+    let span = (db_max - db_min).max(1.0);
+    let norm = ((db - db_min) / span).min(1.0);
+    inner_top + (1.0 - norm) * inner_h
+}
+
+/// Shared logarithmic frequency & horizontal dB grid for Filter & FX Filter scopes.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn paint_filter_freq_grid(
+    canvas: &mut Canvas,
+    ix: f32,
+    iy: f32,
+    iw: f32,
+    ih: f32,
+    dpx: f32,
+    pal: &ThemePalette,
+    enabled: bool,
+    db_lines: &[(f32, u8, u8)],
+    db_min: f32,
+    db_max: f32,
+) {
+    let bottom = iy + ih;
+    let mut v_paint = vg::Paint::color(theme::vg_color(
+        &pal.scope_grid,
+        if enabled { 150 } else { 65 },
+    ));
+    v_paint.set_line_width(1.0 * dpx);
+    for freq in [100.0_f32, 1_000.0_f32, 10_000.0_f32] {
+        let x = ix + filter_freq_to_norm(freq) * iw;
+        let mut line = vg::Path::new();
+        line.move_to(x, iy);
+        line.line_to(x, bottom);
+        canvas.stroke_path(&line, &v_paint);
+    }
+
+    for &(db, en_alpha, dis_alpha) in db_lines {
+        let y = filter_db_to_raw_y(db, iy, ih, db_min, db_max).clamp(iy, bottom);
+        let mut line = vg::Path::new();
+        line.move_to(ix, y);
+        line.line_to(ix + iw, y);
+        let mut p = vg::Paint::color(theme::vg_color(
+            &pal.scope_grid,
+            if enabled { en_alpha } else { dis_alpha },
+        ));
+        p.set_line_width(1.0 * dpx);
+        canvas.stroke_path(&line, &p);
+    }
+}
+
+/// Shared filter magnitude curve + vertical gradient fill under the response line + cutoff dot.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn paint_filter_response_curve(
+    canvas: &mut Canvas,
+    params: &j_syn_dsp::FilterParams,
+    ix: f32,
+    iy: f32,
+    iw: f32,
+    ih: f32,
+    db_min: f32,
+    db_max: f32,
+    pts: usize,
+    dpx: f32,
+    stroke_w: f32,
+    rgb: (u8, u8, u8),
+    pal: &ThemePalette,
+) {
+    let enabled = params.enabled;
+    let bottom = iy + ih;
+    let floor_y = bottom - 0.5 * dpx;
+    let mut curve = vg::Path::new();
+    let mut fill = vg::Path::new();
+    let mut prev_x = ix;
+    let mut prev_raw_y = bottom;
+
+    let count = pts.max(2);
+    for i in 0..count {
+        let t = i as f32 / (count - 1) as f32;
+        let freq_hz = 20.0 * 1000.0_f32.powf(t);
+        let db = j_syn_dsp::evaluate_filter_response_db(params, freq_hz);
+        let x = ix + t * iw;
+        let raw_y = filter_db_to_raw_y(db, iy, ih, db_min, db_max);
+        let fill_y = raw_y.clamp(iy, bottom);
+        if i == 0 {
+            if raw_y < floor_y {
+                curve.move_to(x, raw_y.max(iy));
+            }
+            fill.move_to(x, bottom);
+            fill.line_to(x, fill_y);
+        } else {
+            let prev_in = prev_raw_y < floor_y;
+            let curr_in = raw_y < floor_y;
+            match (prev_in, curr_in) {
+                (true, true) => curve.line_to(x, raw_y.max(iy)),
+                (true, false) => {
+                    let denom = raw_y - prev_raw_y;
+                    let frac = if denom.abs() > 1e-6 {
+                        ((floor_y - prev_raw_y) / denom).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    curve.line_to(prev_x + frac * (x - prev_x), floor_y);
+                }
+                (false, true) => {
+                    let denom = raw_y - prev_raw_y;
+                    let frac = if denom.abs() > 1e-6 {
+                        ((floor_y - prev_raw_y) / denom).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    curve.move_to(prev_x + frac * (x - prev_x), floor_y);
+                    curve.line_to(x, raw_y.max(iy));
+                }
+                (false, false) => {}
+            }
+            fill.line_to(x, fill_y);
+        }
+        if i + 1 == count {
+            fill.line_to(x, bottom);
+            fill.close();
+        }
+        prev_x = x;
+        prev_raw_y = raw_y;
+    }
+
+    let trace_rgb = scope_trace_rgb(rgb, pal, enabled);
+    paint_vertical_gradient_fill(
+        canvas,
+        &fill,
+        ix,
+        iy,
+        bottom,
+        trace_rgb,
+        if enabled { 92 } else { 24 },
+        if enabled { 12 } else { 4 },
+    );
+
+    let stroke_color = vg::Color::rgba(
+        trace_rgb.0,
+        trace_rgb.1,
+        trace_rgb.2,
+        if enabled { 240 } else { 115 },
+    );
+    let mut curve_paint = vg::Paint::color(stroke_color);
+    curve_paint.set_line_width(stroke_w);
+    canvas.stroke_path(&curve, &curve_paint);
+
+    let fc_x = ix + filter_freq_to_norm(params.cutoff_hz) * iw;
+    let fc_db = j_syn_dsp::evaluate_filter_response_db(params, params.cutoff_hz);
+    let fc_raw_y = filter_db_to_raw_y(fc_db, iy, ih, db_min, db_max);
+    if fc_raw_y < bottom - 1.0 * dpx {
+        let mut dot = vg::Path::new();
+        dot.circle(fc_x, fc_raw_y.max(iy), 2.6 * dpx);
+        canvas.fill_path(&dot, &vg::Paint::color(stroke_color));
+    }
+}
 
 /// Live single-cycle wavetable preview canvas per oscillator,
 /// applying `Phase`, `Warp`, and simulated `PM` / `RM` from `Mod Source`.
@@ -108,16 +402,7 @@ impl View for WavetableScope {
         let enabled = self.params.oscs[self.osc_idx].enabled.value();
 
         let pal = super::theme::current_palette(cx);
-        let mut bg = vg::Path::new();
-        bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-        canvas.fill_path(
-            &bg,
-            &vg::Paint::color(if enabled {
-                super::theme::vg_color(&pal.scope_bg, 255)
-            } else {
-                super::theme::vg_color(&pal.scope_bg, 180)
-            }),
-        );
+        paint_scope_bg(canvas, bounds, radius, &pal, enabled);
 
         // Center zero-crossing line
         let mid_y = bounds.y + bounds.h * 0.5;
@@ -284,15 +569,7 @@ impl View for WavetableScope {
         wave_paint.set_line_width(1.6 * dpx);
         canvas.stroke_path(&wave, &wave_paint);
 
-        let mut border = vg::Path::new();
-        border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-        let mut border_paint = vg::Paint::color(if enabled {
-            super::theme::vg_color(&pal.border_mid, 255)
-        } else {
-            super::theme::vg_color(&pal.border_dark, 255)
-        });
-        border_paint.set_line_width(1.0 * dpx);
-        canvas.stroke_path(&border, &border_paint);
+        paint_scope_border(canvas, bounds, dpx, radius, &pal, enabled);
     }
 }
 
@@ -341,16 +618,10 @@ impl View for MasterMeter {
         }
         let dpx = cx.scale_factor();
         let (peak_l, peak_r, rms_l, rms_r, clip_l, clip_r) = self.telemetry.master_meters();
+        let pal = super::theme::current_palette(cx);
 
-        let mut bg = vg::Path::new();
-        bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 3.0 * dpx);
-        canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(20, 17, 15)));
-
-        let mut border = vg::Path::new();
-        border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 3.0 * dpx);
-        let mut bp = vg::Paint::color(vg::Color::rgb(68, 58, 50));
-        bp.set_line_width(1.0 * dpx);
-        canvas.stroke_path(&border, &bp);
+        paint_scope_bg(canvas, bounds, 3.0 * dpx, &pal, true);
+        paint_scope_border(canvas, bounds, dpx, 3.0 * dpx, &pal, true);
 
         let pad = 2.5 * dpx;
         let gap = 2.0 * dpx;
@@ -371,14 +642,17 @@ impl View for MasterMeter {
             let led_col = if clip {
                 vg::Color::rgb(245, 75, 65)
             } else {
-                vg::Color::rgb(46, 38, 34)
+                theme::vg_lerp(&pal.scope_bg, &pal.border_dark, 0.35, 255)
             };
             canvas.fill_path(&led, &vg::Paint::color(led_col));
 
             // Track background
             let mut track = vg::Path::new();
             track.rounded_rect(x, bar_top, bar_w, bar_h, 1.0 * dpx);
-            canvas.fill_path(&track, &vg::Paint::color(vg::Color::rgb(32, 27, 24)));
+            canvas.fill_path(
+                &track,
+                &vg::Paint::color(theme::vg_lerp(&pal.scope_bg, &pal.panel_bg, 0.28, 255)),
+            );
 
             // RMS fill
             let rms_n = Self::level_to_norm(rms);
@@ -392,7 +666,7 @@ impl View for MasterMeter {
                     x,
                     bar_top,
                     vg::Color::rgb(82, 200, 128),
-                    vg::Color::rgb(245, 179, 73),
+                    theme::vg_color(&pal.accent_primary, 255),
                 );
                 canvas.fill_path(&fill, &paint);
             }
@@ -406,7 +680,7 @@ impl View for MasterMeter {
                 let cap_col = if pk > 0.95 {
                     vg::Color::rgb(245, 82, 68)
                 } else {
-                    vg::Color::rgb(255, 224, 150)
+                    theme::vg_color(&pal.accent_gold, 255)
                 };
                 canvas.fill_path(&cap, &vg::Paint::color(cap_col));
             }

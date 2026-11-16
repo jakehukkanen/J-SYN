@@ -14,8 +14,12 @@ use super::controls::{
     bold_label, build_enum_dropdown, build_enum_dropdown_with_override, build_flex_knob_cell_mod_dim,
 };
 use super::mod_bar::ModUiState;
+use super::scope::{
+    filter_db_to_raw_y, filter_freq_to_norm, paint_filter_freq_grid, paint_filter_response_curve,
+    paint_scope_bg, paint_scope_border, scope_trace_rgb,
+};
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
-use super::UiData;
+use super::{theme, UiData};
 use crate::{FilterModeParam, FilterPluginParams, FilterSlopeParam, JSynPluginParams};
 
 #[inline]
@@ -121,22 +125,6 @@ fn filter_preview_signature(filter: &FilterPluginParams) -> u64 {
     h
 }
 
-#[inline]
-fn freq_to_norm(freq_hz: f32) -> f32 {
-    ((freq_hz.clamp(20.0, 20_000.0) / 20.0).ln() / 1000.0_f32.ln()).clamp(0.0, 1.0)
-}
-
-#[inline]
-fn db_to_raw_y(db: f32, inner_top: f32, inner_h: f32) -> f32 {
-    let norm = ((db + 36.0) / 60.0).min(1.0);
-    inner_top + (1.0 - norm) * inner_h
-}
-
-#[inline]
-fn db_to_y(db: f32, inner_top: f32, inner_h: f32) -> f32 {
-    db_to_raw_y(db, inner_top, inner_h).min(inner_top + inner_h)
-}
-
 impl FilterResponseScope {
     pub fn new(
         cx: &mut Context,
@@ -194,17 +182,8 @@ impl View for FilterResponseScope {
         }
         let enabled = dsp_params.enabled;
 
-        let mut bg = vg::Path::new();
-        let pal = super::theme::current_palette(cx);
-        bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-        canvas.fill_path(
-            &bg,
-            &vg::Paint::color(if enabled {
-                super::theme::vg_color(&pal.scope_bg, 255)
-            } else {
-                super::theme::vg_color(&pal.scope_bg, 180)
-            }),
-        );
+        let pal = theme::current_palette(cx);
+        paint_scope_bg(canvas, bounds, radius, &pal, enabled);
 
         let pad_x = 5.0 * dpx;
         let pad_y = 4.0 * dpx;
@@ -214,175 +193,87 @@ impl View for FilterResponseScope {
         let inner_h = (bounds.h - 2.0 * pad_y).max(1.0);
         let inner_bottom = inner_y + inner_h;
 
-        // Vertical logarithmic frequency grid (100 Hz, 1 kHz, 10 kHz)
-        let mut grid_paint = vg::Paint::color(super::theme::vg_color(
-            &pal.scope_grid,
-            if enabled { 170 } else { 75 },
-        ));
-        grid_paint.set_line_width(1.0 * dpx);
-        for freq in [100.0_f32, 1_000.0_f32, 10_000.0_f32] {
-            let x = inner_x + freq_to_norm(freq) * inner_w;
-            let mut line = vg::Path::new();
-            line.move_to(x, inner_y);
-            line.line_to(x, inner_bottom);
-            canvas.stroke_path(&line, &grid_paint);
-        }
+        const DB_MIN: f32 = -36.0;
+        const DB_MAX: f32 = 24.0;
+        paint_filter_freq_grid(
+            canvas,
+            inner_x,
+            inner_y,
+            inner_w,
+            inner_h,
+            dpx,
+            &pal,
+            enabled,
+            &[(-24.0, 85, 35), (-12.0, 85, 35), (0.0, 180, 80), (12.0, 85, 35)],
+            DB_MIN,
+            DB_MAX,
+        );
 
-        // Horizontal dB grid (+12, 0, -12, -24 dB)
-        for &(db, base_alpha) in &[(-24.0_f32, 55_u8), (-12.0, 55), (0.0, 110), (12.0, 55)] {
-            let y = db_to_y(db, inner_y, inner_h);
-            let mut line = vg::Path::new();
-            line.move_to(inner_x, y);
-            line.line_to(inner_x + inner_w, y);
-            let alpha = if enabled {
-                base_alpha
-            } else if base_alpha > 60 {
-                55
-            } else {
-                30
-            };
-            let mut p = vg::Paint::color(vg::Color::rgba(110, 96, 80, alpha));
-            p.set_line_width(1.0 * dpx);
-            canvas.stroke_path(&line, &p);
-        }
-
-        const CURVE_PTS: usize = 96;
-        let floor_y = inner_bottom - 0.5 * dpx;
-        let mut curve = vg::Path::new();
-        let mut fill = vg::Path::new();
-        let mut prev_x = inner_x;
-        let mut prev_raw_y = inner_bottom;
-
-        for i in 0..CURVE_PTS {
-            let t = i as f32 / (CURVE_PTS - 1) as f32;
-            let freq_hz = 20.0 * 1000.0_f32.powf(t);
-            let db = j_syn_dsp::evaluate_filter_response_db(&dsp_params, freq_hz);
-            let x = inner_x + t * inner_w;
-            let raw_y = db_to_raw_y(db, inner_y, inner_h);
-            let fill_y = raw_y.min(inner_bottom);
-            if i == 0 {
-                if raw_y < floor_y {
-                    curve.move_to(x, raw_y);
-                }
-                fill.move_to(x, inner_bottom);
-                fill.line_to(x, fill_y);
-            } else {
-                let prev_in = prev_raw_y < floor_y;
-                let curr_in = raw_y < floor_y;
-                match (prev_in, curr_in) {
-                    (true, true) => curve.line_to(x, raw_y),
-                    (true, false) => {
-                        let denom = raw_y - prev_raw_y;
-                        let frac = if denom.abs() > 1e-6 {
-                            ((floor_y - prev_raw_y) / denom).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                        curve.line_to(prev_x + frac * (x - prev_x), floor_y);
-                    }
-                    (false, true) => {
-                        let denom = raw_y - prev_raw_y;
-                        let frac = if denom.abs() > 1e-6 {
-                            ((floor_y - prev_raw_y) / denom).clamp(0.0, 1.0)
-                        } else {
-                            1.0
-                        };
-                        curve.move_to(prev_x + frac * (x - prev_x), floor_y);
-                        curve.line_to(x, raw_y);
-                    }
-                    (false, false) => {}
-                }
-                fill.line_to(x, fill_y);
-            }
-            if i + 1 == CURVE_PTS {
-                fill.line_to(x, inner_bottom);
-                fill.close();
-            }
-            prev_x = x;
-            prev_raw_y = raw_y;
-        }
-
-        let (r, g, b) = if self.filter_idx == 0 {
+        let rgb = if self.filter_idx == 0 {
             pal.accent_rgb()
         } else {
             pal.secondary_rgb()
         };
-        let fill_color = if enabled {
-            vg::Color::rgba(r, g, b, 30)
-        } else {
-            vg::Color::rgba(85, 76, 68, 8)
-        };
-        canvas.fill_path(&fill, &vg::Paint::color(fill_color));
-
-        let stroke_color = if enabled {
-            vg::Color::rgba(r, g, b, 240)
-        } else {
-            vg::Color::rgba(92, 84, 76, 95)
-        };
-        let mut curve_paint = vg::Paint::color(stroke_color);
-        curve_paint.set_line_width(1.7 * dpx);
-        canvas.stroke_path(&curve, &curve_paint);
+        paint_filter_response_curve(
+            canvas,
+            &dsp_params,
+            inner_x,
+            inner_y,
+            inner_w,
+            inner_h,
+            DB_MIN,
+            DB_MAX,
+            96,
+            dpx,
+            1.7 * dpx,
+            rgb,
+            &pal,
+        );
 
         // Ghost base cutoff marker when modulated
         if (dsp_params.cutoff_hz - base_params.cutoff_hz).abs() / base_params.cutoff_hz.max(20.0)
             > 0.005
         {
-            let base_x = inner_x + freq_to_norm(base_params.cutoff_hz) * inner_w;
+            let trace_rgb = scope_trace_rgb(rgb, &pal, enabled);
+            let base_x = inner_x + filter_freq_to_norm(base_params.cutoff_hz) * inner_w;
             let base_db =
                 j_syn_dsp::evaluate_filter_response_db(&base_params, base_params.cutoff_hz);
-            let base_raw_y = db_to_raw_y(base_db, inner_y, inner_h);
+            let base_raw_y = filter_db_to_raw_y(base_db, inner_y, inner_h, DB_MIN, DB_MAX);
             if base_raw_y < inner_bottom - 1.0 * dpx {
                 let mut ghost = vg::Path::new();
-                ghost.circle(base_x, base_raw_y, 2.4 * dpx);
-                let mut ghost_paint = vg::Paint::color(if enabled {
-                    vg::Color::rgba(r, g, b, 110)
-                } else {
-                    vg::Color::rgba(92, 84, 76, 55)
-                });
+                ghost.circle(base_x, base_raw_y.max(inner_y), 2.4 * dpx);
+                let mut ghost_paint = vg::Paint::color(vg::Color::rgba(
+                    trace_rgb.0,
+                    trace_rgb.1,
+                    trace_rgb.2,
+                    if enabled { 115 } else { 55 },
+                ));
                 ghost_paint.set_line_width(1.1 * dpx);
                 canvas.stroke_path(&ghost, &ghost_paint);
             }
         }
 
-        // Cutoff marker dot on curve
-        let fc_x = inner_x + freq_to_norm(dsp_params.cutoff_hz) * inner_w;
-        let fc_db = j_syn_dsp::evaluate_filter_response_db(&dsp_params, dsp_params.cutoff_hz);
-        let fc_raw_y = db_to_raw_y(fc_db, inner_y, inner_h);
-        if fc_raw_y < inner_bottom - 1.0 * dpx {
-            let mut dot = vg::Path::new();
-            dot.circle(fc_x, fc_raw_y, 2.8 * dpx);
-            canvas.fill_path(&dot, &vg::Paint::color(stroke_color));
-        }
-
         // Secondary Freq 2 marker dot for multi-filter modes
         if dsp_params.mode.is_multi() {
             let f2_hz = j_syn_dsp::filter::aux_to_freq2_hz(dsp_params.aux);
-            let f2_x = inner_x + freq_to_norm(f2_hz) * inner_w;
+            let f2_x = inner_x + filter_freq_to_norm(f2_hz) * inner_w;
             let f2_db = j_syn_dsp::evaluate_filter_response_db(&dsp_params, f2_hz);
-            let f2_raw_y = db_to_raw_y(f2_db, inner_y, inner_h);
+            let f2_raw_y = filter_db_to_raw_y(f2_db, inner_y, inner_h, DB_MIN, DB_MAX);
             if f2_raw_y < inner_bottom - 1.0 * dpx {
                 let mut dot2 = vg::Path::new();
-                dot2.circle(f2_x, f2_raw_y, 2.4 * dpx);
+                dot2.circle(f2_x, f2_raw_y.max(inner_y), 2.4 * dpx);
                 canvas.fill_path(
                     &dot2,
                     &vg::Paint::color(if enabled {
-                        vg::Color::rgba(246, 239, 230, 200)
+                        theme::vg_color(&pal.text_bright, 210)
                     } else {
-                        vg::Color::rgba(110, 100, 90, 85)
+                        theme::vg_color(&pal.text_dim, 95)
                     }),
                 );
             }
         }
 
-        let mut border = vg::Path::new();
-        border.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, radius);
-        let mut border_paint = vg::Paint::color(if enabled {
-            vg::Color::rgb(68, 58, 50)
-        } else {
-            vg::Color::rgb(48, 42, 36)
-        });
-        border_paint.set_line_width(1.0 * dpx);
-        canvas.stroke_path(&border, &border_paint);
+        paint_scope_border(canvas, bounds, dpx, radius, &pal, enabled);
     }
 }
 
