@@ -727,6 +727,8 @@ pub struct ModSlot {
     pub bipolar: bool,
     pub enabled: bool,
     #[serde(default)]
+    pub bypassed: bool,
+    #[serde(default)]
     pub aux_source: ModMatrixSource,
     #[serde(default)]
     pub curve: f32,
@@ -776,6 +778,7 @@ impl ModMatrixState {
                 depth: default_depth.clamp(-1.0, 1.0),
                 bipolar: false,
                 enabled: true,
+                bypassed: false,
                 aux_source: ModMatrixSource::None,
                 curve: 0.0,
             };
@@ -806,7 +809,7 @@ impl ModMatrixState {
     ) {
         out_deltas.fill(0.0);
         for slot in &self.slots {
-            if !slot.enabled {
+            if !slot.enabled || slot.bypassed {
                 continue;
             }
             if let Some(src_idx) = slot.source.active_index() {

@@ -20,55 +20,47 @@ use super::{UiData, UiEvent};
 use crate::{FxTypeParam, JSynPluginParams};
 
 const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
-    ("Off", FxTypeParam::Off),
+    ("Empty", FxTypeParam::Off),
     ("OTT", FxTypeParam::Ott),
     ("Distortion", FxTypeParam::Distortion),
     ("Chorus", FxTypeParam::Chorus),
     ("Delay", FxTypeParam::Delay),
     ("Reverb", FxTypeParam::Reverb),
-    ("J-SAT Clip", FxTypeParam::JSatClipper),
+    ("Clipper", FxTypeParam::JSatClipper),
     ("Filter", FxTypeParam::Filter),
 ];
 
 #[inline]
 fn fx0_enabled(p: &JSynPluginParams) -> bool {
-    let fx = &p.fx_slots[0];
-    fx.enabled.value() && fx.fx_type.value() != FxTypeParam::Off
+    p.fx_slots[0].enabled.value()
 }
 #[inline]
 fn fx1_enabled(p: &JSynPluginParams) -> bool {
-    let fx = &p.fx_slots[1];
-    fx.enabled.value() && fx.fx_type.value() != FxTypeParam::Off
+    p.fx_slots[1].enabled.value()
 }
 #[inline]
 fn fx2_enabled(p: &JSynPluginParams) -> bool {
-    let fx = &p.fx_slots[2];
-    fx.enabled.value() && fx.fx_type.value() != FxTypeParam::Off
+    p.fx_slots[2].enabled.value()
 }
 #[inline]
 fn fx3_enabled(p: &JSynPluginParams) -> bool {
-    let fx = &p.fx_slots[3];
-    fx.enabled.value() && fx.fx_type.value() != FxTypeParam::Off
+    p.fx_slots[3].enabled.value()
 }
 #[inline]
 fn fx4_enabled(p: &JSynPluginParams) -> bool {
-    let fx = &p.fx_slots[4];
-    fx.enabled.value() && fx.fx_type.value() != FxTypeParam::Off
+    p.fx_slots[4].enabled.value()
 }
 #[inline]
 fn fx5_enabled(p: &JSynPluginParams) -> bool {
-    let fx = &p.fx_slots[5];
-    fx.enabled.value() && fx.fx_type.value() != FxTypeParam::Off
+    p.fx_slots[5].enabled.value()
 }
 #[inline]
 fn fx6_enabled(p: &JSynPluginParams) -> bool {
-    let fx = &p.fx_slots[6];
-    fx.enabled.value() && fx.fx_type.value() != FxTypeParam::Off
+    p.fx_slots[6].enabled.value()
 }
 #[inline]
 fn fx7_enabled(p: &JSynPluginParams) -> bool {
-    let fx = &p.fx_slots[7];
-    fx.enabled.value() && fx.fx_type.value() != FxTypeParam::Off
+    p.fx_slots[7].enabled.value()
 }
 
 #[inline]

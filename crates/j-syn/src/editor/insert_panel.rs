@@ -164,7 +164,7 @@ pub(super) fn build_insert_panel(
     mod_ui: Arc<ModUiState>,
 ) {
     VStack::new(cx, move |cx| {
-        build_module_header(cx, "INSERT SHAPERS", 18.0);
+        build_module_header(cx, "INSERT FX", 18.0);
 
         build_insert_slot_row(
             cx,

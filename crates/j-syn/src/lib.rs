@@ -1048,7 +1048,7 @@ impl MacroPluginParams {
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FxTypeParam {
-    #[name = "Off"]
+    #[name = "Empty"]
     Off,
     #[name = "OTT"]
     Ott,
@@ -1060,7 +1060,7 @@ pub enum FxTypeParam {
     Delay,
     #[name = "Reverb"]
     Reverb,
-    #[name = "J-SAT Clipper"]
+    #[name = "Clipper"]
     JSatClipper,
     #[name = "Filter"]
     Filter,
@@ -1154,7 +1154,7 @@ impl Default for JSynPluginParams {
             modseq_steps: PersistedArcSwap::default(),
             master_volume_db: FloatParam::new(
                 "Master Vol",
-                -3.0,
+                0.0,
                 FloatRange::Linear {
                     min: -24.0,
                     max: 6.0,
@@ -1622,6 +1622,7 @@ mod tests {
             depth: 0.65,
             bipolar: true,
             enabled: true,
+            bypassed: false,
             aux_source: j_syn_dsp::ModMatrixSource::ModWheel,
             curve: 0.35,
         };

@@ -135,6 +135,67 @@ label {
   color: #fff3dc;
 }
 
+.mod-context-menu {
+  background-color: #211b17;
+  border-width: 1px;
+  border-color: #f5b349;
+  border-radius: 5px;
+  child-space: 6px;
+  row-between: 3px;
+}
+
+.mod-context-header {
+  font-size: 9;
+  font-weight: bold;
+  color: #f5b349;
+  child-bottom: 2px;
+}
+
+.mod-context-row {
+  background-color: #2b231d;
+  border-radius: 3px;
+  child-left: 4px;
+  child-right: 4px;
+  child-top: 2px;
+  child-bottom: 2px;
+}
+
+.mod-context-src {
+  font-size: 9;
+  font-weight: bold;
+  color: #f0e4d6;
+}
+
+.mod-context-depth {
+  font-size: 9;
+  font-weight: bold;
+  color: #ffd382;
+}
+
+.mod-context-btn {
+  background-color: #362c24;
+  border-width: 1px;
+  border-color: #5a4a3c;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.mod-context-btn:hover {
+  background-color: #4a3c30;
+  border-color: #f5b349;
+}
+
+.mod-context-btn:checked {
+  background-color: #594631;
+  border-color: #f5b349;
+}
+
+.mod-context-btn-text {
+  font-size: 8.5;
+  font-weight: bold;
+  color: #f0e4d6;
+}
+
 .knob-readout-box {
   background-color: #211c17;
   border-width: 1px;

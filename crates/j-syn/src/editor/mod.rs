@@ -42,10 +42,9 @@ mod settings_view;
 mod widgets;
 
 use controls::{
-    bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_flex_knob_cell_mod_dim,
-    build_header_knob_cell, build_header_knob_cell_mod, build_knob_cell, build_mini_pill_cell,
-    build_module_header,
-    build_tab_button, build_ui_scale_dropdown,
+    bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_flex_knob_cell_mod,
+    build_flex_knob_cell_mod_dim, build_header_knob_cell, build_knob_cell, build_mini_pill_cell,
+    build_module_header, build_tab_button, build_ui_scale_dropdown,
 };
 use filter_panel::build_filter_panel;
 use insert_panel::build_insert_panel;
@@ -108,6 +107,21 @@ impl Data for TooltipState {
     }
 }
 
+#[derive(Clone, PartialEq, Debug, Default)]
+pub(crate) struct ModContextMenuState {
+    pub visible: bool,
+    pub dest_idx: usize,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
+    pub rev: u64,
+}
+
+impl Data for ModContextMenuState {
+    fn same(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
 fn format_dir_display(dir: Option<&str>) -> String {
     match dir.filter(|s| !s.trim().is_empty()) {
         Some(s) => s.to_string(),
@@ -138,6 +152,9 @@ pub(crate) enum UiEvent {
     SyncExternalState,
     ShowTooltip(TooltipState),
     HideTooltip,
+    ShowModContextMenu(ModDestination, f32, f32),
+    HideModContextMenu,
+    ModMenuRefresh,
 }
 
 #[derive(Lens)]
@@ -163,6 +180,7 @@ pub(crate) struct UiData {
     pub presets_dir_display: String,
     pub wavetables_dir_display: String,
     pub tooltip: TooltipState,
+    pub mod_menu: ModContextMenuState,
 }
 
 impl Model for UiData {
@@ -427,6 +445,25 @@ impl Model for UiData {
             }
             UiEvent::HideTooltip => {
                 self.tooltip.visible = false;
+                meta.consume();
+            }
+            UiEvent::ShowModContextMenu(dest, x, y) => {
+                self.tooltip.visible = false;
+                self.mod_menu = ModContextMenuState {
+                    visible: true,
+                    dest_idx: dest.index(),
+                    anchor_x: *x,
+                    anchor_y: *y,
+                    rev: self.mod_menu.rev.wrapping_add(1),
+                };
+                meta.consume();
+            }
+            UiEvent::HideModContextMenu => {
+                self.mod_menu.visible = false;
+                meta.consume();
+            }
+            UiEvent::ModMenuRefresh => {
+                self.mod_menu.rev = self.mod_menu.rev.wrapping_add(1);
                 meta.consume();
             }
         });
@@ -733,17 +770,6 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
         HStack::new(cx, move |cx| {
             build_ui_scale_dropdown(cx);
 
-            build_header_knob_cell_mod(
-                cx,
-                UiData::params,
-                |p| &p.glide_ms,
-                "GLIDE",
-                false,
-                GOLD_RGB,
-                ModDestination::GlideMs,
-                mod_ui_hdr.clone(),
-            );
-
             build_header_knob_cell(
                 cx,
                 UiData::params,
@@ -968,6 +994,7 @@ fn build_bottom_tabs(
                         VStack::new(cx, {
                             let params_v = params.clone();
                             let gui_v = gui_context.clone();
+                            let mod_ui_v = mod_ui.clone();
                             move |cx| {
                                 build_module_header(cx, "VOICING", 18.0);
                                 HStack::new(cx, move |cx| {
@@ -988,7 +1015,7 @@ fn build_bottom_tabs(
                                         .height(Pixels(24.0));
                                     })
                                     .row_between(Pixels(2.0))
-                                    .width(Pixels(84.0))
+                                    .width(Pixels(78.0))
                                     .height(Auto)
                                     .top(Stretch(1.0))
                                     .bottom(Stretch(1.0));
@@ -999,12 +1026,25 @@ fn build_bottom_tabs(
                                         |p| &p.pitch_bend_range,
                                         "PB RANGE",
                                         24,
-                                        64.0,
+                                        60.0,
+                                    );
+
+                                    build_flex_knob_cell_mod(
+                                        cx,
+                                        UiData::params,
+                                        |p| &p.glide_ms,
+                                        "GLIDE",
+                                        false,
+                                        GOLD_RGB,
+                                        32.0,
+                                        ModDestination::GlideMs,
+                                        mod_ui_v.clone(),
+                                        bottom_tab_tag(BottomTab::VoiceEnv),
                                     );
                                 })
-                                .col_between(Pixels(12.0))
-                                .child_left(Stretch(1.0))
-                                .child_right(Stretch(1.0))
+                                .col_between(Pixels(10.0))
+                                .child_left(Pixels(8.0))
+                                .child_right(Pixels(8.0))
                                 .child_top(Stretch(1.0))
                                 .child_bottom(Stretch(1.0))
                                 .width(Stretch(1.0))
@@ -1013,7 +1053,7 @@ fn build_bottom_tabs(
                         })
                         .class("hardware-module")
                         .class("drawer-module")
-                        .width(Stretch(0.75))
+                        .width(Stretch(0.95))
                         .height(Stretch(1.0));
 
                         VStack::new(cx, {
@@ -1117,6 +1157,7 @@ pub(crate) fn create(
             presets_dir_display: format_dir_display(initial_cfg.presets_dir.as_deref()),
             wavetables_dir_display: format_dir_display(initial_cfg.wavetables_dir.as_deref()),
             tooltip: TooltipState::default(),
+            mod_menu: ModContextMenuState::default(),
         }
         .build(cx);
 
@@ -1231,6 +1272,145 @@ pub(crate) fn create(
             .z_index(300)
             .display(UiData::tooltip.map(|tt| tt.visible))
             .hoverable(false);
+
+            // Click-away backdrop for floating Modulation Context Menu
+            Element::new(cx)
+                .position_type(PositionType::SelfDirected)
+                .left(Pixels(0.0))
+                .top(Pixels(0.0))
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .z_index(350)
+                .display(UiData::mod_menu.map(|m| m.visible))
+                .on_press(|cx| {
+                    cx.emit(UiEvent::HideModContextMenu);
+                });
+
+            // Floating Modulation Context Menu overlay
+            let mod_ui_menu = mod_ui;
+            VStack::new(cx, move |cx| {
+                let ui_menu = mod_ui_menu.clone();
+                Binding::new(cx, UiData::mod_menu, move |cx, menu_lens| {
+                    let menu = menu_lens.get(cx);
+                    if !menu.visible {
+                        return;
+                    }
+                    let Some(dest) = ModDestination::from_index(menu.dest_idx) else {
+                        return;
+                    };
+                    let slots = ui_menu.all_slots_for_dest(dest);
+                    if slots.is_empty() {
+                        return;
+                    }
+                    let header = format!("MOD: {}", dest.name());
+                    bold_label(cx, &header, "mod-context-header")
+                        .width(Stretch(1.0))
+                        .height(Pixels(16.0));
+                    for (slot_idx, slot) in slots {
+                        let (r, g, b) = slot.source.color_rgb();
+                        let src_name = ui_menu.source_display_name(slot.source);
+                        let depth_str = format!("{:+.0}%", slot.depth * 100.0);
+                        let ui_byp = ui_menu.clone();
+                        let ui_pol = ui_menu.clone();
+                        let ui_rem = ui_menu.clone();
+                        HStack::new(cx, move |cx| {
+                            Element::new(cx)
+                                .width(Pixels(4.0))
+                                .height(Pixels(12.0))
+                                .top(Stretch(1.0))
+                                .bottom(Stretch(1.0))
+                                .background_color(Color::rgb(r, g, b));
+                            bold_label(cx, &src_name, "mod-context-src")
+                                .width(Stretch(1.0))
+                                .height(Stretch(1.0))
+                                .child_top(Stretch(1.0))
+                                .child_bottom(Stretch(1.0));
+                            bold_label(cx, &depth_str, "mod-context-depth")
+                                .width(Pixels(36.0))
+                                .height(Stretch(1.0))
+                                .child_space(Stretch(1.0));
+                            Button::new(
+                                cx,
+                                move |cx| {
+                                    ui_byp.toggle_slot_bypass_at(slot_idx);
+                                    cx.emit(UiEvent::ModUiChanged);
+                                    cx.emit(UiEvent::ModMenuRefresh);
+                                },
+                                move |cx| {
+                                    bold_label(
+                                        cx,
+                                        if slot.bypassed { "BYP" } else { "ON" },
+                                        "mod-context-btn-text",
+                                    )
+                                    .child_space(Stretch(1.0))
+                                    .hoverable(false)
+                                },
+                            )
+                            .class("mod-context-btn")
+                            .checked(!slot.bypassed)
+                            .width(Pixels(30.0))
+                            .height(Pixels(18.0));
+                            Button::new(
+                                cx,
+                                move |cx| {
+                                    ui_pol.toggle_slot_bipolar_at(slot_idx);
+                                    cx.emit(UiEvent::ModUiChanged);
+                                    cx.emit(UiEvent::ModMenuRefresh);
+                                },
+                                move |cx| {
+                                    bold_label(
+                                        cx,
+                                        if slot.bipolar { "BIP" } else { "UNI" },
+                                        "mod-context-btn-text",
+                                    )
+                                    .child_space(Stretch(1.0))
+                                    .hoverable(false)
+                                },
+                            )
+                            .class("mod-context-btn")
+                            .checked(slot.bipolar)
+                            .width(Pixels(30.0))
+                            .height(Pixels(18.0));
+                            Button::new(
+                                cx,
+                                move |cx| {
+                                    ui_rem.remove_slot_at(slot_idx);
+                                    cx.emit(UiEvent::ModUiChanged);
+                                    if ui_rem.all_slots_for_dest(dest).is_empty() {
+                                        cx.emit(UiEvent::HideModContextMenu);
+                                    } else {
+                                        cx.emit(UiEvent::ModMenuRefresh);
+                                    }
+                                },
+                                |cx| {
+                                    bold_label(cx, "x", "mod-context-btn-text")
+                                        .child_space(Stretch(1.0))
+                                        .hoverable(false)
+                                },
+                            )
+                            .class("mod-context-btn")
+                            .width(Pixels(20.0))
+                            .height(Pixels(18.0));
+                        })
+                        .class("mod-context-row")
+                        .col_between(Pixels(4.0))
+                        .width(Stretch(1.0))
+                        .height(Pixels(22.0));
+                    }
+                });
+            })
+            .class("mod-context-menu")
+            .position_type(PositionType::SelfDirected)
+            .left(UiData::mod_menu.map(|m| {
+                Pixels(m.anchor_x.clamp(6.0, BASE_WIDTH as f32 - 236.0))
+            }))
+            .top(UiData::mod_menu.map(|m| {
+                Pixels(m.anchor_y.clamp(6.0, BASE_HEIGHT as f32 - 150.0))
+            }))
+            .width(Pixels(228.0))
+            .height(Auto)
+            .z_index(360)
+            .display(UiData::mod_menu.map(|m| m.visible));
         })
         .class("plugin-root")
         .width(Stretch(1.0))

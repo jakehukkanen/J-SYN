@@ -663,33 +663,6 @@ pub(super) fn build_header_knob_cell<L, Params, P, FMap>(
     );
 }
 
-pub(super) fn build_header_knob_cell_mod<L, Params, P, FMap>(
-    cx: &mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    bipolar: bool,
-    accent_rgb: (u8, u8, u8),
-    dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
-) where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    build_header_knob_cell_inner(
-        cx,
-        params,
-        params_to_param,
-        title,
-        bipolar,
-        accent_rgb,
-        Some((dest, mod_ui, 0)),
-        None,
-    );
-}
-
 pub(super) fn build_header_knob_cell_mod_dim<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,

@@ -1786,6 +1786,7 @@ fn mod_matrix_aux_source_curve_and_master_safety_stages() {
         depth: 1.0,
         bipolar: false,
         enabled: true,
+        bypassed: false,
         aux_source: ModMatrixSource::Macro1,
         curve: 0.5,
     };

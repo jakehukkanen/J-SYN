@@ -61,13 +61,13 @@ impl FxType {
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Off => "Off",
+            Self::Off => "Empty",
             Self::Ott => "OTT",
             Self::Distortion => "Distortion",
             Self::Chorus => "Chorus",
             Self::Delay => "Delay",
             Self::Reverb => "Reverb",
-            Self::JSatClipper => "J-SAT Clipper",
+            Self::JSatClipper => "Clipper",
             Self::Filter => "Filter",
         }
     }
@@ -110,8 +110,8 @@ impl FxSlotParams {
     pub const fn default_params_for_type(fx_type: FxType) -> [f32; 4] {
         match fx_type {
             FxType::Off => [0.5, 0.5, 0.5, 1.0],
-            // OTT: Depth 45%, Time 1.00x (0.50), In Gain 0 dB (0.50), Out Gain 0 dB (0.50)
-            FxType::Ott => [0.45, 0.50, 0.50, 0.50],
+            // OTT: Depth 100%, Time 1.00x (0.50), In Gain 0 dB (0.50), Out Gain 0 dB (0.50)
+            FxType::Ott => [1.00, 0.50, 0.50, 0.50],
             // Distortion: Mode=Tube (0.0), Drive 30%, Tone Neutral (0.50), Mix 100%
             FxType::Distortion => [0.00, 0.30, 0.50, 1.00],
             // Chorus: Rate ~0.5 Hz (0.35), Depth 50%, Width 75%, Mix 100%
@@ -120,8 +120,8 @@ impl FxSlotParams {
             FxType::Delay => [0.43, 0.38, 0.35, 1.00],
             // Reverb: Size 55%, Decay 60%, Damp 45%, Mix 100%
             FxType::Reverb => [0.55, 0.60, 0.45, 1.00],
-            // J-SAT Clipper: Drive +3.6 dB (0.15), Ceil -0.9 dB (0.95), Knee 40%, Mix 100%
-            FxType::JSatClipper => [0.15, 0.95, 0.40, 1.00],
+            // Clipper: Drive 0.0 dB (0.0), Ceil 0.0 dB (1.0), Knee 0%, Mix 100%
+            FxType::JSatClipper => [0.00, 1.00, 0.00, 1.00],
             // Filter: Cutoff ~2.5 kHz (0.65), Res 25%, Type LP 12 (0.0), Mix 100%
             FxType::Filter => [0.65, 0.25, 0.00, 1.00],
         }

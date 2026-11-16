@@ -519,6 +519,27 @@ impl ModUiState {
         }
     }
 
+    pub fn toggle_slot_bypass_at(&self, slot_idx: usize) {
+        if slot_idx >= NUM_MOD_SLOTS {
+            return;
+        }
+        let mut mat = self.params.mod_matrix.snapshot();
+        if mat.slots[slot_idx].enabled {
+            mat.slots[slot_idx].bypassed = !mat.slots[slot_idx].bypassed;
+            self.params.mod_matrix.store_value(mat);
+        }
+    }
+
+    pub fn all_slots_for_dest(&self, dest: ModDestination) -> Vec<(usize, ModSlot)> {
+        let mat = self.params.mod_matrix.snapshot();
+        mat.slots
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.enabled && s.source != ModMatrixSource::None && s.destination == dest)
+            .map(|(i, s)| (i, *s))
+            .collect()
+    }
+
     pub fn clear_all_slots(&self) {
         let mut mat = self.params.mod_matrix.snapshot();
         for idx in 0..NUM_MOD_SLOTS {

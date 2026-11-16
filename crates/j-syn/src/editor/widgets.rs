@@ -432,8 +432,13 @@ impl View for RotaryKnob {
                             return;
                         }
                     } else if mb.mod_ui.has_slots_for_dest(mb.dest) {
-                        mb.mod_ui.cycle_inspected_slot_for_dest(mb.dest);
-                        cx.emit(UiEvent::ModUiChanged);
+                        let bounds = cx.bounds();
+                        let scale = cx.scale_factor().max(0.01);
+                        cx.emit(UiEvent::ShowModContextMenu(
+                            mb.dest,
+                            bounds.x / scale,
+                            (bounds.y + bounds.h + 4.0) / scale,
+                        ));
                         cx.needs_redraw();
                         meta.consume();
                         return;
@@ -763,7 +768,8 @@ impl View for RotaryKnob {
 
                 let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
                 for slot in slots.iter().take(count) {
-                    let (sr, sg, sb) = if is_enabled {
+                    let arc_active = is_enabled && !slot.bypassed;
+                    let (sr, sg, sb) = if arc_active {
                         slot.source.color_rgb()
                     } else {
                         (110, 100, 92)
@@ -781,7 +787,7 @@ impl View for RotaryKnob {
                     if (hi_norm - lo_norm) > 0.004 {
                         let a0 = start_angle + lo_norm * sweep_angle;
                         let a1 = start_angle + hi_norm * sweep_angle;
-                        if is_enabled {
+                        if arc_active {
                             let mut mglow = vg::Path::new();
                             mglow.arc(center_x, center_y, mod_ring_r, a0, a1, vg::Solidity::Hole);
                             let mut mglow_paint = vg::Paint::color(vg::Color::rgba(sr, sg, sb, 75));
@@ -796,7 +802,13 @@ impl View for RotaryKnob {
                             sr,
                             sg,
                             sb,
-                            if is_enabled { 248 } else { 155 },
+                            if arc_active {
+                                248
+                            } else if slot.bypassed {
+                                75
+                            } else {
+                                155
+                            },
                         ));
                         mpaint.set_line_width(2.2 * dpx);
                         mpaint.set_line_cap(vg::LineCap::Round);
@@ -812,7 +824,7 @@ impl View for RotaryKnob {
                     let mut end_tick = vg::Path::new();
                     end_tick.move_to(tx0, ty0);
                     end_tick.line_to(tx1, ty1);
-                    let mut tick_paint = vg::Paint::color(if is_enabled {
+                    let mut tick_paint = vg::Paint::color(if arc_active {
                         vg::Color::rgb(255, 250, 240)
                     } else {
                         vg::Color::rgba(165, 154, 144, 165)
@@ -1367,8 +1379,13 @@ impl View for ParamStepPill {
                         || !self.click_cycles
                     {
                         if mb.mod_ui.has_slots_for_dest(mb.dest) {
-                            mb.mod_ui.cycle_inspected_slot_for_dest(mb.dest);
-                            cx.emit(UiEvent::ModUiChanged);
+                            let bounds = cx.bounds();
+                            let scale = cx.scale_factor().max(0.01);
+                            cx.emit(UiEvent::ShowModContextMenu(
+                                mb.dest,
+                                bounds.x / scale,
+                                (bounds.y + bounds.h + 4.0) / scale,
+                            ));
                             cx.needs_redraw();
                             meta.consume();
                             return;
@@ -1529,7 +1546,12 @@ fn draw_pill_with_mod_bar(
     let bar_h = 2.0 * dpx;
 
     for slot in slots.iter().take(count) {
-        let (sr, sg, sb) = slot.source.color_rgb();
+        let (sr, sg, sb) = if slot.bypassed {
+            (110, 100, 92)
+        } else {
+            slot.source.color_rgb()
+        };
+        let alpha = if slot.bypassed { 75 } else { 225 };
         let (lo, hi) = if slot.bipolar {
             let span = slot.depth.abs();
             ((base_norm - span).clamp(0.0, 1.0), (base_norm + span).clamp(0.0, 1.0))
@@ -1540,7 +1562,7 @@ fn draw_pill_with_mod_bar(
         if hi - lo > 0.005 {
             let mut seg = vg::Path::new();
             seg.rounded_rect(bar_x + lo * bar_w, bar_y, (hi - lo) * bar_w, bar_h, 1.0 * dpx);
-            canvas.fill_path(&seg, &vg::Paint::color(vg::Color::rgba(sr, sg, sb, 225)));
+            canvas.fill_path(&seg, &vg::Paint::color(vg::Color::rgba(sr, sg, sb, alpha)));
         }
     }
 
@@ -1610,9 +1632,7 @@ impl PitchDragBox {
 
     #[inline]
     fn pitch_mode(cx: &EventContext) -> (u8, f32, f32) {
-        let cmd_or_ctrl = cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL);
-        let alt = cx.modifiers().contains(Modifiers::ALT);
-        if cmd_or_ctrl && alt {
+        if cx.modifiers().contains(Modifiers::ALT) {
             (2, 12.0, 14.0)
         } else if cx.modifiers().shift() {
             (1, 0.01, 2.5)
@@ -1700,36 +1720,6 @@ impl View for PitchDragBox {
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
                 let cmd_or_ctrl =
                     cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL);
-                let alt = cx.modifiers().contains(Modifiers::ALT);
-                if cmd_or_ctrl && alt {
-                    self.drag_active = true;
-                    self.last_y = cx.mouse().cursory;
-                    self.accum_y = 0.0;
-                    self.last_mode = 2;
-                    cx.capture();
-                    self.param_base.begin_set_parameter(cx);
-                    self.emit_tooltip(cx);
-                    meta.consume();
-                    return;
-                }
-                if alt {
-                    if let Some(ref mb) = self.mod_binding {
-                        if let Some((slot_idx, slot)) = mb.mod_ui.primary_slot_for_dest(mb.dest) {
-                            self.mod_depth_drag = Some(ModDepthDrag {
-                                slot_idx,
-                                start_y: cx.mouse().cursory,
-                                start_depth: slot.depth,
-                            });
-                            mb.mod_ui.focus_slot(mb.dest, slot_idx);
-                            cx.capture();
-                            cx.emit(UiEvent::ModUiChanged);
-                            self.emit_tooltip(cx);
-                            cx.needs_redraw();
-                            meta.consume();
-                            return;
-                        }
-                    }
-                }
                 if cmd_or_ctrl {
                     self.reset_to_default(cx);
                 } else {
@@ -1754,8 +1744,13 @@ impl View for PitchDragBox {
                             return;
                         }
                     } else if mb.mod_ui.has_slots_for_dest(mb.dest) {
-                        mb.mod_ui.cycle_inspected_slot_for_dest(mb.dest);
-                        cx.emit(UiEvent::ModUiChanged);
+                        let bounds = cx.bounds();
+                        let scale = cx.scale_factor().max(0.01);
+                        cx.emit(UiEvent::ShowModContextMenu(
+                            mb.dest,
+                            bounds.x / scale,
+                            (bounds.y + bounds.h + 4.0) / scale,
+                        ));
                         cx.needs_redraw();
                         meta.consume();
                         return;
