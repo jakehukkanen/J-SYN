@@ -423,6 +423,27 @@ dropdown popup {
   row-between: 2px;
 }
 
+.dropdown-cascade {
+  width: auto;
+  height: auto;
+  col-between: 4px;
+}
+
+.dropdown-cascade-pane {
+  width: 152px;
+  height: auto;
+  max-height: 340px;
+}
+
+.dropdown-cascade-subpane {
+  width: 152px;
+  height: auto;
+  max-height: 340px;
+  border-left-width: 1px;
+  border-color: #524336;
+  child-left: 4px;
+}
+
 .dropdown-folder {
   width: 1s;
   height: 21px;

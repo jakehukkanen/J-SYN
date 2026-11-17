@@ -1,6 +1,6 @@
 //! Scroll-wheel enabled dropdowns, enum/bool pickers, directory trees, wavetable & UI scale menus.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -356,7 +356,13 @@ pub(crate) const WT_ITEMS: &[(&str, WavetableChoice)] = &[
     ("Digital Formant", WavetableChoice::DigitalFormant),
     ("Harmonic Sync", WavetableChoice::HarmonicSync),
     ("Aggressive PWM", WavetableChoice::AggressivePwm),
-    ("Custom .WAV", WavetableChoice::Custom),
+];
+
+static WT_LOAD_GEN: [AtomicU64; 4] = [
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
 ];
 
 fn set_wavetable_choice(
@@ -372,88 +378,295 @@ fn set_wavetable_choice(
     setter.end_set_parameter(param);
 }
 
+fn scan_wavs_in_folder(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<std::path::PathBuf> = rd
+        .filter_map(|res| res.ok().map(|e| e.path()))
+        .filter(|path| {
+            let hidden = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.starts_with('.'));
+            !hidden
+                && path.is_file()
+                && path
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
+        })
+        .collect();
+    files.sort_by(|a, b| {
+        a.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase()
+            .cmp(
+                &b.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_lowercase(),
+            )
+    });
+    files
+}
+
+fn spawn_load_wavetable(
+    osc_idx: usize,
+    path: std::path::PathBuf,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    bank: Arc<WavetableBank>,
+) {
+    let load_gen = WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel) + 1;
+    std::thread::spawn(move || {
+        if WT_LOAD_GEN[osc_idx].load(Ordering::Acquire) != load_gen {
+            return;
+        }
+        let _ = crate::presets::load_wavetable_file_for_osc(
+            osc_idx,
+            &path,
+            &params,
+            &gui_context,
+            &bank,
+        );
+    });
+}
+
 pub(crate) fn step_wavetable(
     params: &Arc<JSynPluginParams>,
     gui_context: &Arc<dyn GuiContext>,
+    bank: &Arc<WavetableBank>,
     osc_idx: usize,
     delta: isize,
 ) {
     let cur = params.oscs[osc_idx].wt_select.value();
+    if cur == WavetableChoice::Custom {
+        let cur_path = params
+            .wavetable_paths
+            .lock()
+            .ok()
+            .map(|g| g[osc_idx].clone())
+            .unwrap_or_default();
+        if !cur_path.trim().is_empty() {
+            let cur_pb = std::path::PathBuf::from(&cur_path);
+            if let Some(parent) = cur_pb.parent() {
+                let files = scan_wavs_in_folder(parent);
+                if !files.is_empty() {
+                    let pos = files
+                        .iter()
+                        .position(|p| p == &cur_pb || p.file_name() == cur_pb.file_name())
+                        .unwrap_or(0);
+                    let next = (pos as isize + delta).rem_euclid(files.len() as isize) as usize;
+                    if files.len() > 1 || next != pos {
+                        spawn_load_wavetable(
+                            osc_idx,
+                            files[next].clone(),
+                            params.clone(),
+                            gui_context.clone(),
+                            bank.clone(),
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel);
     let pos = WT_ITEMS.iter().position(|&(_, v)| v == cur).unwrap_or(0);
     let next = (pos as isize + delta).rem_euclid(WT_ITEMS.len() as isize) as usize;
-    if next != pos {
+    if next != pos || cur == WavetableChoice::Custom {
         set_wavetable_choice(params, gui_context, osc_idx, WT_ITEMS[next].1);
     }
 }
 
-/// Render a recursive `DirectoryTree` as a scrollable list of root items and
-/// collapsible folder categories (`▸ Folder (N)` / `▾ Folder (N)`).
-/// Clicking a folder toggles its expanded state without closing the dropdown;
+#[inline]
+fn is_folder_in_active_path(folder_rel: &str, active_path: Option<&str>) -> bool {
+    let Some(active) = active_path else {
+        return false;
+    };
+    active == folder_rel
+        || active
+            .strip_prefix(folder_rel)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn collect_open_folder_panes<'a>(
+    mut folders: &'a [crate::presets::DirectoryFolder],
+    active_path: Option<&str>,
+    out: &mut Vec<&'a crate::presets::DirectoryFolder>,
+) {
+    let Some(active) = active_path else {
+        return;
+    };
+    while let Some(next_folder) = folders
+        .iter()
+        .find(|f| is_folder_in_active_path(&f.rel_path, Some(active)))
+    {
+        out.push(next_folder);
+        folders = &next_folder.subfolders;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_folder_row<FOpen, FToggle>(
+    cx: &mut Context,
+    folder: &crate::presets::DirectoryFolder,
+    active_path: Option<&str>,
+    on_open_folder: FOpen,
+    on_toggle_folder: FToggle,
+) where
+    FOpen: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
+    FToggle: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
+{
+    let is_open = is_folder_in_active_path(&folder.rel_path, active_path);
+    let label = format!("{} ({})", folder.name, folder.total_file_count());
+    let rel_hover = folder.rel_path.clone();
+    let rel_press = folder.rel_path.clone();
+    let row = HStack::new(cx, move |cx| {
+        bold_label(cx, &label, "dropdown-folder")
+            .width(Stretch(1.0))
+            .height(Auto)
+            .hoverable(false);
+        VectorArrow::caret(cx, ArrowDir::Right, "dropdown-folder")
+            .width(Pixels(10.0))
+            .height(Stretch(1.0));
+    })
+    .col_between(Pixels(3.0))
+    .class("dropdown-folder")
+    .on_hover(move |cx| {
+        on_open_folder(cx, &rel_hover);
+    })
+    .on_press(move |cx| {
+        on_toggle_folder(cx, &rel_press);
+    });
+    if is_open {
+        row.class("dropdown-folder-open");
+    }
+}
+
+/// Render a recursive `DirectoryTree` as cascading side-by-side folder panes.
+/// Hovering (or clicking) a folder opens its children and files in an adjacent pane to the right;
 /// clicking a file invokes `on_select_file`.
-pub(crate) fn build_directory_tree_items<FFile, FFolder>(
+pub(crate) fn build_directory_tree_items<FFile, FOpen, FToggle>(
     cx: &mut Context,
     tree: crate::presets::DirectoryTree,
     expanded_folder: Option<String>,
-    on_toggle_folder: FFolder,
+    on_open_folder: FOpen,
+    on_toggle_folder: FToggle,
     on_select_file: FFile,
 ) where
-    FFolder: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
+    FOpen: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
+    FToggle: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
     FFile: Fn(&mut EventContext, &crate::presets::DirectoryFileEntry)
         + Clone
         + Send
         + Sync
         + 'static,
 {
-    if tree.root_files.is_empty() && tree.folders.is_empty() {
-        return;
-    }
-    ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
-        VStack::new(cx, move |cx| {
-            for entry in &tree.root_files {
-                let entry_c = entry.clone();
-                let on_file = on_select_file.clone();
-                bold_label(cx, &entry.name, "dropdown-item").on_press(move |cx| {
-                    on_file(cx, &entry_c);
-                });
-            }
-            for folder in &tree.folders {
-                let is_open = expanded_folder.as_deref() == Some(folder.name.as_str());
-                let label = format!("{} ({})", folder.name, folder.files.len());
-                let folder_name = folder.name.clone();
-                let on_toggle = on_toggle_folder.clone();
-                let row = HStack::new(cx, move |cx| {
-                    VectorArrow::caret(
+    build_directory_tree_panes(
+        cx,
+        tree,
+        expanded_folder,
+        |_| {},
+        on_open_folder,
+        on_toggle_folder,
+        on_select_file,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_directory_tree_panes<FHeader, FFile, FOpen, FToggle>(
+    cx: &mut Context,
+    tree: crate::presets::DirectoryTree,
+    expanded_folder: Option<String>,
+    build_header: FHeader,
+    on_open_folder: FOpen,
+    on_toggle_folder: FToggle,
+    on_select_file: FFile,
+) where
+    FHeader: FnOnce(&mut Context) + 'static,
+    FOpen: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
+    FToggle: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
+    FFile: Fn(&mut EventContext, &crate::presets::DirectoryFileEntry)
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    let mut header_opt = Some(build_header);
+    HStack::new(cx, move |cx| {
+        let header_fn = header_opt.take();
+        let root_files = tree.root_files.clone();
+        let root_folders = tree.folders.clone();
+        let exp_root = expanded_folder.clone();
+        let on_open_root = on_open_folder.clone();
+        let on_toggle_root = on_toggle_folder.clone();
+        let on_file_root = on_select_file.clone();
+
+        ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+            VStack::new(cx, move |cx| {
+                if let Some(h) = header_fn {
+                    h(cx);
+                }
+                for entry in &root_files {
+                    let entry_c = entry.clone();
+                    let on_file = on_file_root.clone();
+                    bold_label(cx, &entry.name, "dropdown-item").on_press(move |cx| {
+                        on_file(cx, &entry_c);
+                    });
+                }
+                for folder in &root_folders {
+                    build_folder_row(
                         cx,
-                        if is_open { ArrowDir::Down } else { ArrowDir::Right },
-                        "dropdown-folder",
-                    )
-                    .width(Pixels(10.0))
-                    .height(Stretch(1.0));
-                    bold_label(cx, &label, "dropdown-folder")
-                        .width(Stretch(1.0))
-                        .height(Auto)
-                        .hoverable(false);
-                })
-                .col_between(Pixels(3.0))
-                .class("dropdown-folder")
-                .on_press(move |cx| {
-                    on_toggle(cx, &folder_name);
-                });
-                if is_open {
-                    row.class("dropdown-folder-open");
-                    for entry in &folder.files {
+                        folder,
+                        exp_root.as_deref(),
+                        on_open_root.clone(),
+                        on_toggle_root.clone(),
+                    );
+                }
+            })
+            .class("dropdown-scroll-content");
+        })
+        .class("dropdown-cascade-pane");
+
+        let mut open_panes = Vec::new();
+        collect_open_folder_panes(&tree.folders, expanded_folder.as_deref(), &mut open_panes);
+        for pane_folder in open_panes {
+            let pane_files = pane_folder.files.clone();
+            let pane_subs = pane_folder.subfolders.clone();
+            let exp_sub = expanded_folder.clone();
+            let on_open_sub = on_open_folder.clone();
+            let on_toggle_sub = on_toggle_folder.clone();
+            let on_file_sub = on_select_file.clone();
+
+            ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+                VStack::new(cx, move |cx| {
+                    for entry in &pane_files {
                         let entry_c = entry.clone();
-                        let on_file = on_select_file.clone();
-                        bold_label(cx, &entry.name, "dropdown-subitem").on_press(move |cx| {
+                        let on_file = on_file_sub.clone();
+                        bold_label(cx, &entry.name, "dropdown-item").on_press(move |cx| {
                             on_file(cx, &entry_c);
                         });
                     }
-                }
-            }
-        })
-        .class("dropdown-scroll-content");
+                    for sub in &pane_subs {
+                        build_folder_row(
+                            cx,
+                            sub,
+                            exp_sub.as_deref(),
+                            on_open_sub.clone(),
+                            on_toggle_sub.clone(),
+                        );
+                    }
+                })
+                .class("dropdown-scroll-content");
+            })
+            .class("dropdown-cascade-subpane");
+        }
     })
-    .class("dropdown-scroll");
+    .class("dropdown-cascade");
 }
 
 pub(crate) fn build_wavetable_dropdown(
@@ -463,8 +676,6 @@ pub(crate) fn build_wavetable_dropdown(
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
 ) -> Handle<'_, HStack> {
-    let dialog_open = Arc::new(AtomicBool::new(false));
-
     HStack::new(cx, move |cx| {
         let p_trigger = params.clone();
         Dropdown::new(
@@ -506,52 +717,6 @@ pub(crate) fn build_wavetable_dropdown(
                 .overflow(Overflow::Hidden)
             },
             move |cx| {
-                for &(label, val) in WT_ITEMS {
-                    let p_ref = params.clone();
-                    let gui_ctx = gui_context.clone();
-                    bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                        let setter = ParamSetter::new(gui_ctx.as_ref());
-                        let param = &p_ref.oscs[osc_idx].wt_select;
-                        setter.begin_set_parameter(param);
-                        setter.set_parameter(param, val);
-                        setter.end_set_parameter(param);
-                        cx.emit(PopupEvent::Close);
-                    });
-                }
-
-                let bank_ref = bank.clone();
-                let p_ref = params.clone();
-                let gui_ctx = gui_context.clone();
-                let dialog_flag_ref = dialog_open.clone();
-                bold_label(cx, "Load .WAV...", "dropdown-action-item").on_press(move |cx| {
-                    cx.emit(PopupEvent::Close);
-                    if !dialog_flag_ref.swap(true, Ordering::AcqRel) {
-                        let bank = bank_ref.clone();
-                        let params = p_ref.clone();
-                        let gui_context = gui_ctx.clone();
-                        let dialog_flag = dialog_flag_ref.clone();
-                        let start_dir = crate::presets::JSynConfig::load().wavetables_dir;
-
-                        std::thread::spawn(move || {
-                            let mut dlg =
-                                rfd::FileDialog::new().add_filter("WAV Audio", &["wav", "WAV"]);
-                            if let Some(dir) = start_dir.filter(|s| !s.trim().is_empty()) {
-                                dlg = dlg.set_directory(dir);
-                            }
-                            if let Some(path) = dlg.pick_file() {
-                                let _ = crate::presets::load_wavetable_file_for_osc(
-                                    osc_idx,
-                                    &path,
-                                    &params,
-                                    &gui_context,
-                                    &bank,
-                                );
-                            }
-                            dialog_flag.store(false, Ordering::Release);
-                        });
-                    }
-                });
-
                 let bank_dir = bank.clone();
                 let p_dir = params.clone();
                 let g_dir = gui_context.clone();
@@ -560,31 +725,41 @@ pub(crate) fn build_wavetable_dropdown(
                     let tree =
                         crate::presets::scan_wavetable_tree(cfg.wavetables_dir.as_deref());
                     let expanded = UiData::expanded_wt_folder.get(cx);
+                    let p_hdr = p_dir.clone();
+                    let g_hdr = g_dir.clone();
                     let bank_d = bank_dir.clone();
                     let p_d = p_dir.clone();
                     let g_d = g_dir.clone();
-                    build_directory_tree_items(
+                    build_directory_tree_panes(
                         cx,
                         tree,
                         expanded,
-                        |cx, folder_name| {
-                            cx.emit(UiEvent::ToggleWtFolder(folder_name.to_string()));
+                        move |cx| {
+                            for &(label, val) in WT_ITEMS {
+                                let p_ref = p_hdr.clone();
+                                let gui_ctx = g_hdr.clone();
+                                bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                                    WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel);
+                                    set_wavetable_choice(&p_ref, &gui_ctx, osc_idx, val);
+                                    cx.emit(PopupEvent::Close);
+                                });
+                            }
+                        },
+                        |cx, folder_path| {
+                            cx.emit(UiEvent::OpenWtFolder(folder_path.to_string()));
+                        },
+                        |cx, folder_path| {
+                            cx.emit(UiEvent::ToggleWtFolder(folder_path.to_string()));
                         },
                         move |cx, entry| {
                             cx.emit(PopupEvent::Close);
-                            let bank = bank_d.clone();
-                            let params = p_d.clone();
-                            let gui_context = g_d.clone();
-                            let path = entry.path.clone();
-                            std::thread::spawn(move || {
-                                let _ = crate::presets::load_wavetable_file_for_osc(
-                                    osc_idx,
-                                    &path,
-                                    &params,
-                                    &gui_context,
-                                    &bank,
-                                );
-                            });
+                            spawn_load_wavetable(
+                                osc_idx,
+                                entry.path.clone(),
+                                p_d.clone(),
+                                g_d.clone(),
+                                bank_d.clone(),
+                            );
                         },
                     );
                 });

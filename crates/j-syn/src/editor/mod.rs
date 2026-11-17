@@ -158,6 +158,8 @@ pub(crate) enum UiEvent {
     RescanDirectories,
     ToggleWtFolder(String),
     TogglePresetFolder(String),
+    OpenWtFolder(String),
+    OpenPresetFolder(String),
     SyncExternalState,
     ShowTooltip(TooltipState),
     HideTooltip,
@@ -463,20 +465,38 @@ impl Model for UiData {
             }
             UiEvent::ToggleWtFolder(folder) => {
                 if self.expanded_wt_folder.as_deref() == Some(folder.as_str()) {
-                    self.expanded_wt_folder = None;
+                    self.expanded_wt_folder = folder
+                        .rsplit_once('/')
+                        .map(|(parent, _)| parent.to_string());
                 } else {
                     self.expanded_wt_folder = Some(folder.clone());
                 }
                 self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
                 meta.consume();
             }
+            UiEvent::OpenWtFolder(folder) => {
+                if self.expanded_wt_folder.as_deref() != Some(folder.as_str()) {
+                    self.expanded_wt_folder = Some(folder.clone());
+                    self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
+                }
+                meta.consume();
+            }
             UiEvent::TogglePresetFolder(folder) => {
                 if self.expanded_preset_folder.as_deref() == Some(folder.as_str()) {
-                    self.expanded_preset_folder = None;
+                    self.expanded_preset_folder = folder
+                        .rsplit_once('/')
+                        .map(|(parent, _)| parent.to_string());
                 } else {
                     self.expanded_preset_folder = Some(folder.clone());
                 }
                 self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiEvent::OpenPresetFolder(folder) => {
+                if self.expanded_preset_folder.as_deref() != Some(folder.as_str()) {
+                    self.expanded_preset_folder = Some(folder.clone());
+                    self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
+                }
                 meta.consume();
             }
             UiEvent::SyncExternalState => {
@@ -798,8 +818,11 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                                 cx,
                                 tree,
                                 expanded,
-                                |cx, folder_name| {
-                                    cx.emit(UiEvent::TogglePresetFolder(folder_name.to_string()));
+                                |cx, folder_path| {
+                                    cx.emit(UiEvent::OpenPresetFolder(folder_path.to_string()));
+                                },
+                                |cx, folder_path| {
+                                    cx.emit(UiEvent::TogglePresetFolder(folder_path.to_string()));
                                 },
                                 |cx, entry| {
                                     cx.emit(UiEvent::LoadPresetPath(
