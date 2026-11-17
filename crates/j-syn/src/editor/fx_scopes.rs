@@ -4,7 +4,7 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
-use j_syn_dsp::mod_matrix::{ModDestination, FX_SCOPE_LEN};
+use j_syn_dsp::mod_matrix::{FxScopeRing, ModDestination, ModUiTelemetry, FX_SCOPE_LEN};
 use j_syn_dsp::{
     evaluate_diopser_ripple, evaluate_tube_res_scope_response, filter_response_db_from_slot,
     tube_res_lfo_rate_hz, utility_gain_db_from_norm, utility_pan_bipolar,
@@ -131,32 +131,21 @@ fn slot_eff_params(
 
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn paint_clipper_scope(
+#[allow(clippy::too_many_arguments)]
+fn paint_clipper_waveform(
     canvas: &mut Canvas,
     bounds: BoundingBox,
     dpx: f32,
-    bus_idx: usize,
-    slot_idx: usize,
-    params: &JSynPluginParams,
-    mod_ui: &ModUiState,
+    pre: &[f32; FX_SCOPE_LEN],
+    post: &[f32; FX_SCOPE_LEN],
+    gr_act: f32,
+    ceil_lin: f32,
+    y_scale: f32,
+    enabled: bool,
     pal: &ThemePalette,
 ) {
-    let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
-    let enabled = slot.enabled.value();
     let f = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 3.0, enabled, pal);
     let (ix, iy, iw, ih, bottom) = (f.ix, f.iy, f.iw, f.ih, f.bottom);
-
-    let (pre, post, gr_act) = read_scope_snapshot(mod_ui, bus_idx, slot_idx);
-    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
-    let drive_lin = 10.0_f32.powf((eff[0] * 24.0) * 0.05);
-    let ceil_db = -18.0 + eff[1] * 18.0;
-    let ceil_lin = 10.0_f32.powf(ceil_db * 0.05).clamp(0.05, 1.0);
-    let y_scale = 1.25_f32;
-
-    let mut pre_driven = [0.0_f32; FX_SCOPE_LEN];
-    for i in 0..FX_SCOPE_LEN {
-        pre_driven[i] = pre[i] * drive_lin;
-    }
 
     let pre_rgb = scope_trace_rgb((245, 179, 73), pal, enabled);
     let post_rgb = scope_trace_rgb((245, 86, 86), pal, enabled);
@@ -180,7 +169,7 @@ fn paint_clipper_scope(
         canvas.intersect_scissor(bounds.x, iy, bounds.w, (split_y - iy).max(0.0));
         paint_filled_waveform_trace(
             canvas,
-            &pre_driven,
+            pre,
             ix,
             iy,
             iw,
@@ -194,7 +183,7 @@ fn paint_clipper_scope(
         );
         paint_filled_waveform_trace(
             canvas,
-            &post,
+            post,
             ix,
             iy,
             iw,
@@ -215,7 +204,7 @@ fn paint_clipper_scope(
         canvas.intersect_scissor(bounds.x, split_y, bounds.w, (bottom - split_y).max(0.0));
         paint_filled_waveform_trace(
             canvas,
-            &pre_driven,
+            pre,
             ix,
             iy,
             iw,
@@ -229,7 +218,7 @@ fn paint_clipper_scope(
         );
         paint_filled_waveform_trace(
             canvas,
-            &post,
+            post,
             ix,
             iy,
             iw,
@@ -270,6 +259,44 @@ fn paint_clipper_scope(
     }
 
     f.end(canvas, pal);
+}
+
+fn paint_clipper_scope(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    dpx: f32,
+    bus_idx: usize,
+    slot_idx: usize,
+    params: &JSynPluginParams,
+    mod_ui: &ModUiState,
+    pal: &ThemePalette,
+) {
+    let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
+    let enabled = slot.enabled.value();
+
+    let (pre, post, gr_act) = read_scope_snapshot(mod_ui, bus_idx, slot_idx);
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
+    let drive_lin = 10.0_f32.powf((eff[0] * 24.0) * 0.05);
+    let ceil_db = -18.0 + eff[1] * 18.0;
+    let ceil_lin = 10.0_f32.powf(ceil_db * 0.05).clamp(0.05, 1.0);
+
+    let mut pre_driven = [0.0_f32; FX_SCOPE_LEN];
+    for i in 0..FX_SCOPE_LEN {
+        pre_driven[i] = pre[i] * drive_lin;
+    }
+
+    paint_clipper_waveform(
+        canvas,
+        bounds,
+        dpx,
+        &pre_driven,
+        &post,
+        gr_act,
+        ceil_lin,
+        1.25,
+        enabled,
+        pal,
+    );
 }
 
 #[inline]
@@ -1125,5 +1152,112 @@ impl View for FxSlotVisualizer {
             ),
             FxTypeParam::Off => {}
         }
+    }
+}
+
+#[inline]
+fn read_ring_snapshot(ring: &FxScopeRing) -> ([f32; FX_SCOPE_LEN], [f32; FX_SCOPE_LEN], f32) {
+    let mut pre = [0.0_f32; FX_SCOPE_LEN];
+    let mut post = [0.0_f32; FX_SCOPE_LEN];
+    let act = ring.read_snapshot(&mut pre, &mut post);
+    (pre, post, act)
+}
+
+/// Compact clipper scope for the `SUB FX` banner showing pre-clip vs post-clip waveform.
+pub(super) struct SubClipperScope {
+    params: Arc<JSynPluginParams>,
+    telemetry: Arc<ModUiTelemetry>,
+}
+
+impl SubClipperScope {
+    pub(super) fn new<'a>(
+        cx: &'a mut Context,
+        params: Arc<JSynPluginParams>,
+        telemetry: Arc<ModUiTelemetry>,
+    ) -> Handle<'a, Self> {
+        Self { params, telemetry }.build(cx, |_| {})
+    }
+}
+
+impl View for SubClipperScope {
+    fn element(&self) -> Option<&'static str> {
+        Some("sub-clipper-scope")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|raw_param_event, _| {
+            if let RawParamEvent::ParametersChanged = raw_param_event {
+                cx.needs_redraw();
+            }
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let bounds = cx.bounds();
+        if bounds.w <= 4.0 || bounds.h <= 4.0 {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let pal = theme::current_palette(cx);
+        let enabled = self.params.sub_bus.enabled.value();
+        let (pre, post, gr_act) = read_ring_snapshot(&self.telemetry.sub_scope);
+        paint_clipper_waveform(canvas, bounds, dpx, &pre, &post, gr_act, 1.0, 1.25, enabled, &pal);
+    }
+}
+
+/// Compact output/limiter scope in the header bar between `MASTER` and `MasterMeter`.
+pub(super) struct MasterScope {
+    params: Arc<JSynPluginParams>,
+    telemetry: Arc<ModUiTelemetry>,
+}
+
+impl MasterScope {
+    pub(super) fn new<'a>(
+        cx: &'a mut Context,
+        params: Arc<JSynPluginParams>,
+        telemetry: Arc<ModUiTelemetry>,
+    ) -> Handle<'a, Self> {
+        Self { params, telemetry }.build(cx, |_| {})
+    }
+}
+
+impl View for MasterScope {
+    fn element(&self) -> Option<&'static str> {
+        Some("master-scope")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|raw_param_event, _| {
+            if let RawParamEvent::ParametersChanged = raw_param_event {
+                cx.needs_redraw();
+            }
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let bounds = cx.bounds();
+        if bounds.w <= 4.0 || bounds.h <= 4.0 {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let pal = theme::current_palette(cx);
+        let ceil_lin = if self.params.master_limiter.value() {
+            0.988_553_1
+        } else {
+            1.0
+        };
+        let (pre, post, gr_act) = read_ring_snapshot(&self.telemetry.master_scope);
+        paint_clipper_waveform(
+            canvas,
+            bounds,
+            dpx,
+            &pre,
+            &post,
+            gr_act,
+            ceil_lin,
+            1.25,
+            true,
+            &pal,
+        );
     }
 }

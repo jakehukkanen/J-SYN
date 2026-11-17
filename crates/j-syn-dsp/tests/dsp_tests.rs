@@ -2804,3 +2804,97 @@ fn fx_utility_width_pan_gain_phase_invert_and_modulation() {
     );
     assert!(gl > 0.18 && (gl - gr).abs() < 1e-5 && gl.is_finite());
 }
+
+#[test]
+fn sub_bus_lp_off_and_sub_master_clipper_scopes() {
+    use j_syn_dsp::{
+        DirectDest, FxRackParams, FxRackState, ModUiTelemetry, SynthEngine, SynthParams,
+        WavetableBank, FX_SCOPE_LEN, NUM_MOD_DESTS,
+    };
+
+    let sr = 48_000.0;
+    let mod_offsets = [0.0_f32; NUM_MOD_DESTS];
+
+    // 1. Sub LP Cutoff at 100% (2000 Hz) acts as LP Off and passes 6 kHz unattenuated,
+    //    whereas 1500 Hz attenuates 6 kHz strongly.
+    let run_6k = |cutoff_hz: f32, drive_db: f32, tel: Option<&ModUiTelemetry>| -> f32 {
+        let mut rack = FxRackState::new(sr);
+        let mut params = FxRackParams::default();
+        params.sub.enabled = true;
+        params.sub.lp_cutoff_hz = cutoff_hz;
+        params.sub.clip_drive_db = drive_db;
+        params.sub.level = 1.0;
+
+        let mut sq = 0.0_f32;
+        for n in 0..2048 {
+            let x = 0.5 * (2.0 * std::f32::consts::PI * 6_000.0 * n as f32 / sr).sin();
+            let (l, r) = rack.process_buses_sample(
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (x, x),
+                &params,
+                &mod_offsets,
+                120.0,
+                tel,
+            );
+            assert!(l.is_finite() && r.is_finite());
+            if n >= 512 {
+                sq += 0.5 * (l * l + r * r);
+            }
+        }
+        (sq / 1536.0).sqrt()
+    };
+
+    let tel = ModUiTelemetry::new();
+    let rms_lp_off = run_6k(2_000.0, 0.0, None);
+    let rms_lp_1500 = run_6k(1_500.0, 0.0, None);
+    let _ = run_6k(2_000.0, 18.0, Some(&tel));
+
+    assert!(
+        rms_lp_off > 0.34,
+        "Sub LP Off (100% / 2000 Hz) must pass 6 kHz unattenuated: {rms_lp_off}"
+    );
+    assert!(
+        rms_lp_1500 < rms_lp_off * 0.15,
+        "Sub LP 1500 Hz must strongly attenuate 6 kHz: {rms_lp_1500} vs {rms_lp_off}"
+    );
+
+    let mut sub_pre = [0.0_f32; FX_SCOPE_LEN];
+    let mut sub_post = [0.0_f32; FX_SCOPE_LEN];
+    let sub_act = tel.sub_scope.read_snapshot(&mut sub_pre, &mut sub_post);
+    assert!(
+        sub_pre.iter().copied().fold(0.0_f32, f32::max) > 1.2 && sub_act > 0.1,
+        "Expected sub_scope pre_peak > 1.2 and non-zero clip activity: act={sub_act}"
+    );
+
+    // 2. Master Scope populates when hot synth audio hits the master safety limiter and clears on reset
+    let bank = WavetableBank::new();
+    let mut sp = SynthParams::default();
+    sp.amp_attack_s = 0.001;
+    sp.oscs[0].level = 1.0;
+    sp.routing.osc_direct[0] = DirectDest::Sub;
+    sp.sub_bus.enabled = true;
+    sp.sub_bus.lp_cutoff_hz = 2_000.0;
+    sp.sub_bus.clip_drive_db = 12.0;
+    sp.master_gain = 2.0; // +6 dB driving master limiter
+    sp.master_limiter = true;
+
+    let mut eng = SynthEngine::new(sr);
+    eng.note_on(0, 60, 1.0, None, &sp);
+    for _ in 0..2048 {
+        let (l, r) = eng.process_sample(&sp, &bank);
+        assert!(l.is_finite() && r.is_finite());
+    }
+    let eng_tel = eng.telemetry();
+    let mut m_pre = [0.0_f32; FX_SCOPE_LEN];
+    let mut m_post = [0.0_f32; FX_SCOPE_LEN];
+    let m_act = eng_tel.master_scope.read_snapshot(&mut m_pre, &mut m_post);
+    assert!(
+        m_pre.iter().copied().fold(0.0_f32, f32::max) > 1.0 && m_act > 0.05,
+        "Expected master_scope pre_peak > 1.0 and limiter activity > 0.05: act={m_act}"
+    );
+
+    eng.reset();
+    let m_act_after = eng_tel.master_scope.read_snapshot(&mut m_pre, &mut m_post);
+    assert_eq!(m_act_after, 0.0);
+}

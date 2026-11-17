@@ -18,7 +18,7 @@ use super::controls::{
     build_enum_dropdown_with_override, build_inline_pill_cell, build_prefixed_enum_dropdown,
     ArrowButton, ArrowDir, ScrollDropdown,
 };
-use super::fx_scopes::{fx_accent_rgb, FxSlotVisualizer};
+use super::fx_scopes::{fx_accent_rgb, FxSlotVisualizer, SubClipperScope};
 use super::mod_bar::{ModUiState, FX_VIEW_TAG, MAIN_FX_A_TAG, MAIN_FX_B_TAG};
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
 use super::{AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData, UiEvent};
@@ -1112,7 +1112,7 @@ fn build_fx_top_banner(
 
             build_compact_bar_knob(
                 cx,
-                p_sub,
+                p_sub.clone(),
                 |p| &p.sub_bus.level,
                 "LEVEL",
                 36.0,
@@ -1120,9 +1120,16 @@ fn build_fx_top_banner(
                 false,
                 AMBER_RGB,
                 ModDestination::SubLevel,
-                mod_ui,
+                mod_ui.clone(),
                 no_dim,
             );
+
+            SubClipperScope::new(cx, p_sub, mod_ui.telemetry.clone())
+                .width(Stretch(1.0))
+                .min_width(Pixels(56.0))
+                .height(Pixels(28.0))
+                .top(Stretch(1.0))
+                .bottom(Stretch(1.0));
         })
         .class("fx-rack-banner")
         .col_between(Pixels(12.0))

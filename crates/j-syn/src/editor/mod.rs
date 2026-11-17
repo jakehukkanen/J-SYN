@@ -870,6 +870,16 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 AMBER_RGB,
             );
 
+            fx_scopes::MasterScope::new(
+                cx,
+                mod_ui_hdr.params.clone(),
+                mod_ui_hdr.telemetry.clone(),
+            )
+                .width(Pixels(64.0))
+                .height(Pixels(34.0))
+                .top(Stretch(1.0))
+                .bottom(Stretch(1.0));
+
             scope::MasterMeter::new(cx, mod_ui_hdr.telemetry.clone())
                 .width(Pixels(20.0))
                 .height(Pixels(34.0))

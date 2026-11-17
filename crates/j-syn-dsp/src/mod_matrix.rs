@@ -1254,6 +1254,10 @@ pub struct ModUiTelemetry {
     pub filter_live: [[AtomicU32; 4]; 2],
     /// Lock-free FX scopes for `Bus A` (`0..8`) and `Bus B` (`8..16`).
     pub fx_scopes: [FxScopeRing; 16],
+    /// Lock-free Sub Bus clipper scope (`pre_driven`, `post_clipped`, `clip_activity`).
+    pub sub_scope: FxScopeRing,
+    /// Lock-free Master Output / Limiter scope (`pre_limit`, `post_out`, `limit_activity`).
+    pub master_scope: FxScopeRing,
     pub master_peak_l: AtomicU32,
     pub master_peak_r: AtomicU32,
     pub master_rms_l: AtomicU32,
@@ -1284,6 +1288,8 @@ impl ModUiTelemetry {
                 ]
             }),
             fx_scopes: std::array::from_fn(|_| FxScopeRing::new()),
+            sub_scope: FxScopeRing::new(),
+            master_scope: FxScopeRing::new(),
             master_peak_l: AtomicU32::new(0.0_f32.to_bits()),
             master_peak_r: AtomicU32::new(0.0_f32.to_bits()),
             master_rms_l: AtomicU32::new(0.0_f32.to_bits()),
