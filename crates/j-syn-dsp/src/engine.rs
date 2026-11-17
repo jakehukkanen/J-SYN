@@ -148,6 +148,8 @@ pub struct SynthEngine {
     meter_rms_sq_r: f32,
     meter_clip_l: bool,
     meter_clip_r: bool,
+    master_scope_accum: (f32, f32, f32, usize),
+    master_scope_samples_per_col: usize,
 }
 
 impl SynthEngine {
@@ -192,6 +194,8 @@ impl SynthEngine {
             meter_rms_sq_r: 0.0,
             meter_clip_l: false,
             meter_clip_r: false,
+            master_scope_accum: (0.0, 0.0, 0.0, 0),
+            master_scope_samples_per_col: (sr / 150.0).round().max(1.0) as usize,
         };
         engine.set_sample_rate(sr);
         engine
@@ -201,6 +205,7 @@ impl SynthEngine {
         let sr = sample_rate.max(1000.0);
         self.sample_rate = sr;
         self.control_tick_period = (sr / 1500.0).round().max(1.0) as u32;
+        self.master_scope_samples_per_col = (sr / 150.0).round().max(1.0) as usize;
         self.fx_rack.set_sample_rate(sr);
         self.dc_blocker.set_sample_rate(sr);
         self.safety_limiter.set_sample_rate(sr);
@@ -224,6 +229,9 @@ impl SynthEngine {
         self.meter_rms_sq_r = 0.0;
         self.meter_clip_l = false;
         self.meter_clip_r = false;
+        self.master_scope_accum = (0.0, 0.0, 0.0, 0);
+        self.telemetry.master_scope.clear();
+        self.telemetry.sub_scope.clear();
         for v in &mut self.voices {
             v.reset();
         }
@@ -812,15 +820,36 @@ impl SynthEngine {
         } else {
             self.dc_blocker.reset();
         }
+        let pre_limit_peak = if out_l.is_finite() && out_r.is_finite() {
+            out_l.abs().max(out_r.abs())
+        } else {
+            0.0
+        };
         if params.master_limiter {
             (out_l, out_r) = self.safety_limiter.process(out_l, out_r);
         } else {
             self.safety_limiter.reset();
         }
 
-        // Update stereo peak/RMS meters (zero-allocation)
+        // Update stereo peak/RMS meters & master output scope (zero-allocation)
         let abs_l = if out_l.is_finite() { out_l.abs() } else { 0.0 };
         let abs_r = if out_r.is_finite() { out_r.abs() } else { 0.0 };
+        let post_limit_peak = abs_l.max(abs_r);
+        let master_ceil = if params.master_limiter { 0.988_553_1 } else { 1.0 };
+        let over = (pre_limit_peak - master_ceil).max(0.0);
+        let limit_act = (over / pre_limit_peak.max(0.05)).clamp(0.0, 1.0);
+        let (ref mut m_pre, ref mut m_post, ref mut m_act, ref mut m_cnt) = self.master_scope_accum;
+        *m_pre = m_pre.max(pre_limit_peak);
+        *m_post = m_post.max(post_limit_peak);
+        *m_act = m_act.max(limit_act);
+        *m_cnt += 1;
+        if *m_cnt >= self.master_scope_samples_per_col {
+            self.telemetry.master_scope.push(*m_pre, *m_post, *m_act);
+            *m_pre = 0.0;
+            *m_post = 0.0;
+            *m_act = 0.0;
+            *m_cnt = 0;
+        }
         self.meter_peak_l = self.meter_peak_l.max(abs_l);
         self.meter_peak_r = self.meter_peak_r.max(abs_r);
         const RMS_ALPHA: f32 = 0.0025;

@@ -1,5 +1,7 @@
 //! Parallel Dual-Bus FX, Sub Bus, and FX slot parameters.
 
+use std::sync::Arc;
+
 use j_syn_dsp::{FxBusTopology, FxFilterSlope, SubBusParams};
 use nih_plug::prelude::*;
 
@@ -55,8 +57,23 @@ impl Default for SubBusPluginParams {
                     factor: FloatRange::skew_factor(-1.8),
                 },
             )
-            .with_value_to_string(formatters::v2s_f32_hz_then_khz(0))
-            .with_string_to_value(formatters::s2v_f32_hz_then_khz()),
+            .with_value_to_string(Arc::new(|hz| {
+                if j_syn_dsp::sub_cutoff_hz_to_norm(hz) >= 0.995 {
+                    "Off".to_string()
+                } else if hz >= 1000.0 {
+                    format!("{:.2} kHz", hz / 1000.0)
+                } else {
+                    format!("{:.0} Hz", hz)
+                }
+            }))
+            .with_string_to_value(Arc::new(|s| {
+                let t = s.trim();
+                if t.eq_ignore_ascii_case("off") || t.eq_ignore_ascii_case("lp off") {
+                    Some(2_000.0)
+                } else {
+                    formatters::s2v_f32_hz_then_khz()(t)
+                }
+            })),
             drive: FloatParam::new("Sub Drive", 0.0, FloatRange::Linear { min: 0.0, max: 24.0 })
                 .with_unit(" dB")
                 .with_value_to_string(formatters::v2s_f32_rounded(1)),

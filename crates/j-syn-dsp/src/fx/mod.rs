@@ -763,25 +763,32 @@ struct SubBusProcessor {
     last_cutoff_hz: f32,
     last_sr: f32,
     idle_samples: u32,
+    scope_accum: (f32, f32, f32, usize),
+    scope_samples_per_col: usize,
 }
 
 impl SubBusProcessor {
     fn new(sample_rate: f32) -> Self {
+        let sr = sample_rate.max(1_000.0);
         Self {
             lp1: [Biquad::default(); 2],
             lp2: [Biquad::default(); 2],
             oversamplers: [Oversampler4x::new(); 2],
             adaa: [TanhAdaa2::default(); 2],
-            sample_rate: sample_rate.max(1_000.0),
+            sample_rate: sr,
             last_cutoff_hz: -1.0,
             last_sr: 0.0,
             idle_samples: 1024,
+            scope_accum: (0.0, 0.0, 0.0, 0),
+            scope_samples_per_col: (sr / SCOPE_HZ).round().max(1.0) as usize,
         }
     }
 
     fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.sample_rate = sample_rate.max(1_000.0);
+        let sr = sample_rate.max(1_000.0);
+        self.sample_rate = sr;
         self.last_sr = 0.0;
+        self.scope_samples_per_col = (sr / SCOPE_HZ).round().max(1.0) as usize;
     }
 
     fn reset(&mut self) {
@@ -791,7 +798,28 @@ impl SubBusProcessor {
             self.oversamplers[ch].reset();
             self.adaa[ch].reset();
         }
+        self.last_cutoff_hz = -1.0;
         self.idle_samples = 1024;
+        self.scope_accum = (0.0, 0.0, 0.0, 0);
+    }
+
+    #[inline]
+    fn push_scope(&mut self, telemetry: Option<&ModUiTelemetry>, pre: f32, post: f32, act: f32) {
+        if let Some(tel) = telemetry {
+            let (ref mut acc_pre, ref mut acc_post, ref mut acc_act, ref mut cnt) =
+                self.scope_accum;
+            *acc_pre = acc_pre.max(pre);
+            *acc_post = acc_post.max(post);
+            *acc_act = acc_act.max(act);
+            *cnt += 1;
+            if *cnt >= self.scope_samples_per_col {
+                tel.sub_scope.push(*acc_pre, *acc_post, *acc_act);
+                *acc_pre = 0.0;
+                *acc_post = 0.0;
+                *acc_act = 0.0;
+                *cnt = 0;
+            }
+        }
     }
 
     #[inline]
@@ -801,26 +829,47 @@ impl SubBusProcessor {
         in_r: f32,
         sub: &SubBusParams,
         mod_offsets: &[f32; NUM_MOD_DESTS],
+        telemetry: Option<&ModUiTelemetry>,
     ) -> (f32, f32) {
         let level = (sub.level + mod_offsets[ModDestination::SubLevel.index()] * 2.0).clamp(0.0, 2.0);
         if !sub.enabled {
             // Sub FX bypassed: pass raw direct signal straight through scaled by SUB LEVEL.
-            return (flush_denormal(in_l * level), flush_denormal(in_r * level));
+            let out_l = flush_denormal(in_l * level);
+            let out_r = flush_denormal(in_r * level);
+            let raw_peak = in_l.abs().max(in_r.abs());
+            let out_peak = out_l.abs().max(out_r.abs());
+            self.push_scope(telemetry, raw_peak, out_peak, 0.0);
+            return (out_l, out_r);
         }
         if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 256 {
+            if let Some(tel) = telemetry {
+                if self.idle_samples == 257 {
+                    tel.sub_scope.clear();
+                    self.scope_accum = (0.0, 0.0, 0.0, 0);
+                }
+            }
             return (0.0, 0.0);
         }
 
         let cutoff_norm =
             (sub_cutoff_hz_to_norm(sub.lp_cutoff_hz) + mod_offsets[ModDestination::SubCutoff.index()])
                 .clamp(0.0, 1.0);
+        let lp_off = cutoff_norm >= 0.995;
         let cutoff_hz = sub_cutoff_norm_to_hz(cutoff_norm);
         let drive_db =
             (sub.clip_drive_db + mod_offsets[ModDestination::SubDrive.index()] * 24.0).clamp(0.0, 24.0);
 
-        if (cutoff_hz - self.last_cutoff_hz).abs() > 0.25
+        if lp_off {
+            self.last_cutoff_hz = -1.0;
+        } else if (cutoff_hz - self.last_cutoff_hz).abs() > 0.25
             || (self.sample_rate - self.last_sr).abs() > 0.5
         {
+            if self.last_cutoff_hz < 0.0 {
+                for ch in 0..2 {
+                    self.lp1[ch].reset();
+                    self.lp2[ch].reset();
+                }
+            }
             let coeffs = butterworth_lp_coeffs(self.sample_rate as f64, cutoff_hz as f64);
             for ch in 0..2 {
                 self.lp1[ch].set_coeffs(coeffs);
@@ -833,18 +882,29 @@ impl SubBusProcessor {
         let drive_lin = 10.0_f32.powf(drive_db * 0.05);
         let soft_knee = 0.25 + 0.75 * (drive_db / 24.0).clamp(0.0, 1.0);
         let mut out = [0.0_f32; 2];
+        let mut pre_peak = 0.0_f32;
+        let mut post_peak = 0.0_f32;
 
         for (ch, &x) in [in_l, in_r].iter().enumerate() {
-            let filt = self.lp2[ch].process(self.lp1[ch].process(x));
+            let filt = if lp_off {
+                x
+            } else {
+                self.lp2[ch].process(self.lp1[ch].process(x))
+            };
             let driven = filt * drive_lin;
+            pre_peak = pre_peak.max(driven.abs());
             let adaa = &mut self.adaa[ch];
             let clipped = self.oversamplers[ch].process_sample(driven, |s| {
                 let hard = s.clamp(-1.0, 1.0);
                 let soft = adaa.process(s as f64) as f32;
                 hard + (soft - hard) * soft_knee
             });
+            post_peak = post_peak.max(clipped.abs());
             out[ch] = flush_denormal(clipped * level);
         }
+
+        let clip_act = ((pre_peak - post_peak).max(0.0) / pre_peak.max(0.05)).clamp(0.0, 1.0);
+        self.push_scope(telemetry, pre_peak, post_peak, clip_act);
 
         (out[0], out[1])
     }
@@ -938,7 +998,7 @@ impl FxRackState {
         );
         let (sl, sr) = self
             .sub_bus
-            .process_sample(sub_in.0, sub_in.1, &rack.sub, mod_offsets);
+            .process_sample(sub_in.0, sub_in.1, &rack.sub, mod_offsets, telemetry);
 
         (
             flush_denormal(out_a_l + bl + sl),
