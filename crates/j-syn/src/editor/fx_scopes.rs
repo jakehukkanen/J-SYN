@@ -7,8 +7,8 @@ use std::time::Instant;
 use j_syn_dsp::mod_matrix::{FxScopeRing, ModDestination, ModUiTelemetry, FX_SCOPE_LEN};
 use j_syn_dsp::{
     evaluate_diopser_ripple, evaluate_tube_res_scope_response, filter_response_db_from_slot,
-    tube_res_lfo_rate_hz, utility_gain_db_from_norm, utility_pan_bipolar,
-    utility_width_from_norm, FxRackState,
+    limiter_ceil_db, limiter_gain_db, tube_res_lfo_rate_hz, utility_gain_db_from_norm,
+    utility_pan_bipolar, utility_width_from_norm, FxRackState,
 };
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
@@ -37,6 +37,7 @@ pub(super) fn fx_accent_rgb(fx_ty: FxTypeParam) -> (u8, u8, u8) {
         FxTypeParam::Diopser => (92, 226, 210),
         FxTypeParam::TubeResonator => (255, 164, 88),
         FxTypeParam::Utility => (108, 214, 255),
+        FxTypeParam::Limiter => (255, 122, 89),
     }
 }
 
@@ -283,6 +284,44 @@ fn paint_clipper_scope(
     let mut pre_driven = [0.0_f32; FX_SCOPE_LEN];
     for i in 0..FX_SCOPE_LEN {
         pre_driven[i] = pre[i] * drive_lin;
+    }
+
+    paint_clipper_waveform(
+        canvas,
+        bounds,
+        dpx,
+        &pre_driven,
+        &post,
+        gr_act,
+        ceil_lin,
+        1.25,
+        enabled,
+        pal,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_limiter_scope(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    dpx: f32,
+    bus_idx: usize,
+    slot_idx: usize,
+    params: &JSynPluginParams,
+    mod_ui: &ModUiState,
+    pal: &ThemePalette,
+) {
+    let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
+    let enabled = slot.enabled.value();
+
+    let (pre, post, gr_act) = read_scope_snapshot(mod_ui, bus_idx, slot_idx);
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
+    let gain_lin = 10.0_f32.powf(limiter_gain_db(eff[0]) * 0.05);
+    let ceil_lin = 10.0_f32.powf(limiter_ceil_db(eff[1]) * 0.05).clamp(0.05, 1.0);
+
+    let mut pre_driven = [0.0_f32; FX_SCOPE_LEN];
+    for i in 0..FX_SCOPE_LEN {
+        pre_driven[i] = pre[i] * gain_lin;
     }
 
     paint_clipper_waveform(
@@ -1067,6 +1106,16 @@ impl View for FxSlotVisualizer {
             .value();
         match fx_ty {
             FxTypeParam::JSatClipper => paint_clipper_scope(
+                canvas,
+                bounds,
+                dpx,
+                self.bus_idx,
+                self.slot_idx,
+                &self.params,
+                &self.mod_ui,
+                &pal,
+            ),
+            FxTypeParam::Limiter => paint_limiter_scope(
                 canvas,
                 bounds,
                 dpx,

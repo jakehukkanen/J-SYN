@@ -7,7 +7,8 @@ use j_syn_dsp::filter::cutoff_norm_to_hz;
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{
     diopser_freq_hz, format_tube_res_tune, format_utility_pan, fx_high_cut_hz, fx_low_cut_hz,
-    tube_res_decay_ms, tube_res_flt_freq_hz, tube_res_flt_width_oct, tube_res_lfo_rate_hz,
+    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, tube_res_decay_ms,
+    tube_res_flt_freq_hz, tube_res_flt_width_oct, tube_res_lfo_rate_hz,
     utility_gain_db_from_norm, utility_width_from_norm, FxRackState, FxType,
 };
 use nih_plug::prelude::{FloatParam, GuiContext, Param, ParamSetter};
@@ -40,6 +41,7 @@ const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Dispersion", FxTypeParam::Diopser),
     ("Tube Res.", FxTypeParam::TubeResonator),
     ("Utility", FxTypeParam::Utility),
+    ("Limiter", FxTypeParam::Limiter),
 ];
 
 const FX_FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
@@ -126,6 +128,12 @@ fn fx_slot_param_label(
                 2 => "FEEDBK",
                 _ => "DAMP",
             },
+            FxTypeParam::Limiter => match param_idx {
+                0 => "RELEASE",
+                1 => "KNEE",
+                2 => "LINK",
+                _ => "PUNCH",
+            },
             _ => "--",
         };
     }
@@ -204,6 +212,12 @@ fn fx_slot_param_label(
             2 => "GAIN",
             _ => "MIX",
         },
+        FxTypeParam::Limiter => match param_idx {
+            0 => "GAIN",
+            1 => "CEIL",
+            2 => "LOOKAHD",
+            _ => "MIX",
+        },
     }
 }
 
@@ -232,6 +246,12 @@ fn format_fx_slot_param_value(
                 0 => format!("{:.0}%", n * 100.0),
                 1 => format!("{:.2} Hz", tube_res_lfo_rate_hz(n)),
                 2 => format!("{:.1} ms", tube_res_decay_ms(n)),
+                _ => format!("{:.0}%", n * 100.0),
+            };
+        }
+        if fx_ty == FxTypeParam::Limiter {
+            return match param_idx {
+                0 => format!("{:.0} ms", limiter_release_ms(n)),
                 _ => format!("{:.0}%", n * 100.0),
             };
         }
@@ -310,6 +330,19 @@ fn format_fx_slot_param_value(
             }
             _ => format!("{:.0}%", n * 100.0),
         },
+        FxTypeParam::Limiter => match param_idx {
+            0 => format!("+{:.1} dB", limiter_gain_db(n)),
+            1 => format!("{:.1} dB", limiter_ceil_db(n)),
+            2 => {
+                let ms = limiter_lookahead_ms(n);
+                if ms < 0.05 {
+                    "0.0 (Clip)".to_string()
+                } else {
+                    format!("{ms:.1} ms")
+                }
+            }
+            _ => format!("{:.0}%", n * 100.0),
+        },
     }
 }
 
@@ -349,6 +382,7 @@ struct SlotSnapshot {
     tr_flt: bool,
     util_inv_l: bool,
     util_inv_r: bool,
+    lim_tp: bool,
 }
 
 /// Swaps all settings, EQ sub-tabs, and modulation assignments between two slots of `bus_idx`.
@@ -379,6 +413,7 @@ fn swap_fx_slots(
             tr_flt: s.tube_res_filter_enabled.value(),
             util_inv_l: s.utility_inv_l.value(),
             util_inv_r: s.utility_inv_r.value(),
+            lim_tp: s.limiter_true_peak.value(),
         }
     };
     let a = capture(slot_a);
@@ -433,6 +468,10 @@ fn swap_fx_slots(
         setter.begin_set_parameter(&s.utility_inv_r);
         setter.set_parameter(&s.utility_inv_r, snap.util_inv_r);
         setter.end_set_parameter(&s.utility_inv_r);
+
+        setter.begin_set_parameter(&s.limiter_true_peak);
+        setter.set_parameter(&s.limiter_true_peak, snap.lim_tp);
+        setter.end_set_parameter(&s.limiter_true_peak);
     };
 
     write(slot_a, b);
@@ -478,6 +517,9 @@ fn set_fx_slot_type_with_defaults(
         setter.begin_set_parameter(&slot.utility_inv_r);
         setter.set_parameter(&slot.utility_inv_r, false);
         setter.end_set_parameter(&slot.utility_inv_r);
+        setter.begin_set_parameter(&slot.limiter_true_peak);
+        setter.set_parameter(&slot.limiter_true_peak, true);
+        setter.end_set_parameter(&slot.limiter_true_peak);
         mod_ui.set_fx_eq_subtab(bus_idx, slot_idx, false);
     }
 }
@@ -804,6 +846,9 @@ fn build_fx_scope_zstack(
                         FxTypeParam::Utility => {
                             add_util_inv_pill(cx, "Ø L", |s| &s.utility_inv_l);
                         }
+                        FxTypeParam::Limiter => {
+                            add_util_inv_pill(cx, "TP", |s| &s.limiter_true_peak);
+                        }
                         _ => {}
                     }
 
@@ -834,7 +879,11 @@ fn build_fx_scope_zstack(
                     }
 
                     if let Some(sub_lbl) = FxType::from(fx_ty).subtab_label() {
-                        let sub_w = if sub_lbl == "LFO" { 26.0 } else { 22.0 };
+                        let sub_w = if sub_lbl == "LFO" || sub_lbl == "ADV" {
+                            26.0
+                        } else {
+                            22.0
+                        };
                         HStack::new(cx, move |cx| {
                             let m_main = m_ov.clone();
                             let m_main_cls = m_ov.clone();
