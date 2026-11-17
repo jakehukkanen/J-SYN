@@ -125,11 +125,25 @@ pub struct DirectoryFileEntry {
     pub path: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DirectoryFolder {
-    /// Relative folder path from the configured root (e.g. `"Analog"` or `"Bass/Reese"`).
+    /// Immediate folder name (e.g. `"Analog"` or `"Bass"`).
     pub name: String,
+    /// Relative folder path from the configured root (e.g. `"Bass/Reese"`).
+    pub rel_path: String,
     pub files: Vec<DirectoryFileEntry>,
+    pub subfolders: Vec<DirectoryFolder>,
+}
+
+impl DirectoryFolder {
+    pub fn total_file_count(&self) -> usize {
+        self.files.len()
+            + self
+                .subfolders
+                .iter()
+                .map(Self::total_file_count)
+                .sum::<usize>()
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -144,18 +158,17 @@ fn is_hidden_name(path: &std::path::Path) -> bool {
         .is_some_and(|s| s.starts_with('.'))
 }
 
-fn collect_tree_recursive(
+fn collect_dir_entries(
     root: &std::path::Path,
     dir: &std::path::Path,
     ext_lower: &str,
     depth: usize,
-    out: &mut DirectoryTree,
-) {
+) -> (Vec<DirectoryFileEntry>, Vec<DirectoryFolder>) {
     if depth > 8 {
-        return;
+        return (Vec::new(), Vec::new());
     }
     let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
+        return (Vec::new(), Vec::new());
     };
     let mut files = Vec::new();
     let mut subdirs = Vec::new();
@@ -196,21 +209,30 @@ fn collect_tree_recursive(
             )
     });
 
-    if !files.is_empty() {
-        if depth == 0 {
-            out.root_files = files;
-        } else if let Ok(rel) = dir.strip_prefix(root) {
-            let folder_name = rel.to_string_lossy().replace('\\', "/");
-            out.folders.push(DirectoryFolder {
-                name: folder_name,
-                files,
-            });
+    let mut folders = Vec::new();
+    for sub in subdirs {
+        let (sub_files, sub_subfolders) = collect_dir_entries(root, &sub, ext_lower, depth + 1);
+        if sub_files.is_empty() && sub_subfolders.is_empty() {
+            continue;
         }
+        let name = sub
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let rel_path = sub
+            .strip_prefix(root)
+            .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| name.clone());
+        folders.push(DirectoryFolder {
+            name,
+            rel_path,
+            files: sub_files,
+            subfolders: sub_subfolders,
+        });
     }
 
-    for sub in subdirs {
-        collect_tree_recursive(root, &sub, ext_lower, depth + 1, out);
-    }
+    (files, folders)
 }
 
 pub fn scan_directory_tree(dir: Option<&str>, ext_lower: &str) -> DirectoryTree {
@@ -218,9 +240,11 @@ pub fn scan_directory_tree(dir: Option<&str>, ext_lower: &str) -> DirectoryTree 
         return DirectoryTree::default();
     };
     let root = std::path::Path::new(dir_str);
-    let mut tree = DirectoryTree::default();
-    collect_tree_recursive(root, root, ext_lower, 0, &mut tree);
-    tree
+    let (root_files, folders) = collect_dir_entries(root, root, ext_lower, 0);
+    DirectoryTree {
+        root_files,
+        folders,
+    }
 }
 
 pub fn scan_preset_tree(dir: Option<&str>) -> DirectoryTree {
@@ -231,12 +255,17 @@ pub fn scan_wavetable_tree(dir: Option<&str>) -> DirectoryTree {
     scan_directory_tree(dir, "wav")
 }
 
+fn collect_folder_files(folders: &[DirectoryFolder], out: &mut Vec<DirectoryFileEntry>) {
+    for folder in folders {
+        out.extend(folder.files.iter().cloned());
+        collect_folder_files(&folder.subfolders, out);
+    }
+}
+
 fn scan_extension(dir: Option<&str>, ext_lower: &str) -> Vec<DirectoryFileEntry> {
     let tree = scan_directory_tree(dir, ext_lower);
     let mut entries = tree.root_files;
-    for folder in tree.folders {
-        entries.extend(folder.files);
-    }
+    collect_folder_files(&tree.folders, &mut entries);
     entries
 }
 
@@ -700,8 +729,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Arp", "Juno"]
         );
-        assert_eq!(tree.folders[1].name, "Bass/Reese");
-        assert_eq!(tree.folders[1].files[0].name, "Sub");
+        assert_eq!(tree.folders[1].name, "Bass");
+        assert_eq!(tree.folders[1].rel_path, "Bass");
+        assert_eq!(tree.folders[1].total_file_count(), 1);
+        assert_eq!(tree.folders[1].subfolders.len(), 1);
+        assert_eq!(tree.folders[1].subfolders[0].name, "Reese");
+        assert_eq!(tree.folders[1].subfolders[0].rel_path, "Bass/Reese");
+        assert_eq!(tree.folders[1].subfolders[0].files[0].name, "Sub");
 
         let flat = scan_wavetables(base.to_str());
         assert_eq!(flat.len(), 4);

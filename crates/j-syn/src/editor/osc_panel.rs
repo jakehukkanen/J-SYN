@@ -169,9 +169,10 @@ pub(super) fn build_osc_panel(
             HStack::new(cx, move |cx| {
                 let p_prev = p_wt.clone();
                 let g_prev = gui_wt.clone();
+                let b_prev = bank_wt.clone();
                 ArrowButton::new(
                     cx,
-                    move |_| step_wavetable(&p_prev, &g_prev, osc_idx, -1),
+                    move |_| step_wavetable(&p_prev, &g_prev, &b_prev, osc_idx, -1),
                     ArrowDir::Left,
                 )
                 .class("wt-step-btn")
@@ -179,15 +180,16 @@ pub(super) fn build_osc_panel(
                 .width(Pixels(18.0))
                 .height(Pixels(20.0));
 
-                build_wavetable_dropdown(cx, osc_idx, bank_wt, p_wt.clone(), gui_wt.clone())
+                build_wavetable_dropdown(cx, osc_idx, bank_wt.clone(), p_wt.clone(), gui_wt.clone())
                     .width(Stretch(1.0))
                     .height(Pixels(20.0));
 
                 let p_next = p_wt;
                 let g_next = gui_wt;
+                let b_next = bank_wt;
                 ArrowButton::new(
                     cx,
-                    move |_| step_wavetable(&p_next, &g_next, osc_idx, 1),
+                    move |_| step_wavetable(&p_next, &g_next, &b_next, osc_idx, 1),
                     ArrowDir::Right,
                 )
                 .class("wt-step-btn")
