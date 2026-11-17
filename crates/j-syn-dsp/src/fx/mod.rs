@@ -278,8 +278,8 @@ impl FxSlotParams {
             FxType::Reverb => [0.24, 1.0, 0.0, 0.50],
             // Tube Res. LFO: LFO Amt 50%, LFO Spd 1.00 Hz (0.42625), Feedbk/Decay 50 ms (0.29922), Mix shared on P4
             FxType::TubeResonator => [0.50, 0.426_25, 0.299_22, 1.00],
-            // Limiter ADV: Release ~80 ms (0.53), Knee 25% (0.25), Link 100% (1.0), Punch 0% (0.0)
-            FxType::Limiter => [0.53, 0.25, 1.00, 0.00],
+            // Limiter ADV: Release ~80 ms (0.53), Knee 0% (0.0), Link 100% (1.0), Punch 100% (1.0)
+            FxType::Limiter => [0.53, 0.00, 1.00, 1.00],
             _ => [0.0, 1.0, 0.50, 0.50],
         }
     }
