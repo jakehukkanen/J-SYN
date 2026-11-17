@@ -3,6 +3,7 @@
 
 pub mod diopser;
 pub mod dynamics;
+pub mod limiter;
 pub mod modulation;
 pub mod tube_resonator;
 pub mod utility;
@@ -20,12 +21,16 @@ use crate::oversample::{Biquad, BiquadCoeffs, Oversampler4x};
 
 use self::diopser::DiopserStereo;
 use self::dynamics::{DistortionStereo, JSatClipperStereo, OttStereo};
+use self::limiter::LimiterStereo;
 use self::modulation::{ChorusStereo, DelayStereo, PhaserStereo, ReverbStereo};
 use self::tube_resonator::TubeResonatorStereo;
 use self::utility::UtilityStereo;
 
 pub use self::diopser::{
     diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, DIOPSER_STAGE_COUNTS,
+};
+pub use self::limiter::{
+    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms,
 };
 pub use self::modulation::{
     fx_high_cut_hz, fx_low_cut_hz, DELAY_SYNC_LABELS,
@@ -61,10 +66,11 @@ pub enum FxType {
     Diopser = 9,
     TubeResonator = 10,
     Utility = 11,
+    Limiter = 12,
 }
 
 impl FxType {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Off,
         Self::Ott,
         Self::Distortion,
@@ -77,6 +83,7 @@ impl FxType {
         Self::Diopser,
         Self::TubeResonator,
         Self::Utility,
+        Self::Limiter,
     ];
 
     #[inline]
@@ -93,6 +100,7 @@ impl FxType {
             9 => Self::Diopser,
             10 => Self::TubeResonator,
             11 => Self::Utility,
+            12 => Self::Limiter,
             _ => Self::Off,
         }
     }
@@ -111,6 +119,7 @@ impl FxType {
             Self::Diopser => "Dispersion",
             Self::TubeResonator => "Tube Res.",
             Self::Utility => "Utility",
+            Self::Limiter => "Limiter",
         }
     }
 
@@ -128,6 +137,7 @@ impl FxType {
             Self::Diopser => "DISP",
             Self::TubeResonator => "TUBE",
             Self::Utility => "UTIL",
+            Self::Limiter => "LIM",
         }
     }
 
@@ -136,6 +146,7 @@ impl FxType {
         match self {
             Self::Chorus | Self::Delay | Self::Reverb => Some("EQ"),
             Self::TubeResonator => Some("LFO"),
+            Self::Limiter => Some("ADV"),
             _ => None,
         }
     }
@@ -201,6 +212,8 @@ pub struct FxSlotParams {
     pub utility_inv_l: bool,
     /// Invert right channel phase in `UTILITY` (default `false`).
     pub utility_inv_r: bool,
+    /// Enable 4x True Peak detection in `LIMITER` (default `false`).
+    pub limiter_true_peak: bool,
 }
 
 impl Default for FxSlotParams {
@@ -217,6 +230,7 @@ impl Default for FxSlotParams {
             tube_res_filter_enabled: true,
             utility_inv_l: false,
             utility_inv_r: false,
+            limiter_true_peak: false,
         }
     }
 }
@@ -248,10 +262,12 @@ impl FxSlotParams {
             FxType::TubeResonator => [12.0 / 72.0, 0.267_604, 1.5 / 8.5, 1.00],
             // Utility: Width 100% (0.40), Pan C (0.50), Gain 0.0 dB (0.50), Mix 100%
             FxType::Utility => [UTILITY_WIDTH_DEFAULT_NORM, 0.50, 0.50, 1.00],
+            // Limiter: Gain 0.0 dB (0.0), Ceil -0.1 dB (17.9/18.0), Lookahead 1.5 ms (0.50), Mix 100%
+            FxType::Limiter => [0.00, 17.9 / 18.0, 0.50, 1.00],
         }
     }
 
-    /// Default normalized secondary `[P5, P6, P7, P8]` (`EQ` / `LFO`) knob positions for `fx_type`.
+    /// Default normalized secondary `[P5, P6, P7, P8]` (`EQ` / `LFO` / `ADV`) knob positions for `fx_type`.
     pub const fn default_eq_params_for_type(fx_type: FxType) -> [f32; 4] {
         match fx_type {
             // Chorus EQ: Low Cut 20 Hz (0.0), High Cut 20 kHz (1.0), Spread 100% (0.5), Feedback 0% (0.0)
@@ -262,6 +278,8 @@ impl FxSlotParams {
             FxType::Reverb => [0.24, 1.0, 0.0, 0.50],
             // Tube Res. LFO: LFO Amt 50%, LFO Spd 1.00 Hz (0.42625), Feedbk/Decay 50 ms (0.29922), Mix shared on P4
             FxType::TubeResonator => [0.50, 0.426_25, 0.299_22, 1.00],
+            // Limiter ADV: Release ~80 ms (0.53), Knee 25% (0.25), Link 100% (1.0), Punch 0% (0.0)
+            FxType::Limiter => [0.53, 0.25, 1.00, 0.00],
             _ => [0.0, 1.0, 0.50, 0.50],
         }
     }
@@ -281,6 +299,7 @@ impl FxSlotParams {
             tube_res_filter_enabled: true,
             utility_inv_l: false,
             utility_inv_r: false,
+            limiter_true_peak: false,
         }
     }
 }
@@ -523,6 +542,7 @@ struct StereoFxStage {
     diopser: DiopserStereo,
     tube_res: TubeResonatorStereo,
     utility: UtilityStereo,
+    limiter: LimiterStereo,
 }
 
 impl StereoFxStage {
@@ -539,6 +559,7 @@ impl StereoFxStage {
             diopser: DiopserStereo::new(sample_rate),
             tube_res: TubeResonatorStereo::new(sample_rate),
             utility: UtilityStereo::new(sample_rate),
+            limiter: LimiterStereo::new(sample_rate),
         }
     }
 
@@ -553,6 +574,7 @@ impl StereoFxStage {
         self.diopser.set_sample_rate(sample_rate);
         self.tube_res.set_sample_rate(sample_rate);
         self.utility.set_sample_rate(sample_rate);
+        self.limiter.set_sample_rate(sample_rate);
     }
 
     fn reset(&mut self) {
@@ -567,6 +589,7 @@ impl StereoFxStage {
         self.diopser.reset();
         self.tube_res.reset();
         self.utility.reset();
+        self.limiter.reset();
     }
 
     #[inline]
@@ -606,6 +629,13 @@ impl StereoFxStage {
                 p,
                 slot.utility_inv_l,
                 slot.utility_inv_r,
+            ),
+            FxType::Limiter => self.limiter.process(
+                in_l,
+                in_r,
+                p,
+                eq,
+                slot.limiter_true_peak,
             ),
         }
     }

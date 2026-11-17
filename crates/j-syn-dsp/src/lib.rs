@@ -24,7 +24,8 @@ pub use filter::{
 pub use fx::{
     diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple,
     evaluate_tube_res_scope_response, filter_response_db_from_slot, format_tube_res_tune,
-    format_utility_pan, fx_high_cut_hz, fx_low_cut_hz, sub_cutoff_hz_to_norm,
+    format_utility_pan, fx_high_cut_hz, fx_low_cut_hz, limiter_ceil_db, limiter_gain_db,
+    limiter_lookahead_ms, limiter_release_ms, sub_cutoff_hz_to_norm,
     sub_cutoff_norm_to_hz, tube_res_decay_ms, tube_res_flt_freq_hz, tube_res_flt_width_oct,
     tube_res_lfo_rate_hz, tube_res_tune_hz, tube_res_tune_midi, utility_gain_db_from_norm,
     utility_pan_bipolar, utility_width_from_norm, FxBusParams, FxBusTopology, FxFilterSlope,

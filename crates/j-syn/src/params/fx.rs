@@ -119,6 +119,8 @@ pub enum FxTypeParam {
     TubeResonator,
     #[name = "Utility"]
     Utility,
+    #[name = "Limiter"]
+    Limiter,
 }
 
 impl From<j_syn_dsp::FxType> for FxTypeParam {
@@ -136,6 +138,7 @@ impl From<j_syn_dsp::FxType> for FxTypeParam {
             j_syn_dsp::FxType::Diopser => Self::Diopser,
             j_syn_dsp::FxType::TubeResonator => Self::TubeResonator,
             j_syn_dsp::FxType::Utility => Self::Utility,
+            j_syn_dsp::FxType::Limiter => Self::Limiter,
         }
     }
 }
@@ -155,6 +158,7 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
             FxTypeParam::Diopser => Self::Diopser,
             FxTypeParam::TubeResonator => Self::TubeResonator,
             FxTypeParam::Utility => Self::Utility,
+            FxTypeParam::Limiter => Self::Limiter,
         }
     }
 }
@@ -278,6 +282,8 @@ pub struct FxSlotPluginParams {
     pub utility_inv_l: BoolParam,
     #[id = "fx_util_inv_r"]
     pub utility_inv_r: BoolParam,
+    #[id = "fx_lim_tp"]
+    pub limiter_true_peak: BoolParam,
 }
 
 impl FxSlotPluginParams {
@@ -308,6 +314,7 @@ impl FxSlotPluginParams {
             tube_res_filter_enabled: BoolParam::new("Tube Res. Filter", init.tube_res_filter_enabled),
             utility_inv_l: BoolParam::new("Utility Inv L", init.utility_inv_l),
             utility_inv_r: BoolParam::new("Utility Inv R", init.utility_inv_r),
+            limiter_true_peak: BoolParam::new("Limiter True Peak", init.limiter_true_peak),
         }
     }
 
@@ -355,6 +362,7 @@ impl FxSlotPluginParams {
             tube_res_filter_enabled: self.tube_res_filter_enabled.value(),
             utility_inv_l: self.utility_inv_l.value(),
             utility_inv_r: self.utility_inv_r.value(),
+            limiter_true_peak: self.limiter_true_peak.value(),
         }
     }
 }

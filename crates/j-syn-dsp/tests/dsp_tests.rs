@@ -2898,3 +2898,166 @@ fn sub_bus_lp_off_and_sub_master_clipper_scopes() {
     let m_act_after = eng_tel.master_scope.read_snapshot(&mut m_pre, &mut m_post);
     assert_eq!(m_act_after, 0.0);
 }
+
+#[test]
+fn fx_limiter_lookahead_scurve_transient_clipping_and_modulation() {
+    use j_syn_dsp::{
+        limiter_ceil_db, FxRackParams, FxRackState, FxSlotParams, FxType, ModDestination,
+        NUM_MOD_DESTS,
+    };
+
+    let sr = 48_000.0;
+    let mod_offsets = [0.0_f32; NUM_MOD_DESTS];
+
+    // 1. Ceiling invariant at 0.0 ms and 3.0 ms lookahead under +18 dB drive & sharp spikes
+    let ceil_norm = 0.75; // -4.5 dB
+    let ceil_lin = 10.0_f32.powf(limiter_ceil_db(ceil_norm) * 0.05);
+    for la_norm in [0.0_f32, 1.0_f32] {
+        let mut rack = FxRackState::new(sr);
+        let mut params = FxRackParams::default();
+        params.buses[0].slots[0].fx_type = FxType::Limiter;
+        params.buses[0].slots[0].enabled = true;
+        params.buses[0].slots[0].params = [0.75, ceil_norm, la_norm, 1.0]; // +18 dB gain
+        params.buses[0].slots[0].eq_params = FxSlotParams::default_eq_params_for_type(FxType::Limiter);
+        params.buses[0].slots[0].limiter_true_peak = true;
+
+        for n in 0..4096 {
+            let x = if n % 400 < 20 {
+                0.95
+            } else {
+                0.35 * (2.0 * std::f32::consts::PI * 55.0 * n as f32 / sr).sin()
+            };
+            let (l, r) = rack.process_buses_sample(
+                (x, -x),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                &params,
+                &mod_offsets,
+                120.0,
+                None,
+            );
+            assert!(l.is_finite() && r.is_finite());
+            assert!(
+                l.abs() <= ceil_lin + 1e-4 && r.abs() <= ceil_lin + 1e-4,
+                "Limiter exceeded ceiling {ceil_lin} at lookahead_norm={la_norm}: l={l}, r={r}"
+            );
+        }
+    }
+
+    // 2. 0 ms lookahead lets micro-transient hit clipper without ducking subsequent audio
+    //    as deeply as 2.0 ms lookahead (Pro-L 2 style punch vs kHs lookahead smoothness).
+    let measure_post_spike_rms = |la_norm: f32| -> f32 {
+        let mut rack = FxRackState::new(sr);
+        let mut params = FxRackParams::default();
+        params.buses[0].slots[0].fx_type = FxType::Limiter;
+        params.buses[0].slots[0].enabled = true;
+        params.buses[0].slots[0].params = [0.0, 0.5, la_norm, 1.0]; // 0 dB gain, -9 dB ceil (~0.355)
+        params.buses[0].slots[0].eq_params = [0.3, 0.1, 1.0, 0.0];
+        params.buses[0].slots[0].limiter_true_peak = false;
+
+        let la_samples = (la_norm * 3.0 * 0.001 * sr).round() as usize;
+        let spike_at = 500;
+        let mut sq = 0.0_f32;
+        let mut count = 0;
+        for n in 0..1000 {
+            let base = 0.15 * (2.0 * std::f32::consts::PI * 220.0 * n as f32 / sr).sin();
+            let spike = if n == spike_at { 1.0 } else { 0.0 };
+            let (l, _r) = rack.process_buses_sample(
+                (base + spike, base + spike),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                &params,
+                &mod_offsets,
+                120.0,
+                None,
+            );
+            // Measure 1 ms right before/during spike arrival in delayed stream
+            if n >= spike_at + la_samples - 24 && n < spike_at + la_samples {
+                sq += l * l;
+                count += 1;
+            }
+        }
+        (sq / count.max(1) as f32).sqrt()
+    };
+    let rms_zero_la = measure_post_spike_rms(0.0);
+    let rms_lookahead = measure_post_spike_rms(2.0 / 3.0);
+    assert!(
+        rms_zero_la > rms_lookahead,
+        "0 ms lookahead should preserve pre-spike level rather than ducking ahead: 0ms={rms_zero_la}, 2ms={rms_lookahead}"
+    );
+
+    // 3. Delay-compensated Mix=50% at 3.0 ms lookahead has no comb cancellation on unclipped audio
+    let mut rack_mix = FxRackState::new(sr);
+    let mut p_mix = FxRackParams::default();
+    p_mix.buses[0].slots[0].fx_type = FxType::Limiter;
+    p_mix.buses[0].slots[0].enabled = true;
+    p_mix.buses[0].slots[0].params = [0.0, 1.0, 1.0, 0.5]; // 0 dB gain, 0 dB ceil, 3.0 ms, 50% mix
+    p_mix.buses[0].slots[0].eq_params = FxSlotParams::default_eq_params_for_type(FxType::Limiter);
+    let mut sq_in = 0.0_f32;
+    let mut sq_out = 0.0_f32;
+    for n in 0..2048 {
+        let x = 0.25 * (2.0 * std::f32::consts::PI * 3000.0 * n as f32 / sr).sin();
+        let (l, _r) = rack_mix.process_buses_sample(
+            (x, x),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            &p_mix,
+            &mod_offsets,
+            120.0,
+            None,
+        );
+        if n >= 512 {
+            sq_in += x * x;
+            sq_out += l * l;
+        }
+    }
+    let ratio = (sq_out / sq_in.max(1e-9)).sqrt();
+    assert!(
+        (ratio - 1.0).abs() < 0.03,
+        "Delay-compensated 50% Mix must preserve amplitude without comb filtering: ratio={ratio}"
+    );
+
+    // 4. Mod Matrix modulation on Limiter Gain + idle sleep recovery
+    let mut mod_gain = [0.0_f32; NUM_MOD_DESTS];
+    mod_gain[ModDestination::fx_bus_slot_param(0, 0, 0).index()] = 0.5;
+    let mut rack_mod = FxRackState::new(sr);
+    let mut p_mod = FxRackParams::default();
+    p_mod.buses[0].slots[0].fx_type = FxType::Limiter;
+    p_mod.buses[0].slots[0].enabled = true;
+    p_mod.buses[0].slots[0].params = [0.0, 1.0, 0.5, 1.0];
+    p_mod.buses[0].slots[0].eq_params = FxSlotParams::default_eq_params_for_type(FxType::Limiter);
+    for n in 0..1024 {
+        let x = 0.1 * (2.0 * std::f32::consts::PI * 440.0 * n as f32 / sr).sin();
+        let (l, r) = rack_mod.process_buses_sample(
+            (x, x),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            &p_mod,
+            &mod_gain,
+            120.0,
+            None,
+        );
+        assert!(l.is_finite() && r.is_finite());
+    }
+    for _ in 0..1500 {
+        let _ = rack_mod.process_buses_sample(
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.0, 0.0),
+            &p_mod,
+            &mod_gain,
+            120.0,
+            None,
+        );
+    }
+    let (il, ir) = rack_mod.process_buses_sample(
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (0.0, 0.0),
+        &p_mod,
+        &mod_gain,
+        120.0,
+        None,
+    );
+    assert_eq!((il, ir), (0.0, 0.0));
+}
