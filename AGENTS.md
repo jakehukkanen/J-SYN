@@ -51,3 +51,11 @@
 - **Single 60 Hz Vizia Timer:** Never add additional `cx.add_timer` loops; extend the single timer in `mod_bar.rs` instead.
 - **Split Structural vs. Value Lenses:** Emit `UiEvent::ModValChanged` (`mod_val_rev`) during continuous drags inside `Binding::new(..., UiData::mod_ui_rev, ...)` views so captured drag widgets (`cx.capture()`) are never destroyed mid-drag.
 - **CSS & Verification Gate:** Avoid unsupported Vizia CSS selectors (e.g. `:focus-within`, which crashes Ableton Live); run `cargo test --offline --workspace` (verifying CSS parsing, unique `#[id]` strings, single timer, patch/dir/theme tests, MPE & DSP tests) plus `cargo xtask bundle j-syn --release` with zero project compiler warnings before committing.
+
+---
+
+## Git Workflow & Pull Requests
+
+- **Branch per Issue / Feature:** Always create a dedicated branch off `main` (e.g. `fix/<short-slug>` or `feat/<short-slug>`) when working on an issue or task rather than committing directly to `main`. If tackling multiple unrelated issues, use separate branches off `main` for each.
+- **Verify Before Pushing:** Run `cargo test --offline --workspace` and `cargo xtask bundle j-syn --release --offline` (zero project compiler warnings) before opening or merging a PR.
+- **Pull Requests:** Push the branch to `origin` and open a Pull Request targeting `main` (`gh pr create`), referencing the issue (`Closes #<n>` when applicable). Merge via PR (`gh pr merge --merge --delete-branch` when requested/approved) and fast-forward local `main`.
