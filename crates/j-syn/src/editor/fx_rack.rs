@@ -518,7 +518,7 @@ fn set_fx_slot_type_with_defaults(
         setter.set_parameter(&slot.utility_inv_r, false);
         setter.end_set_parameter(&slot.utility_inv_r);
         setter.begin_set_parameter(&slot.limiter_true_peak);
-        setter.set_parameter(&slot.limiter_true_peak, true);
+        setter.set_parameter(&slot.limiter_true_peak, false);
         setter.end_set_parameter(&slot.limiter_true_peak);
         mod_ui.set_fx_eq_subtab(bus_idx, slot_idx, false);
     }

@@ -212,7 +212,7 @@ pub struct FxSlotParams {
     pub utility_inv_l: bool,
     /// Invert right channel phase in `UTILITY` (default `false`).
     pub utility_inv_r: bool,
-    /// Enable 4x True Peak detection in `LIMITER` (default `true`).
+    /// Enable 4x True Peak detection in `LIMITER` (default `false`).
     pub limiter_true_peak: bool,
 }
 
@@ -230,7 +230,7 @@ impl Default for FxSlotParams {
             tube_res_filter_enabled: true,
             utility_inv_l: false,
             utility_inv_r: false,
-            limiter_true_peak: true,
+            limiter_true_peak: false,
         }
     }
 }
@@ -299,7 +299,7 @@ impl FxSlotParams {
             tube_res_filter_enabled: true,
             utility_inv_l: false,
             utility_inv_r: false,
-            limiter_true_peak: true,
+            limiter_true_peak: false,
         }
     }
 }
