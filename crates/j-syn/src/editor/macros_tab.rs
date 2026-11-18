@@ -22,7 +22,7 @@ pub(super) fn build_macros_tab(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             }
         })
         .row_between(Pixels(tokens::SPACE_XS))
-        .width(Pixels(44.0))
+        .width(Pixels(tokens::PERF_PILL_COL_W))
         .height(Stretch(1.0));
 
         // Right: Shrunk 2 × 4 Macro Grid (M1–M4 top row, M5–M8 bottom row)
@@ -47,7 +47,7 @@ pub(super) fn build_macros_tab(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     .class("drawer-module")
     .col_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))
-    .height(Pixels(134.0));
+    .height(Pixels(tokens::MACROS_DOCK_H));
 }
 
 fn build_macro_card(cx: &mut Context, idx: usize, mod_ui: Arc<ModUiState>) {
@@ -55,8 +55,8 @@ fn build_macro_card(cx: &mut Context, idx: usize, mod_ui: Arc<ModUiState>) {
     VStack::new(cx, move |cx| {
         HStack::new(cx, move |cx| {
             ModSourcePill::new(cx, source, mod_ui.clone())
-                .width(Pixels(28.0))
-                .height(Pixels(15.0));
+                .width(Pixels(tokens::MACRO_PILL_W))
+                .height(Pixels(tokens::MACRO_HDR_H));
 
             Textbox::new(
                 cx,
@@ -70,11 +70,11 @@ fn build_macro_card(cx: &mut Context, idx: usize, mod_ui: Arc<ModUiState>) {
             })
             .class("macro-name-input")
             .width(Stretch(1.0))
-            .height(Pixels(15.0));
+            .height(Pixels(tokens::MACRO_HDR_H));
         })
         .col_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
-        .height(Pixels(15.0));
+        .height(Pixels(tokens::MACRO_HDR_H));
 
         HStack::new(cx, move |cx| {
             build_rotary_knob_with_opt_mod(
@@ -92,7 +92,7 @@ fn build_macro_card(cx: &mut Context, idx: usize, mod_ui: Arc<ModUiState>) {
 
             build_param_readout_box(cx, UiData::params, move |p| &p.macros[idx].value)
                 .width(Stretch(1.0))
-                .height(Pixels(17.0))
+                .height(Pixels(tokens::READOUT_H))
                 .top(Stretch(1.0))
                 .bottom(Stretch(1.0));
         })

@@ -18,7 +18,6 @@ use crate::JSynPluginParams;
 
 const UNSET_U8: u8 = 255;
 const UNSET_DEST: u16 = u16::MAX;
-pub(crate) const FX_VIEW_TAG: u8 = 5;
 
 /// Converts `BottomTab` to the visibility tag used for drop-target hit testing (`1..=3`, `0` = always visible).
 #[inline]
@@ -278,8 +277,7 @@ impl ModUiState {
     }
 
     fn hit_test_cursor(&self, x: f32, y: f32) -> Option<usize> {
-        let view_mode = self.active_view_mode.load(Ordering::Relaxed);
-        if view_mode > 1 {
+        if self.active_view_mode.load(Ordering::Relaxed) != 0 {
             return None;
         }
         let active_tab = self.active_bottom_tab.load(Ordering::Relaxed);
@@ -288,12 +286,7 @@ impl ModUiState {
             if rw <= 1.0 || rh <= 1.0 {
                 continue;
             }
-            let visible = if view_mode == 1 {
-                tag == FX_VIEW_TAG
-            } else {
-                tag == 0 || tag == active_tab
-            };
-            if !visible {
+            if tag != 0 && tag != active_tab {
                 continue;
             }
             if x >= rx && x <= rx + rw && y >= ry && y <= ry + rh {
@@ -751,7 +744,6 @@ impl View for ModSourcePill {
                     } else {
                         self.mod_ui.clear_drag();
                         if let Some(sub) = Self::subtab_for_source(self.source) {
-                            cx.emit(UiEvent::SelectViewMode(super::MainViewMode::Main));
                             cx.emit(UiEvent::SelectTab(BottomTab::ModSeq));
                             cx.emit(UiEvent::SelectModSeqSubTab(sub));
                         }

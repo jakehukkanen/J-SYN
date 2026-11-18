@@ -98,7 +98,7 @@ fn build_source_send_column<FB, FD>(
             DIRECT_ROUTE_ITEMS,
         )
         .width(Stretch(1.0))
-        .height(Pixels(18.0))
+        .height(Pixels(tokens::PILL_H))
         .toggle_class(
             "routing-pill-active",
             UiData::params.map(move |p| direct_map(p).value() != DirectRouteParam::Off),

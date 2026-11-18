@@ -104,7 +104,7 @@ pub(super) fn build_osc_panel(
                 osc_label,
                 accent,
             )
-            .width(Pixels(52.0))
+            .width(Pixels(tokens::OSC_LED_W))
             .height(Pixels(tokens::HEADER_STRIP_H));
 
             let p_prev = p_hdr.clone();
@@ -117,7 +117,7 @@ pub(super) fn build_osc_panel(
             )
             .class("wt-step-btn")
             .class("wt-step-label")
-            .width(Pixels(16.0))
+            .width(Pixels(tokens::STEP_BTN_W))
             .height(Pixels(tokens::HEADER_STRIP_H));
 
             build_wavetable_dropdown(cx, osc_idx, b_hdr.clone(), p_hdr.clone(), g_hdr.clone())
@@ -134,7 +134,7 @@ pub(super) fn build_osc_panel(
             )
             .class("wt-step-btn")
             .class("wt-step-label")
-            .width(Pixels(16.0))
+            .width(Pixels(tokens::STEP_BTN_W))
             .height(Pixels(tokens::HEADER_STRIP_H));
         })
         .col_between(Pixels(tokens::SPACE_XS))
@@ -199,12 +199,12 @@ pub(super) fn build_osc_panel(
         })
         .col_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
-        .height(Pixels(18.0));
+        .height(Pixels(tokens::PILL_H));
 
         // Row 3: [WavetableScope] | [WT POS | WARP+dd | < > | MOD+dd | LEVEL]
         HStack::new(cx, move |cx| {
             WavetableScope::new(cx, osc_idx, bank, params.clone(), mod_ui.clone())
-                .width(Pixels(92.0))
+                .width(Pixels(tokens::OSC_SCOPE_W))
                 .height(Stretch(1.0));
 
             let p_right = params;
@@ -257,7 +257,9 @@ pub(super) fn build_osc_panel(
                         p_r1.clone(),
                         u_r1.clone(),
                     );
-                    Element::new(cx).width(Pixels(16.0)).height(Stretch(1.0));
+                    Element::new(cx)
+                        .width(Pixels(tokens::STEP_BTN_W))
+                        .height(Stretch(1.0));
                     add_knob(
                         cx,
                         |o| &o.mod_depth,
@@ -281,7 +283,9 @@ pub(super) fn build_osc_panel(
 
                 // Row 2: [spacer] | WARP dropdown | < / > order button | MOD dropdown | [spacer]
                 HStack::new(cx, move |cx| {
-                    Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
+                    Element::new(cx)
+                        .width(Stretch(1.0))
+                        .height(Pixels(tokens::PILL_H));
 
                     build_enum_dropdown(
                         cx,
@@ -291,7 +295,7 @@ pub(super) fn build_osc_panel(
                         WARP_ITEMS,
                     )
                     .width(Stretch(1.0))
-                    .height(Pixels(18.0));
+                    .height(Pixels(tokens::PILL_H));
 
                     let p_ord = p_right.clone();
                     let g_ord = gui_right.clone();
@@ -318,8 +322,8 @@ pub(super) fn build_osc_panel(
                     )
                     .class("wt-step-btn")
                     .class("wt-step-label")
-                    .width(Pixels(16.0))
-                    .height(Pixels(18.0));
+                    .width(Pixels(tokens::STEP_BTN_W))
+                    .height(Pixels(tokens::PILL_H));
 
                     let p_mod_scroll = p_right.clone();
                     let g_mod_scroll = gui_right.clone();
@@ -408,13 +412,15 @@ pub(super) fn build_osc_panel(
                         },
                     )
                     .width(Stretch(1.0))
-                    .height(Pixels(18.0));
+                    .height(Pixels(tokens::PILL_H));
 
-                    Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
+                    Element::new(cx)
+                        .width(Stretch(1.0))
+                        .height(Pixels(tokens::PILL_H));
                 })
                 .col_between(Pixels(tokens::SPACE_XS))
                 .width(Stretch(1.0))
-                .height(Pixels(18.0));
+                .height(Pixels(tokens::PILL_H));
             })
             .row_between(Pixels(tokens::SPACE_XS))
             .child_top(Stretch(1.0))
@@ -440,7 +446,7 @@ pub(super) fn build_osc_panel(
                 0,
             )
             .class("stk-pill")
-            .height(Pixels(18.0));
+            .height(Pixels(tokens::PILL_H));
 
             build_inline_pill_cell(
                 cx,
@@ -451,7 +457,7 @@ pub(super) fn build_osc_panel(
                 0.94,
             )
             .class("stk-pill")
-            .height(Pixels(18.0));
+            .height(Pixels(tokens::PILL_H));
 
             let p_det_dim = p_dock.clone();
             build_inline_pill_cell_mod(
@@ -466,7 +472,7 @@ pub(super) fn build_osc_panel(
                 0,
             )
             .class("stk-pill")
-            .height(Pixels(18.0))
+            .height(Pixels(tokens::PILL_H))
             .toggle_class(
                 "pill-dimmed",
                 UiData::mod_ui_rev.map(move |_| p_det_dim.oscs[osc_idx].unison.value() <= 1),
@@ -484,7 +490,7 @@ pub(super) fn build_osc_panel(
                 0,
             )
             .class("stk-pill")
-            .height(Pixels(18.0))
+            .height(Pixels(tokens::PILL_H))
             .toggle_class(
                 "pill-dimmed",
                 UiData::mod_ui_rev.map(move |_| p_dock.oscs[osc_idx].unison.value() <= 1),
@@ -492,7 +498,7 @@ pub(super) fn build_osc_panel(
         })
         .col_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
-        .height(Pixels(18.0));
+        .height(Pixels(tokens::PILL_H));
     })
     .class("hardware-module")
     .toggle_class(

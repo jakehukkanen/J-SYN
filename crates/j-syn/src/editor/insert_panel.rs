@@ -87,7 +87,7 @@ fn build_insert_card(
                     slot_label,
                     accent,
                 )
-                .width(Pixels(48.0))
+                .width(Pixels(tokens::INSERT_LED_W))
                 .height(Pixels(tokens::HEADER_STRIP_H));
 
                 build_enum_dropdown(
@@ -107,7 +107,7 @@ fn build_insert_card(
                     move |p| &p.routing.inserts[slot_idx].position,
                     INSERT_POS_ITEMS,
                 )
-                .width(Pixels(56.0))
+                .width(Pixels(tokens::INSERT_POS_W))
                 .height(Pixels(tokens::HEADER_STRIP_H));
             }
         })
@@ -158,7 +158,7 @@ fn build_insert_card(
                 }
             })
             .col_between(Pixels(tokens::SPACE_MD))
-            .width(Pixels(86.0))
+            .width(Pixels(tokens::INSERT_KNOB_CLUSTER_W))
             .height(Auto);
         })
         .col_between(Pixels(tokens::SPACE_MD))
@@ -197,5 +197,5 @@ pub(super) fn build_insert_panel(
     })
     .col_between(Pixels(tokens::SPACE_MD))
     .width(Stretch(1.0))
-    .height(Pixels(84.0));
+    .height(Pixels(tokens::INSERT_SECTION_H));
 }

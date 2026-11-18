@@ -370,8 +370,8 @@ pub(super) fn build_filter_panel(
                     label,
                     accent,
                 )
-                .width(Pixels(62.0))
-                .height(Pixels(20.0));
+                .width(Pixels(tokens::FILTER_LED_W))
+                .height(Pixels(tokens::HEADER_STRIP_H));
 
                 build_enum_dropdown(
                     cx,
@@ -381,7 +381,7 @@ pub(super) fn build_filter_panel(
                     FILTER_MODE_ITEMS,
                 )
                 .width(Stretch(1.0))
-                .height(Pixels(20.0));
+                .height(Pixels(tokens::HEADER_STRIP_H));
 
                 build_enum_dropdown_with_override(
                     cx,
@@ -394,17 +394,17 @@ pub(super) fn build_filter_panel(
                         mode.has_fixed_12db_slope().then_some("12 dB")
                     },
                 )
-                .width(Pixels(60.0))
-                .height(Pixels(20.0));
+                .width(Pixels(tokens::FILTER_SLOPE_W))
+                .height(Pixels(tokens::HEADER_STRIP_H));
             }
         })
-        .col_between(Pixels(6.0))
-        .height(Pixels(20.0))
+        .col_between(Pixels(tokens::SPACE_MD))
+        .height(Pixels(tokens::HEADER_STRIP_H))
         .width(Stretch(1.0));
 
         FilterResponseScope::new(cx, filter_idx, params.clone(), mod_ui.clone(), accent)
             .width(Stretch(1.0))
-            .height(Pixels(52.0));
+            .height(Pixels(tokens::FILTER_SCOPE_H));
 
         HStack::new(cx, {
             let params = params.clone();
@@ -496,5 +496,5 @@ pub(super) fn build_dual_filter_section(
     })
     .col_between(Pixels(tokens::SPACE_MD))
     .width(Stretch(1.0))
-    .height(Pixels(148.0));
+    .height(Pixels(tokens::FILTER_SECTION_H));
 }

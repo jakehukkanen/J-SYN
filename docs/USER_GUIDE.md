@@ -1,13 +1,12 @@
 # J-SYN User Guide
 
-Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP plugin featuring a `920 × 840` 2-Wing `MAIN` workspace (`Left Wing`: Oscillators & Noise, `Center Wing`: Dual Filters, Center Modulation Stage, Insert Shapers & Permanent `2×4` Macro/Source Dock) plus a dedicated **`FX`** view hosting the 3-Lane Master FX Rack (`BUS A | BUS B | BUS C`).
+Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP plugin featuring a unified `1760 × 840` 3-Wing workspace (`Left Wing`: Oscillators & Noise, `Center Wing`: Dual Filters, Center Modulation Stage, Insert Shapers & Permanent `2×4` Macro/Source Dock, `Right Wing`: 3-Lane Scrollable Master FX Rack).
 
 ---
 
 ## 1. Top Header Bar
-- **View Switcher (`MAIN | FX | MATRIX | ⚙`):**
-  - `MAIN`: 2-Wing synth chassis (Oscillators & Noise, Dual Filters, Insert 1/2, Center Stage Tabs, and Permanent Macro & Source Dock).
-  - `FX`: Full-width 3-Lane `BUS A | BUS B | BUS C` Snapin FX Rack with a permanent draggable modulation source pill strip (`E1–E4`, `MS1–MS4`, `VEL–SLD`, `M1–M8`) across the top.
+- **View Switcher (`MAIN | MATRIX | ⚙`):**
+  - `MAIN`: Full 3-Wing synth chassis (Oscillators & Noise, Dual Filters, Insert 1/2, Center Stage Tabs, Permanent Macro & Source Dock, and 3-Lane `BUS A | BUS B | BUS C` FX Rack on one screen).
   - `MATRIX`: Full 32-slot interactive Modulation Matrix.
   - `⚙` (Settings): UI Theme, Engine Quality (`Dirty` / `Clean`), `DC Blocker`, `Safety Limiter`, `MODSEQ SWING`, `GEAR SIZE` (`0.10–0.60`), and Presets/Wavetables directories.
     - > **Note on `0 dBFS` Headroom & `DC Blocker`:** The `~2.5 Hz` `DC Blocker` runs **after** the Master FX Rack and `MASTER` gain. Even with a `Limiter` or `Clipper` set to `0.0 dB` ceiling at the end of a bus, highpass phase-tilt on flat-topped or asymmetric waveforms can push output above `0.0 dBFS` unless `Safety Limiter` is enabled (or `DC Blocker` is disabled).
@@ -41,9 +40,9 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 
 ---
 
-## 4. `FX` View — 3-Lane Snapin FX Rack (`BUS A | BUS B | BUS C`)
+## 4. Right Wing — 3-Lane Scrollable FX Rack (`BUS A | BUS B | BUS C`)
 - **Three Parallel / Routable 8-Slot FX Lanes (`BUS A`, `BUS B`, `BUS C`):**
-  - Each lane features an 8-slot scrollable stack of Snapin cards (`ON/OFF`, effect selector, `↑`/`↓` slot reordering, `STK 1..4` stacking, and live `150 Hz` pre/post visualizer scope) plus lane header `L` (level) and `P` (pan) mini-knobs.
+  - Each lane features an 8-slot scrollable stack of variable-height FX Unit cards (`Empty` slots collapse cleanly to a slim selector strip; active FX units expand to match their scope and `27 px` 4-knob footer with `ON/OFF`, effect selector, `STK 1..4` stacking, `↑`/`↓` slot reordering, and live `150 Hz` pre/post visualizer scope) plus lane header `L` (level) and `P` (pan) mini-knobs.
   - **Lane-to-Lane Routing:** Click the target badge in the `BUS A` or `BUS B` lane header (or use **`FX LANE MATRIX`** in the **`ROUTE`** tab) to configure 6 routing topologies (`Bus C` always outputs `-> MST`):
     - **`Parallel (A | B | C)`:** All 3 lanes sum independently to Master.
     - **`Serial (A -> B | C)`:** `Bus A` feeds `Bus B`; `Bus C` runs in parallel.
@@ -63,8 +62,8 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 
 ## 5. Permanent Macro & Source Dock, Center Stage Tabs & MPE
 - **Permanent `2×4` Macro & Performance Source Dock:** Always visible at bottom-center: houses a vertical column of performance source pills (`VEL`, `KEY`, `MW`, `AT`, `SLD`) on the left alongside all 8 renameable **`M1`–`M8`** macro cards (with draggable badge, editable name textbox, knob, and readout).
-  - **Drag** `E1`–`E4` / `MS1`–`MS4` directly from the Center Stage tab strip (or the top strip in **`FX`** view), or `VEL`–`SLD` / `M1`–`M8` from the dock onto any knob or value pill to assign modulation.
-  - **Click** `E1`–`E4` or `MS1`–`MS4` (including from the **`FX`** source strip) to jump directly to its editor in the Center Stage.
+  - **Drag** `E1`–`E4` / `MS1`–`MS4` directly from the Center Stage tab strip, or `VEL`–`SLD` / `M1`–`M8` from the dock onto any knob, pill, or FX Unit control on the right to assign modulation.
+  - **Click** `E1`–`E4` or `MS1`–`MS4` to jump directly to its editor in the Center Stage.
   - **Collar Handle:** Hover/drag the radial modulation arc around a knob to adjust depth.
   - **Right-Click** any modulated control to open a quick menu to **Bypass (`ON`/`BYP`)**, toggle **Polarity (`UNI`/`BIP`)**, or **Remove (`×`)** each routing.
 - **`VOICE` Center Tab & MPE:**

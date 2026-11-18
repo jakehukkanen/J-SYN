@@ -753,7 +753,7 @@ fn build_fx_type_dropdown(
         },
     )
     .width(Stretch(1.0))
-    .height(Pixels(18.0));
+    .height(Pixels(tokens::FX_UNIT_HEADER_H));
 }
 
 fn build_fx_slot_header(
@@ -773,8 +773,8 @@ fn build_fx_slot_header(
             "ON",
             AMBER_RGB,
         )
-        .width(Pixels(30.0))
-        .height(Pixels(16.0))
+        .width(Pixels(tokens::FX_UNIT_LED_W))
+        .height(Pixels(tokens::FX_UNIT_ARROW_H))
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
 
@@ -798,8 +798,8 @@ fn build_fx_slot_header(
             )
             .class("stk-pill");
         })
-        .width(Pixels(36.0))
-        .height(Pixels(tokens::SNAPIN_HEADER_H));
+        .width(Pixels(tokens::FX_UNIT_STACK_W))
+        .height(Pixels(tokens::FX_UNIT_HEADER_H));
 
         let p_up = params.clone();
         let g_up = gui_context.clone();
@@ -817,8 +817,8 @@ fn build_fx_slot_header(
         .class("fx-move-btn")
         .class("fx-move-label")
         .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 0))
-        .width(Pixels(13.0))
-        .height(Pixels(16.0));
+        .width(Pixels(tokens::FX_UNIT_ARROW_W))
+        .height(Pixels(tokens::FX_UNIT_ARROW_H));
 
         ArrowButton::new(
             cx,
@@ -840,11 +840,11 @@ fn build_fx_slot_header(
         .class("fx-move-btn")
         .class("fx-move-label")
         .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 7))
-        .width(Pixels(13.0))
-        .height(Pixels(16.0));
+        .width(Pixels(tokens::FX_UNIT_ARROW_W))
+        .height(Pixels(tokens::FX_UNIT_ARROW_H));
     })
     .col_between(Pixels(tokens::SPACE_XS))
-    .height(Pixels(tokens::SNAPIN_HEADER_H))
+    .height(Pixels(tokens::FX_UNIT_HEADER_H))
     .width(Stretch(1.0));
 }
 
@@ -855,6 +855,7 @@ fn build_fx_scope_zstack(
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
+    scope_h: f32,
 ) {
     ZStack::new(cx, move |cx| {
         FxSlotVisualizer::new(cx, bus_idx, slot_idx, params.clone(), mod_ui.clone())
@@ -1195,7 +1196,7 @@ fn build_fx_scope_zstack(
         );
     })
     .width(Stretch(1.0))
-    .height(Stretch(1.0));
+    .height(Pixels(scope_h));
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1443,7 +1444,7 @@ fn build_compact_bar_knob<P, FMap>(
             accent,
             dest,
             mod_ui,
-            super::mod_bar::FX_VIEW_TAG,
+            0,
         );
         if let Some(check) = dim_check {
             knob = knob.enabled_by(params, check);
@@ -1607,11 +1608,11 @@ fn build_lane_header(
     })
     .class("fx-bus-header")
     .col_between(Pixels(tokens::SPACE_SM))
-    .height(Pixels(24.0))
+    .height(Pixels(tokens::FX_LANE_HEADER_H))
     .width(Stretch(1.0));
 }
 
-fn build_snapin_card(
+fn build_fx_unit_card(
     cx: &mut Context,
     bus_idx: usize,
     slot_idx: usize,
@@ -1630,36 +1631,48 @@ fn build_snapin_card(
             mod_ui.clone(),
         );
 
-        let p_scope = params.clone();
-        let g_scope = gui_context.clone();
-        let m_scope = mod_ui.clone();
+        let p_body = params.clone();
+        let g_body = gui_context.clone();
+        let m_body = mod_ui.clone();
         Binding::new(
             cx,
             UiData::params
                 .map(move |p| p.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() as usize),
             move |cx, fx_idx_lens| {
-                if FxType::from_index(fx_idx_lens.get(cx)) != FxType::Off {
+                let fx_type = FxType::from_index(fx_idx_lens.get(cx));
+                if fx_type == FxType::Off {
+                    return;
+                }
+                let scope_h = tokens::fx_unit_scope_height(fx_type);
+                let p_unit = p_body.clone();
+                let g_unit = g_body.clone();
+                let m_unit = m_body.clone();
+                VStack::new(cx, move |cx| {
                     build_fx_scope_zstack(
                         cx,
                         bus_idx,
                         slot_idx,
-                        p_scope.clone(),
-                        g_scope.clone(),
-                        m_scope.clone(),
+                        p_unit.clone(),
+                        g_unit.clone(),
+                        m_unit.clone(),
+                        scope_h,
                     );
-                }
-            },
-        );
 
-        build_fx_knob_row(
-            cx,
-            bus_idx,
-            slot_idx,
-            params,
-            gui_context,
-            mod_ui,
-            tokens::KNOB_SNAPIN,
-            super::mod_bar::FX_VIEW_TAG,
+                    build_fx_knob_row(
+                        cx,
+                        bus_idx,
+                        slot_idx,
+                        p_unit,
+                        g_unit,
+                        m_unit,
+                        tokens::KNOB_FX_UNIT,
+                        0,
+                    );
+                })
+                .row_between(Pixels(tokens::SPACE_SM))
+                .width(Stretch(1.0))
+                .height(Auto);
+            },
         );
     })
     .class("hardware-module")
@@ -1669,11 +1682,11 @@ fn build_snapin_card(
         UiData::mod_ui_rev.map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
     )
     .width(Stretch(1.0))
-    .height(Pixels(tokens::SNAPIN_CARD_H))
-    .row_between(Pixels(tokens::SPACE_XS));
+    .height(Auto)
+    .row_between(Pixels(tokens::SPACE_SM));
 }
 
-/// Right Wing: Phase Plant-inspired 3-lane Snapin FX Rack (`Bus A`, `Bus B`, `Bus C`, 8 slots each).
+/// Right Wing: 3-lane scrollable FX Rack (`Bus A`, `Bus B`, `Bus C`, 8 slots each).
 pub(crate) fn build_three_lane_fx_rack(
     cx: &mut Context,
     params: Arc<JSynPluginParams>,
@@ -1697,7 +1710,7 @@ pub(crate) fn build_three_lane_fx_rack(
                 ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
                     VStack::new(cx, move |cx| {
                         for slot_idx in 0..8 {
-                            build_snapin_card(
+                            build_fx_unit_card(
                                 cx,
                                 bus_idx,
                                 slot_idx,
@@ -1707,7 +1720,8 @@ pub(crate) fn build_three_lane_fx_rack(
                             );
                         }
                     })
-                    .row_between(Pixels(tokens::SPACE_XS))
+                    .row_between(Pixels(tokens::SPACE_SM))
+                    .child_right(Pixels(tokens::FX_LANE_SCROLL_GUTTER))
                     .width(Stretch(1.0))
                     .height(Auto);
                 })

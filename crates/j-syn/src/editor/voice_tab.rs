@@ -70,8 +70,8 @@ pub(super) fn build_voice_tab(
                             "KT",
                             accent,
                         )
-                        .width(Pixels(52.0))
-                        .height(Pixels(20.0))
+                        .width(Pixels(tokens::VOICE_KT_W))
+                        .height(Pixels(tokens::CONTROL_H))
                         .left(Stretch(1.0))
                         .right(Stretch(1.0));
                     })
@@ -95,7 +95,7 @@ pub(super) fn build_voice_tab(
 
         // Bottom Card: Global Voicing (stacked vertically), MPE, Glide & Filter Keytracking
         VStack::new(cx, move |cx| {
-            build_module_header(cx, "VOICING, MPE & FILTER KEYTRACKING", 18.0);
+            build_module_header(cx, "VOICING, MPE & FILTER KEYTRACKING", tokens::PILL_H);
             HStack::new(cx, move |cx| {
                 // Stacked Voicing column: MODE over PB RANGE
                 VStack::new(cx, move |cx| {
@@ -113,9 +113,9 @@ pub(super) fn build_voice_tab(
                             "Mono",
                         )
                         .width(Stretch(1.0))
-                        .height(Pixels(20.0));
+                        .height(Pixels(tokens::CONTROL_H));
                     })
-                    .row_between(Pixels(2.0))
+                    .row_between(Pixels(tokens::SPACE_XS))
                     .width(Stretch(1.0))
                     .height(Auto);
 
@@ -125,13 +125,13 @@ pub(super) fn build_voice_tab(
                         |p| &p.pitch_bend_range,
                         "PB RANGE",
                         24,
-                        72.0,
+                        tokens::VOICE_COL_MODE_W,
                     );
                 })
                 .row_between(Pixels(tokens::SPACE_SM))
                 .child_top(Stretch(1.0))
                 .child_bottom(Stretch(1.0))
-                .width(Pixels(72.0))
+                .width(Pixels(tokens::VOICE_COL_MODE_W))
                 .height(Stretch(1.0));
 
                 // Stacked MPE column: MPE toggle over MPE PB
@@ -145,7 +145,7 @@ pub(super) fn build_voice_tab(
                         AMBER_RGB,
                     )
                     .width(Stretch(1.0))
-                    .height(Pixels(20.0));
+                    .height(Pixels(tokens::CONTROL_H));
 
                     build_mini_pill_cell(
                         cx,
@@ -153,13 +153,13 @@ pub(super) fn build_voice_tab(
                         |p| &p.mpe_pitch_bend_range,
                         "MPE PB",
                         48,
-                        68.0,
+                        tokens::VOICE_COL_MPE_W,
                     );
                 })
                 .row_between(Pixels(tokens::SPACE_SM))
                 .child_top(Stretch(1.0))
                 .child_bottom(Stretch(1.0))
-                .width(Pixels(68.0))
+                .width(Pixels(tokens::VOICE_COL_MPE_W))
                 .height(Stretch(1.0));
 
                 build_flex_knob_cell_mod(
@@ -183,7 +183,7 @@ pub(super) fn build_voice_tab(
                     false,
                     AMBER_RGB,
                     tokens::KNOB_STD,
-                    58.0,
+                    tokens::VOICE_FLT_KT_CELL_W,
                 );
 
                 build_knob_cell(
@@ -194,7 +194,7 @@ pub(super) fn build_voice_tab(
                     false,
                     CORAL_RGB,
                     tokens::KNOB_STD,
-                    58.0,
+                    tokens::VOICE_FLT_KT_CELL_W,
                 );
             })
             .col_between(Pixels(tokens::SPACE_LG))
@@ -209,7 +209,7 @@ pub(super) fn build_voice_tab(
         .class("drawer-module")
         .row_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
-        .height(Pixels(118.0));
+        .height(Pixels(tokens::VOICE_VOICING_H));
     })
     .row_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))

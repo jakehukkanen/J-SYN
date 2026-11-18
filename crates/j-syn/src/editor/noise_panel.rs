@@ -43,7 +43,7 @@ pub(super) fn build_noise_panel(
                 "NOISE",
                 CORAL_RGB,
             )
-            .width(Pixels(58.0))
+            .width(Pixels(tokens::NOISE_LED_W))
             .height(Pixels(tokens::HEADER_STRIP_H));
 
             build_enum_dropdown(
@@ -119,5 +119,5 @@ pub(super) fn build_noise_panel(
     )
     .row_between(Pixels(tokens::SPACE_XS))
     .width(Stretch(1.0))
-    .height(Pixels(170.0));
+    .height(Pixels(tokens::NOISE_CARD_H));
 }
