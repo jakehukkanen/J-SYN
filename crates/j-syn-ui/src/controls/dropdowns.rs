@@ -1,22 +1,57 @@
-//! Scroll-wheel enabled dropdowns, enum/bool pickers, directory trees, wavetable & UI scale menus.
+//! Scroll-wheel enabled dropdowns, generic enum/bool pickers, cascading directory trees, and UI scale menu.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use j_syn_dsp::WavetableBank;
 use nih_plug::prelude::{Enum, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
 use super::bold_label;
 use super::icon_buttons::{ArrowDir, VectorArrow};
-#[cfg(target_os = "macos")]
-use super::super::notify_baseview_resize_macos;
-use super::super::{UiData, UiEvent};
-use crate::{JSynPluginParams, WavetableChoice};
+use crate::shell::{notify_baseview_resize_macos, UiKitEvent, UiShellState};
 
-pub(crate) fn build_dropdown_trigger_labels<T>(cx: &mut Context, text: impl Res<T> + Clone)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryFileEntry {
+    pub name: String,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DirectoryFolder {
+    /// Immediate folder name (e.g. `"Analog"` or `"Bass"`).
+    pub name: String,
+    /// Relative folder path from the configured root (e.g. `"Bass/Reese"`).
+    pub rel_path: String,
+    pub files: Vec<DirectoryFileEntry>,
+    pub subfolders: Vec<DirectoryFolder>,
+}
+
+impl DirectoryFolder {
+    pub fn total_file_count(&self) -> usize {
+        self.files.len()
+            + self
+                .subfolders
+                .iter()
+                .map(Self::total_file_count)
+                .sum::<usize>()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DirectoryTree {
+    pub root_files: Vec<DirectoryFileEntry>,
+    pub folders: Vec<DirectoryFolder>,
+}
+
+impl DirectoryTree {
+    pub fn is_empty(&self) -> bool {
+        self.root_files.is_empty() && self.folders.is_empty()
+    }
+}
+
+pub fn build_dropdown_trigger_labels<T>(cx: &mut Context, text: impl Res<T> + Clone)
 where
     T: ToStringLocalized,
 {
@@ -32,7 +67,7 @@ where
         .height(Stretch(1.0));
 }
 
-pub(crate) struct ScrollDropdown {
+pub struct ScrollDropdown {
     scroll_accum: f32,
     last_sign: f32,
     last_step: Instant,
@@ -40,7 +75,7 @@ pub(crate) struct ScrollDropdown {
     on_activate: Option<Box<dyn Fn(&mut EventContext) + Send + Sync>>,
 }
 
-pub(crate) trait ScrollDropdownExt {
+pub trait ScrollDropdownExt {
     fn on_activate<F>(self, cb: F) -> Self
     where
         F: Fn(&mut EventContext) + Send + Sync + 'static;
@@ -56,7 +91,7 @@ impl ScrollDropdownExt for Handle<'_, ScrollDropdown> {
 }
 
 impl ScrollDropdown {
-    pub(crate) fn new<'a, F, B>(cx: &'a mut Context, on_step: F, build_inner: B) -> Handle<'a, Self>
+    pub fn new<'a, F, B>(cx: &'a mut Context, on_step: F, build_inner: B) -> Handle<'a, Self>
     where
         F: Fn(&mut EventContext, isize) + Send + Sync + 'static,
         B: FnOnce(&mut Context) -> Handle<'_, Dropdown>,
@@ -116,21 +151,26 @@ impl View for ScrollDropdown {
     }
 }
 
-type EnumLabelOverride = Arc<dyn Fn(&Arc<JSynPluginParams>) -> Option<&'static str> + Send + Sync>;
+type EnumLabelOverride<Params> =
+    Arc<dyn Fn(&Arc<Params>) -> Option<&'static str> + Send + Sync>;
 
-fn build_enum_dropdown_inner<'a, E, P, FMap>(
+#[allow(clippy::too_many_arguments)]
+fn build_enum_dropdown_inner<'a, L, Params, E, P, FMap>(
     cx: &'a mut Context,
-    params: Arc<JSynPluginParams>,
+    params_lens: L,
+    params: Arc<Params>,
     gui_context: Arc<dyn GuiContext>,
     params_to_param: FMap,
     items: &'static [(&'static str, E)],
-    fixed_override: Option<EnumLabelOverride>,
+    fixed_override: Option<EnumLabelOverride<Params>>,
     trigger_prefix: Option<&'static str>,
 ) -> Handle<'a, ScrollDropdown>
 where
+    L: Lens<Target = Arc<Params>> + Clone,
+    Params: Send + Sync + 'static,
     E: Enum + Copy + PartialEq + Send + Sync + 'static,
     P: Param<Plain = E> + 'static,
-    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
+    FMap: Fn(&Arc<Params>) -> &P + Copy + Send + Sync + 'static,
 {
     let p_scroll = params.clone();
     let g_scroll = gui_context.clone();
@@ -139,6 +179,9 @@ where
     let ov_dd_disabled = fixed_override.clone();
     let ov_disabled = fixed_override.clone();
     let ov_class = fixed_override;
+    let lens_dd = params_lens.clone();
+    let lens_dis = params_lens.clone();
+    let lens_cls = params_lens.clone();
 
     let handle = ScrollDropdown::new(
         cx,
@@ -160,15 +203,16 @@ where
                 setter.begin_set_parameter(param);
                 setter.set_parameter(param, items[next].1);
                 setter.end_set_parameter(param);
-                cx.emit(super::UiEvent::ModUiChanged);
+                cx.emit(UiKitEvent::ModUiChanged);
             }
         },
         move |cx| {
+            let lens_trig = params_lens.clone();
             let dd = Dropdown::new(
                 cx,
                 move |cx| {
                     let ov_t = ov_trigger.clone();
-                    let text_lens = UiData::params.map(move |params| {
+                    let text_lens = lens_trig.map(move |params| {
                         if let Some(ref ov) = ov_t {
                             if let Some(fixed) = ov(params) {
                                 return fixed.to_string();
@@ -211,14 +255,14 @@ where
                             setter.begin_set_parameter(param);
                             setter.set_parameter(param, val);
                             setter.end_set_parameter(param);
-                            cx.emit(super::UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             cx.emit(PopupEvent::Close);
                         });
                     }
                 },
             );
             if let Some(ov) = ov_dd_disabled {
-                dd.disabled(UiData::params.map(move |params| ov(params).is_some()))
+                dd.disabled(lens_dd.map(move |params| ov(params).is_some()))
             } else {
                 dd
             }
@@ -227,46 +271,63 @@ where
 
     if let (Some(ov_d), Some(ov_c)) = (ov_disabled, ov_class) {
         handle
-            .disabled(UiData::params.map(move |params| ov_d(params).is_some()))
+            .disabled(lens_dis.map(move |params| ov_d(params).is_some()))
             .toggle_class(
                 "dropdown-disabled",
-                UiData::params.map(move |params| ov_c(params).is_some()),
+                lens_cls.map(move |params| ov_c(params).is_some()),
             )
     } else {
         handle
     }
 }
 
-pub(crate) fn build_enum_dropdown<'a, E, P, FMap>(
+pub fn build_enum_dropdown<'a, L, Params, E, P, FMap>(
     cx: &'a mut Context,
-    params: Arc<JSynPluginParams>,
+    params_lens: L,
+    params: Arc<Params>,
     gui_context: Arc<dyn GuiContext>,
     params_to_param: FMap,
     items: &'static [(&'static str, E)],
 ) -> Handle<'a, ScrollDropdown>
 where
+    L: Lens<Target = Arc<Params>> + Clone,
+    Params: Send + Sync + 'static,
     E: Enum + Copy + PartialEq + Send + Sync + 'static,
     P: Param<Plain = E> + 'static,
-    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
+    FMap: Fn(&Arc<Params>) -> &P + Copy + Send + Sync + 'static,
 {
-    build_enum_dropdown_inner(cx, params, gui_context, params_to_param, items, None, None)
+    build_enum_dropdown_inner(
+        cx,
+        params_lens,
+        params,
+        gui_context,
+        params_to_param,
+        items,
+        None,
+        None,
+    )
 }
 
-pub(crate) fn build_prefixed_enum_dropdown<'a, E, P, FMap>(
+#[allow(clippy::too_many_arguments)]
+pub fn build_prefixed_enum_dropdown<'a, L, Params, E, P, FMap>(
     cx: &'a mut Context,
-    params: Arc<JSynPluginParams>,
+    params_lens: L,
+    params: Arc<Params>,
     gui_context: Arc<dyn GuiContext>,
     params_to_param: FMap,
     items: &'static [(&'static str, E)],
     trigger_prefix: &'static str,
 ) -> Handle<'a, ScrollDropdown>
 where
+    L: Lens<Target = Arc<Params>> + Clone,
+    Params: Send + Sync + 'static,
     E: Enum + Copy + PartialEq + Send + Sync + 'static,
     P: Param<Plain = E> + 'static,
-    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
+    FMap: Fn(&Arc<Params>) -> &P + Copy + Send + Sync + 'static,
 {
     build_enum_dropdown_inner(
         cx,
+        params_lens,
         params,
         gui_context,
         params_to_param,
@@ -276,22 +337,27 @@ where
     )
 }
 
-pub(crate) fn build_enum_dropdown_with_override<'a, E, P, FMap, FOverride>(
+#[allow(clippy::too_many_arguments)]
+pub fn build_enum_dropdown_with_override<'a, L, Params, E, P, FMap, FOverride>(
     cx: &'a mut Context,
-    params: Arc<JSynPluginParams>,
+    params_lens: L,
+    params: Arc<Params>,
     gui_context: Arc<dyn GuiContext>,
     params_to_param: FMap,
     items: &'static [(&'static str, E)],
     override_fn: FOverride,
 ) -> Handle<'a, ScrollDropdown>
 where
+    L: Lens<Target = Arc<Params>> + Clone,
+    Params: Send + Sync + 'static,
     E: Enum + Copy + PartialEq + Send + Sync + 'static,
     P: Param<Plain = E> + 'static,
-    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
-    FOverride: Fn(&Arc<JSynPluginParams>) -> Option<&'static str> + Send + Sync + 'static,
+    FMap: Fn(&Arc<Params>) -> &P + Copy + Send + Sync + 'static,
+    FOverride: Fn(&Arc<Params>) -> Option<&'static str> + Send + Sync + 'static,
 {
     build_enum_dropdown_inner(
         cx,
+        params_lens,
         params,
         gui_context,
         params_to_param,
@@ -301,17 +367,21 @@ where
     )
 }
 
-pub(crate) fn build_bool_dropdown<'a, P, FMap>(
+#[allow(clippy::too_many_arguments)]
+pub fn build_bool_dropdown<'a, L, Params, P, FMap>(
     cx: &'a mut Context,
-    params: Arc<JSynPluginParams>,
+    params_lens: L,
+    params: Arc<Params>,
     gui_context: Arc<dyn GuiContext>,
     params_to_param: FMap,
     false_label: &'static str,
     true_label: &'static str,
 ) -> Handle<'a, ScrollDropdown>
 where
+    L: Lens<Target = Arc<Params>> + Clone,
+    Params: Send + Sync + 'static,
     P: Param<Plain = bool> + 'static,
-    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
+    FMap: Fn(&Arc<Params>) -> &P + Copy + Send + Sync + 'static,
 {
     let p_scroll = params.clone();
     let g_scroll = gui_context.clone();
@@ -330,7 +400,7 @@ where
                 setter.begin_set_parameter(param);
                 setter.set_parameter(param, next == 1);
                 setter.end_set_parameter(param);
-                cx.emit(super::UiEvent::ModUiChanged);
+                cx.emit(UiKitEvent::ModUiChanged);
             }
         },
         move |cx| {
@@ -338,8 +408,8 @@ where
                 cx,
                 move |cx| {
                     let text_lens = ParamWidgetBase::make_lens(
-                        UiData::params,
-                        params_to_param,
+                        params_lens,
+                        move |p| params_to_param(p),
                         move |param| {
                             if param.modulated_normalized_value() >= 0.5 {
                                 true_label.to_string()
@@ -367,7 +437,7 @@ where
                             setter.begin_set_parameter(param);
                             setter.set_parameter(param, val);
                             setter.end_set_parameter(param);
-                            cx.emit(super::UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             cx.emit(PopupEvent::Close);
                         });
                     }
@@ -375,137 +445,6 @@ where
             )
         },
     )
-}
-
-pub(crate) const WT_ITEMS: &[(&str, WavetableChoice)] = &[
-    ("Basic Shapes", WavetableChoice::BasicShapes),
-    ("Digital Formant", WavetableChoice::DigitalFormant),
-    ("Harmonic Sync", WavetableChoice::HarmonicSync),
-    ("Aggressive PWM", WavetableChoice::AggressivePwm),
-];
-
-static WT_LOAD_GEN: [AtomicU64; 4] = [
-    AtomicU64::new(0),
-    AtomicU64::new(0),
-    AtomicU64::new(0),
-    AtomicU64::new(0),
-];
-
-fn set_wavetable_choice(
-    params: &JSynPluginParams,
-    gui_context: &Arc<dyn GuiContext>,
-    osc_idx: usize,
-    choice: WavetableChoice,
-) {
-    let param = &params.oscs[osc_idx].wt_select;
-    let setter = ParamSetter::new(gui_context.as_ref());
-    setter.begin_set_parameter(param);
-    setter.set_parameter(param, choice);
-    setter.end_set_parameter(param);
-}
-
-fn scan_wavs_in_folder(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut files: Vec<std::path::PathBuf> = rd
-        .filter_map(|res| res.ok().map(|e| e.path()))
-        .filter(|path| {
-            let hidden = path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .is_some_and(|s| s.starts_with('.'));
-            !hidden
-                && path.is_file()
-                && path
-                    .extension()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("wav"))
-        })
-        .collect();
-    files.sort_by(|a, b| {
-        a.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase()
-            .cmp(
-                &b.file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_lowercase(),
-            )
-    });
-    files
-}
-
-fn spawn_load_wavetable(
-    osc_idx: usize,
-    path: std::path::PathBuf,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-    bank: Arc<WavetableBank>,
-) {
-    let load_gen = WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel) + 1;
-    std::thread::spawn(move || {
-        if WT_LOAD_GEN[osc_idx].load(Ordering::Acquire) != load_gen {
-            return;
-        }
-        let _ = crate::presets::load_wavetable_file_for_osc(
-            osc_idx,
-            &path,
-            &params,
-            &gui_context,
-            &bank,
-        );
-    });
-}
-
-pub(crate) fn step_wavetable(
-    params: &Arc<JSynPluginParams>,
-    gui_context: &Arc<dyn GuiContext>,
-    bank: &Arc<WavetableBank>,
-    osc_idx: usize,
-    delta: isize,
-) {
-    let cur = params.oscs[osc_idx].wt_select.value();
-    if cur == WavetableChoice::Custom {
-        let cur_path = params
-            .wavetable_paths
-            .lock()
-            .ok()
-            .map(|g| g[osc_idx].clone())
-            .unwrap_or_default();
-        if !cur_path.trim().is_empty() {
-            let cur_pb = std::path::PathBuf::from(&cur_path);
-            if let Some(parent) = cur_pb.parent() {
-                let files = scan_wavs_in_folder(parent);
-                if !files.is_empty() {
-                    let pos = files
-                        .iter()
-                        .position(|p| p == &cur_pb || p.file_name() == cur_pb.file_name())
-                        .unwrap_or(0);
-                    let next = (pos as isize + delta).rem_euclid(files.len() as isize) as usize;
-                    if files.len() > 1 || next != pos {
-                        spawn_load_wavetable(
-                            osc_idx,
-                            files[next].clone(),
-                            params.clone(),
-                            gui_context.clone(),
-                            bank.clone(),
-                        );
-                    }
-                    return;
-                }
-            }
-        }
-    }
-
-    WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel);
-    let pos = WT_ITEMS.iter().position(|&(_, v)| v == cur).unwrap_or(0);
-    let next = (pos as isize + delta).rem_euclid(WT_ITEMS.len() as isize) as usize;
-    if next != pos || cur == WavetableChoice::Custom {
-        set_wavetable_choice(params, gui_context, osc_idx, WT_ITEMS[next].1);
-    }
 }
 
 #[inline]
@@ -520,9 +459,9 @@ fn is_folder_in_active_path(folder_rel: &str, active_path: Option<&str>) -> bool
 }
 
 fn collect_open_folder_panes<'a>(
-    mut folders: &'a [crate::presets::DirectoryFolder],
+    mut folders: &'a [DirectoryFolder],
     active_path: Option<&str>,
-    out: &mut Vec<&'a crate::presets::DirectoryFolder>,
+    out: &mut Vec<&'a DirectoryFolder>,
 ) {
     let Some(active) = active_path else {
         return;
@@ -539,7 +478,7 @@ fn collect_open_folder_panes<'a>(
 #[allow(clippy::too_many_arguments)]
 fn build_folder_row<FOpen, FToggle>(
     cx: &mut Context,
-    folder: &crate::presets::DirectoryFolder,
+    folder: &DirectoryFolder,
     active_path: Option<&str>,
     on_open_folder: FOpen,
     on_toggle_folder: FToggle,
@@ -574,11 +513,9 @@ fn build_folder_row<FOpen, FToggle>(
 }
 
 /// Render a recursive `DirectoryTree` as cascading side-by-side folder panes.
-/// Hovering (or clicking) a folder opens its children and files in an adjacent pane to the right;
-/// clicking a file invokes `on_select_file`.
-pub(crate) fn build_directory_tree_items<FFile, FOpen, FToggle>(
+pub fn build_directory_tree_items<FFile, FOpen, FToggle>(
     cx: &mut Context,
-    tree: crate::presets::DirectoryTree,
+    tree: DirectoryTree,
     expanded_folder: Option<String>,
     on_open_folder: FOpen,
     on_toggle_folder: FToggle,
@@ -586,11 +523,7 @@ pub(crate) fn build_directory_tree_items<FFile, FOpen, FToggle>(
 ) where
     FOpen: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
     FToggle: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
-    FFile: Fn(&mut EventContext, &crate::presets::DirectoryFileEntry)
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    FFile: Fn(&mut EventContext, &DirectoryFileEntry) + Clone + Send + Sync + 'static,
 {
     build_directory_tree_panes(
         cx,
@@ -604,9 +537,9 @@ pub(crate) fn build_directory_tree_items<FFile, FOpen, FToggle>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn build_directory_tree_panes<FHeader, FFile, FOpen, FToggle>(
+pub fn build_directory_tree_panes<FHeader, FFile, FOpen, FToggle>(
     cx: &mut Context,
-    tree: crate::presets::DirectoryTree,
+    tree: DirectoryTree,
     expanded_folder: Option<String>,
     build_header: FHeader,
     on_open_folder: FOpen,
@@ -616,11 +549,7 @@ pub(crate) fn build_directory_tree_panes<FHeader, FFile, FOpen, FToggle>(
     FHeader: FnOnce(&mut Context) + 'static,
     FOpen: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
     FToggle: Fn(&mut EventContext, &str) + Clone + Send + Sync + 'static,
-    FFile: Fn(&mut EventContext, &crate::presets::DirectoryFileEntry)
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    FFile: Fn(&mut EventContext, &DirectoryFileEntry) + Clone + Send + Sync + 'static,
 {
     let mut header_opt = Some(build_header);
     HStack::new(cx, move |cx| {
@@ -695,175 +624,77 @@ pub(crate) fn build_directory_tree_panes<FHeader, FFile, FOpen, FToggle>(
     .class("dropdown-cascade");
 }
 
-pub(crate) fn build_wavetable_dropdown(
-    cx: &mut Context,
-    osc_idx: usize,
-    bank: Arc<WavetableBank>,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-) -> Handle<'_, HStack> {
-    HStack::new(cx, move |cx| {
-        let p_trigger = params.clone();
-        Dropdown::new(
-            cx,
-            move |cx| {
-                let p_label = p_trigger.clone();
-                let text_lens = ParamWidgetBase::make_lens(
-                    UiData::params,
-                    move |p| &p.oscs[osc_idx].wt_select,
-                    move |param| {
-                        if param.value() == WavetableChoice::Custom {
-                            if let Ok(guard) = p_label.wavetable_paths.lock() {
-                                let path_str = guard[osc_idx].trim();
-                                if !path_str.is_empty() {
-                                    if let Some(stem) = std::path::Path::new(path_str)
-                                        .file_stem()
-                                        .and_then(|s| s.to_str())
-                                    {
-                                        if !stem.is_empty() {
-                                            return stem.to_string();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        param.normalized_value_to_string(
-                            param.modulated_normalized_value(),
-                            true,
-                        )
-                    },
-                );
-                HStack::new(cx, move |cx| {
-                    build_dropdown_trigger_labels(cx, text_lens);
-                })
-                .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .child_top(Pixels(0.0))
-                .child_bottom(Pixels(0.0))
-                .overflow(Overflow::Hidden)
-            },
-            move |cx| {
-                let bank_dir = bank.clone();
-                let p_dir = params.clone();
-                let g_dir = gui_context.clone();
-                Binding::new(cx, UiData::wavetables_dir_rev, move |cx, _| {
-                    let cfg = crate::presets::JSynConfig::load();
-                    let tree =
-                        crate::presets::scan_wavetable_tree(cfg.wavetables_dir.as_deref());
-                    let expanded = UiData::expanded_wt_folder.get(cx);
-                    let p_hdr = p_dir.clone();
-                    let g_hdr = g_dir.clone();
-                    let bank_d = bank_dir.clone();
-                    let p_d = p_dir.clone();
-                    let g_d = g_dir.clone();
-                    build_directory_tree_panes(
-                        cx,
-                        tree,
-                        expanded,
-                        move |cx| {
-                            for &(label, val) in WT_ITEMS {
-                                let p_ref = p_hdr.clone();
-                                let gui_ctx = g_hdr.clone();
-                                bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                                    WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel);
-                                    set_wavetable_choice(&p_ref, &gui_ctx, osc_idx, val);
-                                    cx.emit(PopupEvent::Close);
-                                });
-                            }
-                        },
-                        |cx, folder_path| {
-                            cx.emit(UiEvent::OpenWtFolder(folder_path.to_string()));
-                        },
-                        |cx, folder_path| {
-                            cx.emit(UiEvent::ToggleWtFolder(folder_path.to_string()));
-                        },
-                        move |cx, entry| {
+pub const UI_SCALE_ITEMS: &[(&str, u32, f64)] = &[
+    ("85%", 85_u32, 0.85_f64),
+    ("100%", 100_u32, 1.0_f64),
+    ("115%", 115_u32, 1.15_f64),
+    ("125%", 125_u32, 1.25_f64),
+    ("133%", 133_u32, 1.33_f64),
+    ("150%", 150_u32, 1.50_f64),
+    ("175%", 175_u32, 1.75_f64),
+    ("200%", 200_u32, 2.00_f64),
+];
+
+/// Compact inline UI scale picker (`85%..=200%`) driven by `UiShellState::ui_scale_pct`.
+pub fn build_ui_scale_picker(cx: &mut Context) -> Handle<'_, ScrollDropdown> {
+    ScrollDropdown::new(
+        cx,
+        move |cx, delta| {
+            let cur_pct = UiShellState::ui_scale_pct.get(cx);
+            let pos = UI_SCALE_ITEMS
+                .iter()
+                .position(|&(_, pct, _)| pct == cur_pct)
+                .unwrap_or(1);
+            let next =
+                (pos as isize + delta).clamp(0, UI_SCALE_ITEMS.len() as isize - 1) as usize;
+            if next != pos {
+                let (_, pct, factor) = UI_SCALE_ITEMS[next];
+                cx.set_user_scale_factor(factor);
+                cx.emit(UiKitEvent::SetUiScale(pct));
+                notify_baseview_resize_macos();
+            }
+        },
+        |cx| {
+            Dropdown::new(
+                cx,
+                |cx| {
+                    HStack::new(cx, move |cx| {
+                        build_dropdown_trigger_labels(
+                            cx,
+                            UiShellState::ui_scale_pct.map(|pct| format!("{pct}%")),
+                        );
+                    })
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0))
+                    .child_top(Pixels(0.0))
+                    .child_bottom(Pixels(0.0))
+                    .overflow(Overflow::Hidden)
+                },
+                move |cx| {
+                    for &(label, pct, factor) in UI_SCALE_ITEMS {
+                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                            cx.set_user_scale_factor(factor);
+                            cx.emit(UiKitEvent::SetUiScale(pct));
                             cx.emit(PopupEvent::Close);
-                            spawn_load_wavetable(
-                                osc_idx,
-                                entry.path.clone(),
-                                p_d.clone(),
-                                g_d.clone(),
-                                bank_d.clone(),
-                            );
-                        },
-                    );
-                });
-            },
-        )
-        .width(Stretch(1.0))
-        .height(Stretch(1.0));
-    })
+                            notify_baseview_resize_macos();
+                        });
+                    }
+                },
+            )
+        },
+    )
 }
 
-pub(crate) fn build_ui_scale_dropdown(cx: &mut Context) {
-    const SCALE_ITEMS: &[(&str, u32, f64)] = &[
-        ("85%", 85_u32, 0.85_f64),
-        ("100%", 100_u32, 1.0_f64),
-        ("115%", 115_u32, 1.15_f64),
-        ("125%", 125_u32, 1.25_f64),
-        ("133%", 133_u32, 1.33_f64),
-        ("150%", 150_u32, 1.50_f64),
-        ("175%", 175_u32, 1.75_f64),
-        ("200%", 200_u32, 2.00_f64),
-    ];
-
+pub fn build_ui_scale_dropdown(cx: &mut Context) {
     VStack::new(cx, |cx| {
         bold_label(cx, "UI SCALE", "mini-label")
             .width(Stretch(1.0))
             .height(Pixels(13.0))
             .child_space(Stretch(1.0));
 
-        ScrollDropdown::new(
-            cx,
-            move |cx, delta| {
-                let cur_pct = UiData::ui_scale_pct.get(cx);
-                let pos = SCALE_ITEMS
-                    .iter()
-                    .position(|&(_, pct, _)| pct == cur_pct)
-                    .unwrap_or(1);
-                let next =
-                    (pos as isize + delta).clamp(0, SCALE_ITEMS.len() as isize - 1) as usize;
-                if next != pos {
-                    let (_, pct, factor) = SCALE_ITEMS[next];
-                    cx.set_user_scale_factor(factor);
-                    cx.emit(UiEvent::SetUiScale(pct));
-                    #[cfg(target_os = "macos")]
-                    notify_baseview_resize_macos();
-                }
-            },
-            |cx| {
-                Dropdown::new(
-                    cx,
-                    |cx| {
-                        HStack::new(cx, move |cx| {
-                            build_dropdown_trigger_labels(
-                                cx,
-                                UiData::ui_scale_pct.map(|pct| format!("{pct}%")),
-                            );
-                        })
-                        .width(Stretch(1.0))
-                        .height(Stretch(1.0))
-                        .child_top(Pixels(0.0))
-                        .child_bottom(Pixels(0.0))
-                        .overflow(Overflow::Hidden)
-                    },
-                    move |cx| {
-                        for &(label, pct, factor) in SCALE_ITEMS {
-                            bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                                cx.set_user_scale_factor(factor);
-                                cx.emit(UiEvent::SetUiScale(pct));
-                                cx.emit(PopupEvent::Close);
-                                #[cfg(target_os = "macos")]
-                                notify_baseview_resize_macos();
-                            });
-                        }
-                    },
-                )
-            },
-        )
-        .width(Pixels(60.0))
-        .height(Pixels(19.0));
+        build_ui_scale_picker(cx)
+            .width(Pixels(60.0))
+            .height(Pixels(19.0));
     })
     .width(Pixels(60.0))
     .height(Auto)

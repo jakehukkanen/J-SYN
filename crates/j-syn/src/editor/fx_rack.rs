@@ -3,17 +3,12 @@
 
 use std::sync::Arc;
 
-use j_syn_dsp::filter::cutoff_norm_to_hz;
 use j_syn_dsp::mod_matrix::ModDestination;
-use j_syn_dsp::{
-    diopser_freq_hz, flanger_delay_ms, flanger_feedback, flanger_phase_deg, flanger_rate_hz,
-    format_tube_res_tune, format_utility_pan, fx_high_cut_hz, fx_low_cut_hz, limiter_ceil_db,
-    limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, mb_band_level_db, mb_out_gain_db,
-    mb_xover_high_hz, mb_xover_low_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
-    tube_res_flt_width_oct, tube_res_lfo_rate_hz, utility_gain_db_from_norm,
-    utility_width_from_norm, FxBusTopology, FxRackState, FxType, MB_BAND_LEVEL_DEFAULT_NORM,
+use j_syn_dsp::{FxBusTopology, FxType, MB_BAND_LEVEL_DEFAULT_NORM};
+use j_syn_ui::fx_units::{
+    build_utility_fx_unit_body, format_fx_slot_param_value, fx_slot_param_label, UtilityUnitParams,
 };
-use nih_plug::prelude::{GuiContext, Param, ParamSetter};
+use nih_plug::prelude::{BoolParam, FloatParam, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
@@ -21,7 +16,10 @@ use super::controls::{
     build_enum_dropdown_with_override, build_flex_knob_cell_mod, build_inline_pill_cell,
     build_prefixed_enum_dropdown, ArrowButton, ArrowDir, ScrollDropdown, ScrollDropdownExt,
 };
-use super::fx_scopes::{fx_accent_rgb, FxSlotVisualizer, MultibandXoverDragOverlay};
+use super::fx_scopes::{
+    fx_accent_rgb, slot_scope_snapshot, FxSlotVisualizer, JSynMbXoverHost,
+    MultibandXoverDragOverlay,
+};
 use super::mod_bar::ModUiState;
 use super::tokens;
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
@@ -118,318 +116,6 @@ const MB_DIST_MODE_ITEMS: &[(&str, DistortionModeParam)] = &[
 #[inline]
 fn slot_enabled_for_bus(p: &JSynPluginParams, bus_idx: usize, slot_idx: usize) -> bool {
     p.fx_bus_slots(bus_idx)[slot_idx].enabled.value()
-}
-
-#[inline]
-fn fx_slot_param_label(
-    fx_ty: FxTypeParam,
-    is_eq: bool,
-    is_scream: bool,
-    mb_tab: u8,
-    param_idx: usize,
-) -> &'static str {
-    if fx_ty == FxTypeParam::MultibandDist {
-        return if mb_tab == 0 {
-            match param_idx {
-                0 => "LOW XOV",
-                1 => "HIGH XOV",
-                2 => "OUT GN",
-                _ => "MIX",
-            }
-        } else {
-            match param_idx {
-                0 => "DRIVE",
-                1 => "BIAS",
-                2 => "LEVEL",
-                _ => "MIX",
-            }
-        };
-    }
-    if is_eq {
-        return match fx_ty {
-            FxTypeParam::Chorus => match param_idx {
-                0 => "LOW CUT",
-                1 => "HIGH CUT",
-                2 => "SPREAD",
-                _ => "FEEDBK",
-            },
-            FxTypeParam::Delay => match param_idx {
-                0 => "LOW CUT",
-                1 => "HIGH CUT",
-                2 => "PING-PNG",
-                _ => "WIDTH",
-            },
-            FxTypeParam::Reverb => match param_idx {
-                0 => "LOW CUT",
-                1 => "HIGH CUT",
-                2 => "PRE-DLY",
-                _ => "WIDTH",
-            },
-            FxTypeParam::TubeResonator => match param_idx {
-                0 => "LFO AMT",
-                1 => "LFO SPD",
-                2 => "FEEDBK",
-                _ => "DAMP",
-            },
-            FxTypeParam::Limiter => match param_idx {
-                0 => "RELEASE",
-                1 => "KNEE",
-                2 => "LINK",
-                _ => "PUNCH",
-            },
-            FxTypeParam::Flanger => match param_idx {
-                0 => "FEEDBK",
-                1 => "PHASE",
-                2 => "LOW CUT",
-                _ => "TONE",
-            },
-            _ => "--",
-        };
-    }
-
-    match fx_ty {
-        FxTypeParam::Off => "--",
-        FxTypeParam::Ott => match param_idx {
-            0 => "DEPTH",
-            1 => "TIME",
-            2 => "IN GAIN",
-            _ => "OUT GN",
-        },
-        FxTypeParam::Distortion => match param_idx {
-            0 => "BIAS",
-            1 => "DRIVE",
-            2 => "TONE",
-            _ => "MIX",
-        },
-        FxTypeParam::Chorus => match param_idx {
-            0 => "RATE",
-            1 => "DEPTH",
-            2 => "DIM",
-            _ => "MIX",
-        },
-        FxTypeParam::Delay => match param_idx {
-            0 => "TIME",
-            1 => "FEEDBK",
-            2 => "MOD",
-            _ => "MIX",
-        },
-        FxTypeParam::Reverb => match param_idx {
-            0 => "SIZE",
-            1 => "DECAY",
-            2 => "DAMP",
-            _ => "MIX",
-        },
-        FxTypeParam::JSatClipper => match param_idx {
-            0 => "DRIVE",
-            1 => "CEIL",
-            2 => "KNEE",
-            _ => "MIX",
-        },
-        FxTypeParam::Filter => match param_idx {
-            0 => "CUTOFF",
-            1 => "RES",
-            2 => {
-                if is_scream {
-                    "SCREAM"
-                } else {
-                    "DRIVE"
-                }
-            }
-            _ => "MIX",
-        },
-        FxTypeParam::Phaser => match param_idx {
-            0 => "RATE",
-            1 => "DEPTH",
-            2 => "FEEDBK",
-            _ => "MIX",
-        },
-        FxTypeParam::Diopser => match param_idx {
-            0 => "FREQ",
-            1 => "RES",
-            2 => "SPREAD",
-            _ => "MIX",
-        },
-        FxTypeParam::TubeResonator => match param_idx {
-            0 => "TUNE",
-            1 => "FLT FREQ",
-            2 => "FLT WDTH",
-            _ => "MIX",
-        },
-        FxTypeParam::Utility => match param_idx {
-            0 => "WIDTH",
-            1 => "PAN",
-            2 => "GAIN",
-            _ => "MIX",
-        },
-        FxTypeParam::Limiter => match param_idx {
-            0 => "GAIN",
-            1 => "CEIL",
-            2 => "LOOKAHD",
-            _ => "MIX",
-        },
-        FxTypeParam::Flanger => match param_idx {
-            0 => "RATE",
-            1 => "DEPTH",
-            2 => "DELAY",
-            _ => "MIX",
-        },
-        FxTypeParam::MultibandDist => "--",
-    }
-}
-
-#[inline]
-fn format_hz(hz: f32) -> String {
-    if hz >= 10_000.0 {
-        format!("{:.1} kHz", hz / 1000.0)
-    } else if hz >= 1000.0 {
-        format!("{:.2} kHz", hz / 1000.0)
-    } else {
-        format!("{:.0} Hz", hz)
-    }
-}
-
-#[inline]
-fn format_fx_slot_param_value(
-    fx_ty: FxTypeParam,
-    is_eq: bool,
-    mb_tab: u8,
-    param_idx: usize,
-    norm: f32,
-) -> String {
-    let n = norm.clamp(0.0, 1.0);
-    if fx_ty == FxTypeParam::MultibandDist {
-        return if mb_tab == 0 {
-            match param_idx {
-                0 => format_hz(mb_xover_low_hz(n)),
-                1 => format_hz(mb_xover_high_hz(n)),
-                2 => format!("{:+.1} dB", mb_out_gain_db(n)),
-                _ => format!("{:.0}%", n * 100.0),
-            }
-        } else {
-            match param_idx {
-                0 | 3 => format!("{:.0}%", n * 100.0),
-                1 => format!("{:+.0}%", (n - 0.5) * 200.0),
-                _ => format!("{:+.1} dB", mb_band_level_db(n)),
-            }
-        };
-    }
-    if is_eq {
-        if fx_ty == FxTypeParam::TubeResonator {
-            return match param_idx {
-                0 => format!("{:.0}%", n * 100.0),
-                1 => format!("{:.2} Hz", tube_res_lfo_rate_hz(n)),
-                2 => format!("{:.1} ms", tube_res_decay_ms(n)),
-                _ => format!("{:.0}%", n * 100.0),
-            };
-        }
-        if fx_ty == FxTypeParam::Limiter {
-            return match param_idx {
-                0 => format!("{:.0} ms", limiter_release_ms(n)),
-                _ => format!("{:.0}%", n * 100.0),
-            };
-        }
-        if fx_ty == FxTypeParam::Flanger {
-            return match param_idx {
-                0 => format!("{:+.0}%", flanger_feedback(n) * 100.0),
-                1 => format!("{:.0}°", flanger_phase_deg(n)),
-                2 => format_hz(fx_low_cut_hz(n)),
-                _ => format_hz(fx_high_cut_hz(n)),
-            };
-        }
-        return match param_idx {
-            0 => format_hz(fx_low_cut_hz(n)),
-            1 => format_hz(fx_high_cut_hz(n)),
-            2 => match fx_ty {
-                FxTypeParam::Reverb => format!("{:.0} ms", n * 250.0),
-                FxTypeParam::Chorus => format!("{:.0}%", n * 200.0),
-                _ => format!("{:.0}%", n * 100.0),
-            },
-            _ => match fx_ty {
-                FxTypeParam::Chorus => format!("{:.0}%", n * 75.0),
-                _ => format!("{:.0}%", n * 200.0),
-            },
-        };
-    }
-
-    match fx_ty {
-        FxTypeParam::Off => "--".to_string(),
-        FxTypeParam::Ott => match param_idx {
-            0 => format!("{:.0}%", n * 100.0),
-            1 => format!("{:.2}x", 0.25 * 16.0_f32.powf(n)),
-            2 | 3 => format!("{:+.1} dB", -18.0 + n * 36.0),
-            _ => String::new(),
-        },
-        FxTypeParam::Distortion => match param_idx {
-            0 | 2 => format!("{:+.0}%", (n - 0.5) * 200.0),
-            1 | 3 => format!("{:.0}%", n * 100.0),
-            _ => String::new(),
-        },
-        FxTypeParam::Chorus => match param_idx {
-            0 => format!("{:.2} Hz", 0.05 * 100.0_f32.powf(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::Delay => match param_idx {
-            0 => FxRackState::format_delay_sync(n).to_string(),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::Reverb => format!("{:.0}%", n * 100.0),
-        FxTypeParam::JSatClipper => match param_idx {
-            0 => format!("+{:.1} dB", n * 24.0),
-            1 => format!("{:.1} dB", -18.0 + n * 18.0),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::Filter => match param_idx {
-            0 => format_hz(cutoff_norm_to_hz(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::Phaser => match param_idx {
-            0 => format!("{:.2} Hz", 0.05 * 120.0_f32.powf(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::Diopser => match param_idx {
-            0 => format_hz(diopser_freq_hz(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::TubeResonator => match param_idx {
-            0 => format_tube_res_tune(n),
-            1 => format_hz(tube_res_flt_freq_hz(n)),
-            2 => format!("{:.2} oct", tube_res_flt_width_oct(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::Utility => match param_idx {
-            0 => format!("{:.0}%", utility_width_from_norm(n) * 100.0),
-            1 => format_utility_pan(n),
-            2 => {
-                let db = utility_gain_db_from_norm(n);
-                let clean = if db.abs() < 0.05 { 0.0 } else { db };
-                if clean == 0.0 {
-                    "0.0 dB".to_string()
-                } else {
-                    format!("{clean:+.1} dB")
-                }
-            }
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::Limiter => match param_idx {
-            0 => format!("+{:.1} dB", limiter_gain_db(n)),
-            1 => format!("{:.1} dB", limiter_ceil_db(n)),
-            2 => {
-                let ms = limiter_lookahead_ms(n);
-                if ms < 0.05 {
-                    "0.0 (Clip)".to_string()
-                } else {
-                    format!("{ms:.1} ms")
-                }
-            }
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::Flanger => match param_idx {
-            0 => format!("{:.2} Hz", flanger_rate_hz(n)),
-            2 => format!("{:.2} ms", flanger_delay_ms(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxTypeParam::MultibandDist => String::new(),
-    }
 }
 
 fn swap_mod_destinations_for_slots(
@@ -858,7 +544,9 @@ fn build_fx_scope_zstack(
     scope_h: f32,
 ) {
     ZStack::new(cx, move |cx| {
-        FxSlotVisualizer::new(cx, bus_idx, slot_idx, params.clone(), mod_ui.clone())
+        let p_vis = params.clone();
+        let m_vis = mod_ui.clone();
+        FxSlotVisualizer::new(cx, move || slot_scope_snapshot(bus_idx, slot_idx, &p_vis, &m_vis))
             .hoverable(false)
             .width(Stretch(1.0))
             .height(Stretch(1.0));
@@ -882,11 +570,13 @@ fn build_fx_scope_zstack(
                 if fx_ty == FxTypeParam::MultibandDist {
                     MultibandXoverDragOverlay::new(
                         cx,
-                        bus_idx,
-                        slot_idx,
-                        p_ov.clone(),
-                        g_ov.clone(),
-                        m_ov.clone(),
+                        Arc::new(JSynMbXoverHost {
+                            bus_idx,
+                            slot_idx,
+                            params: p_ov.clone(),
+                            gui_context: g_ov.clone(),
+                            mod_ui: m_ov.clone(),
+                        }),
                     )
                     .position_type(PositionType::SelfDirected)
                     .z_index(5)
@@ -1350,17 +1040,23 @@ fn build_fx_knob_row(
                         j_syn_dsp::FxSlotParams::default_params_for_type(key.fx_type.into())[p_idx]
                     };
                     let title = fx_slot_param_label(
-                        key.fx_type,
+                        key.fx_type.into(),
                         key.is_eq,
                         key.is_scream,
                         key.mb_tab,
                         p_idx,
                     );
-                    let accent = fx_accent_rgb(key.fx_type);
+                    let accent = fx_accent_rgb(key.fx_type.into());
                     let p_cell = p_dim.clone();
                     let mod_cell = mod_ui.clone();
                     let formatter = Arc::new(move |norm: f32, _off: Option<f32>| {
-                        format_fx_slot_param_value(key.fx_type, key.is_eq, key.mb_tab, p_idx, norm)
+                        format_fx_slot_param_value(
+                            key.fx_type.into(),
+                            key.is_eq,
+                            key.mb_tab,
+                            p_idx,
+                            norm,
+                        )
                     });
                     VStack::new(cx, move |cx| {
                         bold_label(cx, title, "knob-title")
@@ -1653,10 +1349,59 @@ fn build_fx_unit_card(
                 if fx_type == FxType::Off {
                     return;
                 }
-                let scope_h = tokens::fx_unit_scope_height(fx_type);
                 let p_unit = p_body.clone();
                 let g_unit = g_body.clone();
                 let m_unit = m_body.clone();
+                if fx_type == FxType::Utility {
+                    #[derive(Clone, Copy)]
+                    struct JSynUtilitySlotParams {
+                        bus_idx: usize,
+                        slot_idx: usize,
+                    }
+                    impl UtilityUnitParams<JSynPluginParams> for JSynUtilitySlotParams {
+                        fn enabled<'a>(&self, p: &'a JSynPluginParams) -> &'a BoolParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].enabled
+                        }
+                        fn width<'a>(&self, p: &'a JSynPluginParams) -> &'a FloatParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].p1
+                        }
+                        fn pan<'a>(&self, p: &'a JSynPluginParams) -> &'a FloatParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].p2
+                        }
+                        fn gain<'a>(&self, p: &'a JSynPluginParams) -> &'a FloatParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].p3
+                        }
+                        fn mix<'a>(&self, p: &'a JSynPluginParams) -> &'a FloatParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].p4
+                        }
+                        fn inv_l<'a>(&self, p: &'a JSynPluginParams) -> &'a BoolParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].utility_inv_l
+                        }
+                        fn inv_r<'a>(&self, p: &'a JSynPluginParams) -> &'a BoolParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].utility_inv_r
+                        }
+                    }
+                    let mod_dests = [
+                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 0),
+                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 1),
+                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 2),
+                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 3),
+                    ];
+                    let p_scope = p_unit.clone();
+                    let m_scope = m_unit.clone();
+                    build_utility_fx_unit_body(
+                        cx,
+                        UiData::params,
+                        p_unit,
+                        g_unit,
+                        JSynUtilitySlotParams { bus_idx, slot_idx },
+                        Some((mod_dests, m_unit, 0)),
+                        move || slot_scope_snapshot(bus_idx, slot_idx, &p_scope, &m_scope),
+                        tokens::KNOB_FX_UNIT,
+                    );
+                    return;
+                }
+                let scope_h = tokens::fx_unit_scope_height(fx_type);
                 VStack::new(cx, move |cx| {
                     build_fx_scope_zstack(
                         cx,

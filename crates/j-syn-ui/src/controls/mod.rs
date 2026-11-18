@@ -7,21 +7,20 @@ use nih_plug::prelude::Param;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
-use super::mod_bar::ModUiState;
-use super::widgets::{
+use crate::shell::ModUiHost;
+use crate::tokens;
+use crate::widgets::{
     KnobDimExt, ParamStepPill, PitchDragBox, PitchGroupModOverlay, PitchPart, RatioDragBox,
     RotaryKnob, ValueFormatter,
 };
-use super::{BottomTab, CenterStageTab, UiData, UiEvent};
-use crate::JSynPluginParams;
 
 mod dropdowns;
 mod icon_buttons;
 
-pub(crate) use dropdowns::*;
-pub(crate) use icon_buttons::*;
+pub use dropdowns::*;
+pub use icon_buttons::*;
 
-pub(super) fn bold_label<'a, T>(
+pub fn bold_label<'a, T>(
     cx: &'a mut Context,
     text: impl Res<T> + Clone,
     class_name: &str,
@@ -35,13 +34,13 @@ where
         .font_weight(FontWeightKeyword::Bold)
 }
 
-pub(super) fn build_rotary_knob_with_opt_mod<'a, L, Params, P, FMap>(
+pub fn build_rotary_knob_with_opt_mod<'a, L, Params, P, FMap>(
     cx: &'a mut Context,
     params: L,
     params_to_param: FMap,
     bipolar: bool,
     accent_rgb: (u8, u8, u8),
-    mod_target: Option<(ModDestination, Arc<ModUiState>, u8)>,
+    mod_target: Option<(ModDestination, Arc<dyn ModUiHost>, u8)>,
 ) -> Handle<'a, RotaryKnob>
 where
     L: Lens<Target = Params> + Clone,
@@ -57,15 +56,13 @@ where
     }
 }
 
-fn build_header_knob_cell_inner<L, Params, P, FMap>(
+pub fn build_header_knob_cell<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
     title: &'static str,
     bipolar: bool,
     accent_rgb: (u8, u8, u8),
-    mod_target: Option<(ModDestination, Arc<ModUiState>, u8)>,
-    enabled_state: Option<(Arc<JSynPluginParams>, fn(&JSynPluginParams) -> bool)>,
 ) where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
@@ -73,19 +70,9 @@ fn build_header_knob_cell_inner<L, Params, P, FMap>(
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
     HStack::new(cx, move |cx| {
-        let mut knob = build_rotary_knob_with_opt_mod(
-            cx,
-            params,
-            params_to_param,
-            bipolar,
-            accent_rgb,
-            mod_target,
-        );
-        if let Some((dim_params, dim_check)) = enabled_state {
-            knob = knob.enabled_by(dim_params, dim_check);
-        }
-        knob.width(Pixels(36.0))
-            .height(Pixels(36.0))
+        RotaryKnob::new(cx, params, params_to_param, bipolar, accent_rgb)
+            .width(Pixels(tokens::KNOB_HEADER))
+            .height(Pixels(tokens::KNOB_HEADER))
             .top(Stretch(1.0))
             .bottom(Stretch(1.0));
 
@@ -100,32 +87,7 @@ fn build_header_knob_cell_inner<L, Params, P, FMap>(
     .col_between(Pixels(5.0));
 }
 
-pub(super) fn build_header_knob_cell<L, Params, P, FMap>(
-    cx: &mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    bipolar: bool,
-    accent_rgb: (u8, u8, u8),
-) where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    build_header_knob_cell_inner(
-        cx,
-        params,
-        params_to_param,
-        title,
-        bipolar,
-        accent_rgb,
-        None,
-        None,
-    );
-}
-
-pub(super) fn build_param_readout_box<'a, L, Params, P, FMap>(
+pub fn build_param_readout_box<'a, L, Params, P, FMap>(
     cx: &'a mut Context,
     params: L,
     params_to_param: FMap,
@@ -151,7 +113,8 @@ where
     .class("knob-readout-box")
 }
 
-pub(super) fn build_knob_cell_with_readout<L, Params, P, FMap>(
+#[allow(clippy::too_many_arguments)]
+pub fn build_knob_cell_with_readout<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
@@ -169,7 +132,7 @@ pub(super) fn build_knob_cell_with_readout<L, Params, P, FMap>(
     VStack::new(cx, move |cx| {
         bold_label(cx, title, "knob-title")
             .width(Stretch(1.0))
-            .height(Pixels(12.0))
+            .height(Pixels(tokens::KNOB_TITLE_COMPACT_H))
             .child_space(Stretch(1.0));
 
         build_rotary_knob_with_opt_mod(
@@ -186,8 +149,8 @@ pub(super) fn build_knob_cell_with_readout<L, Params, P, FMap>(
         .right(Stretch(1.0));
 
         build_param_readout_box(cx, params, params_to_param)
-            .width(Pixels(cell_w - 6.0))
-            .height(Pixels(14.0))
+            .width(Pixels(cell_w - tokens::CARD_PAD))
+            .height(Pixels(tokens::KNOB_READOUT_H))
             .left(Stretch(1.0))
             .right(Stretch(1.0));
     })
@@ -197,7 +160,8 @@ pub(super) fn build_knob_cell_with_readout<L, Params, P, FMap>(
     .row_between(Pixels(1.0));
 }
 
-pub(super) fn build_knob_cell<L, Params, P, FMap>(
+#[allow(clippy::too_many_arguments)]
+pub fn build_knob_cell<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
@@ -215,7 +179,7 @@ pub(super) fn build_knob_cell<L, Params, P, FMap>(
     VStack::new(cx, move |cx| {
         bold_label(cx, title, "knob-title")
             .width(Stretch(1.0))
-            .height(Pixels(14.0))
+            .height(Pixels(tokens::KNOB_TITLE_H))
             .child_space(Stretch(1.0));
 
         build_rotary_knob_with_opt_mod(cx, params, params_to_param, bipolar, accent_rgb, None)
@@ -227,11 +191,11 @@ pub(super) fn build_knob_cell<L, Params, P, FMap>(
     .class("knob-cell")
     .width(Pixels(cell_w))
     .height(Auto)
-    .row_between(Pixels(2.0));
+    .row_between(Pixels(tokens::SPACE_XS));
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
+pub fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
@@ -241,7 +205,7 @@ pub(super) fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
     knob_sz: f32,
     cell_w: f32,
     dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
+    mod_ui: Arc<dyn ModUiHost>,
     tab_tag: u8,
     value_formatter: ValueFormatter,
 ) where
@@ -253,7 +217,7 @@ pub(super) fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
     VStack::new(cx, move |cx| {
         bold_label(cx, title, "knob-title")
             .width(Stretch(1.0))
-            .height(Pixels(14.0))
+            .height(Pixels(tokens::KNOB_TITLE_H))
             .child_space(Stretch(1.0));
 
         RotaryKnob::new_with_mod_formatter(
@@ -275,129 +239,11 @@ pub(super) fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
     .class("knob-cell")
     .width(Pixels(cell_w))
     .height(Auto)
-    .row_between(Pixels(2.0));
-}
-
-fn build_flex_knob_cell_mod_inner<L, Params, P, FMap>(
-    cx: &mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    bipolar: bool,
-    accent_rgb: (u8, u8, u8),
-    knob_sz: f32,
-    dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
-    tab_tag: u8,
-    enabled_state: Option<(Arc<JSynPluginParams>, fn(&JSynPluginParams) -> bool)>,
-    disabled_tooltip: Option<Arc<dyn Fn(&JSynPluginParams) -> String + Send + Sync>>,
-) where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    VStack::new(cx, move |cx| {
-        bold_label(cx, title, "knob-title")
-            .width(Stretch(1.0))
-            .height(Pixels(14.0))
-            .child_space(Stretch(1.0));
-
-        let mut knob = build_rotary_knob_with_opt_mod(
-            cx,
-            params,
-            params_to_param,
-            bipolar,
-            accent_rgb,
-            Some((dest, mod_ui, tab_tag)),
-        );
-        if let Some((dim_params, dim_check)) = enabled_state {
-            knob = knob.enabled_by(dim_params, dim_check);
-        }
-        if let Some(fmt) = disabled_tooltip {
-            knob = knob.disabled_tooltip(move |p| fmt(p));
-        }
-        knob.width(Pixels(knob_sz))
-            .height(Pixels(knob_sz))
-            .left(Stretch(1.0))
-            .right(Stretch(1.0));
-    })
-    .class("knob-cell")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .row_between(Pixels(2.0));
-}
-
-pub(super) fn build_flex_knob_cell_mod<L, Params, P, FMap>(
-    cx: &mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    bipolar: bool,
-    accent_rgb: (u8, u8, u8),
-    knob_sz: f32,
-    dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
-    tab_tag: u8,
-) where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    build_flex_knob_cell_mod_inner(
-        cx,
-        params,
-        params_to_param,
-        title,
-        bipolar,
-        accent_rgb,
-        knob_sz,
-        dest,
-        mod_ui,
-        tab_tag,
-        None,
-        None,
-    );
-}
-
-pub(super) fn build_flex_knob_cell_mod_dim<L, Params, P, FMap>(
-    cx: &mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    bipolar: bool,
-    accent_rgb: (u8, u8, u8),
-    knob_sz: f32,
-    dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
-    tab_tag: u8,
-    dim_params: Arc<JSynPluginParams>,
-    dim_check: fn(&JSynPluginParams) -> bool,
-) where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    build_flex_knob_cell_mod_inner(
-        cx,
-        params,
-        params_to_param,
-        title,
-        bipolar,
-        accent_rgb,
-        knob_sz,
-        dest,
-        mod_ui,
-        tab_tag,
-        Some((dim_params, dim_check)),
-        None,
-    );
+    .row_between(Pixels(tokens::SPACE_XS));
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_flex_knob_cell_mod_dim_tooltip<L, Params, P, FMap, FDim, FTt>(
+pub fn build_flex_knob_cell_mod<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
@@ -406,35 +252,30 @@ pub(super) fn build_flex_knob_cell_mod_dim_tooltip<L, Params, P, FMap, FDim, FTt
     accent_rgb: (u8, u8, u8),
     knob_sz: f32,
     dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
+    mod_ui: Arc<dyn ModUiHost>,
     tab_tag: u8,
-    dim_params: Arc<JSynPluginParams>,
-    dim_check: FDim,
-    tooltip_fmt: FTt,
 ) where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
     P: Param + 'static,
     FMap: Fn(&Params) -> &P + Copy + 'static,
-    FDim: Fn(&JSynPluginParams) -> bool + Send + Sync + 'static,
-    FTt: Fn(&JSynPluginParams) -> String + Send + Sync + 'static,
 {
     VStack::new(cx, move |cx| {
         bold_label(cx, title, "knob-title")
             .width(Stretch(1.0))
-            .height(Pixels(14.0))
+            .height(Pixels(tokens::KNOB_TITLE_H))
             .child_space(Stretch(1.0));
 
-        build_rotary_knob_with_opt_mod(
+        RotaryKnob::new_with_mod(
             cx,
             params,
             params_to_param,
             bipolar,
             accent_rgb,
-            Some((dest, mod_ui, tab_tag)),
+            dest,
+            mod_ui,
+            tab_tag,
         )
-        .enabled_by(dim_params, dim_check)
-        .disabled_tooltip(tooltip_fmt)
         .width(Pixels(knob_sz))
         .height(Pixels(knob_sz))
         .left(Stretch(1.0))
@@ -443,10 +284,113 @@ pub(super) fn build_flex_knob_cell_mod_dim_tooltip<L, Params, P, FMap, FDim, FTt
     .class("knob-cell")
     .width(Stretch(1.0))
     .height(Auto)
-    .row_between(Pixels(2.0));
+    .row_between(Pixels(tokens::SPACE_XS));
 }
 
-pub(super) fn build_inline_pill_cell<'a, L, Params, P, FMap>(
+#[allow(clippy::too_many_arguments)]
+pub fn build_flex_knob_cell_mod_dim<L, Params, DimParams, P, FMap, FDim>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    accent_rgb: (u8, u8, u8),
+    knob_sz: f32,
+    dest: ModDestination,
+    mod_ui: Arc<dyn ModUiHost>,
+    tab_tag: u8,
+    dim_params: Arc<DimParams>,
+    dim_check: FDim,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    DimParams: Send + Sync + 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+    FDim: Fn(&DimParams) -> bool + Send + Sync + 'static,
+{
+    VStack::new(cx, move |cx| {
+        bold_label(cx, title, "knob-title")
+            .width(Stretch(1.0))
+            .height(Pixels(tokens::KNOB_TITLE_H))
+            .child_space(Stretch(1.0));
+
+        RotaryKnob::new_with_mod(
+            cx,
+            params,
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            dest,
+            mod_ui,
+            tab_tag,
+        )
+        .enabled_by(dim_params, dim_check)
+        .width(Pixels(knob_sz))
+        .height(Pixels(knob_sz))
+        .left(Stretch(1.0))
+        .right(Stretch(1.0));
+    })
+    .class("knob-cell")
+    .width(Stretch(1.0))
+    .height(Auto)
+    .row_between(Pixels(tokens::SPACE_XS));
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_flex_knob_cell_mod_dim_tooltip<L, Params, DimParams, P, FMap, FDim, FTt>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    accent_rgb: (u8, u8, u8),
+    knob_sz: f32,
+    dest: ModDestination,
+    mod_ui: Arc<dyn ModUiHost>,
+    tab_tag: u8,
+    dim_params: Arc<DimParams>,
+    dim_check: FDim,
+    tooltip_fmt: FTt,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    DimParams: Send + Sync + 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+    FDim: Fn(&DimParams) -> bool + Send + Sync + 'static,
+    FTt: Fn(&DimParams) -> String + Send + Sync + 'static,
+{
+    VStack::new(cx, move |cx| {
+        bold_label(cx, title, "knob-title")
+            .width(Stretch(1.0))
+            .height(Pixels(tokens::KNOB_TITLE_H))
+            .child_space(Stretch(1.0));
+
+        RotaryKnob::new_with_mod(
+            cx,
+            params,
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            dest,
+            mod_ui,
+            tab_tag,
+        )
+        .enabled_by(dim_params.clone(), dim_check)
+        .disabled_tooltip(dim_params, tooltip_fmt)
+        .width(Pixels(knob_sz))
+        .height(Pixels(knob_sz))
+        .left(Stretch(1.0))
+        .right(Stretch(1.0));
+    })
+    .class("knob-cell")
+    .width(Stretch(1.0))
+    .height(Auto)
+    .row_between(Pixels(tokens::SPACE_XS));
+}
+
+pub fn build_inline_pill_cell<'a, L, Params, P, FMap>(
     cx: &'a mut Context,
     params: L,
     params_to_param: FMap,
@@ -462,11 +406,11 @@ where
 {
     ParamStepPill::new_inline(cx, params, params_to_param, num_steps, title)
         .width(Stretch(weight))
-        .height(Pixels(20.0))
+        .height(Pixels(tokens::CONTROL_H))
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_inline_pill_cell_mod<'a, L, Params, P, FMap>(
+pub fn build_inline_pill_cell_mod<'a, L, Params, P, FMap>(
     cx: &'a mut Context,
     params: L,
     params_to_param: FMap,
@@ -474,7 +418,7 @@ pub(super) fn build_inline_pill_cell_mod<'a, L, Params, P, FMap>(
     num_steps: usize,
     weight: f32,
     dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
+    mod_ui: Arc<dyn ModUiHost>,
     tab_tag: u8,
 ) -> Handle<'a, ParamStepPill>
 where
@@ -483,12 +427,21 @@ where
     P: Param + 'static,
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
-    ParamStepPill::new_inline_with_mod(cx, params, params_to_param, num_steps, title, dest, mod_ui, tab_tag)
-        .width(Stretch(weight))
-        .height(Pixels(20.0))
+    ParamStepPill::new_inline_with_mod(
+        cx,
+        params,
+        params_to_param,
+        num_steps,
+        title,
+        dest,
+        mod_ui,
+        tab_tag,
+    )
+    .width(Stretch(weight))
+    .height(Pixels(tokens::CONTROL_H))
 }
 
-pub(super) fn build_mini_pill_cell<L, Params, P, FMap>(
+pub fn build_mini_pill_cell<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
@@ -515,10 +468,10 @@ pub(super) fn build_mini_pill_cell<L, Params, P, FMap>(
     .height(Auto)
     .top(Stretch(1.0))
     .bottom(Stretch(1.0))
-    .row_between(Pixels(2.0));
+    .row_between(Pixels(tokens::SPACE_XS));
 }
 
-pub(super) fn build_flex_pill_cell<L, Params, P, FMap>(
+pub fn build_flex_pill_cell<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
@@ -533,12 +486,12 @@ pub(super) fn build_flex_pill_cell<L, Params, P, FMap>(
     VStack::new(cx, move |cx| {
         bold_label(cx, title, "mini-label")
             .width(Stretch(1.0))
-            .height(Pixels(12.0))
+            .height(Pixels(tokens::KNOB_TITLE_COMPACT_H))
             .child_space(Stretch(1.0));
 
         ParamStepPill::new(cx, params, params_to_param, num_steps)
             .width(Stretch(1.0))
-            .height(Pixels(17.0));
+            .height(Pixels(tokens::READOUT_H));
     })
     .width(Stretch(1.0))
     .height(Auto)
@@ -546,13 +499,13 @@ pub(super) fn build_flex_pill_cell<L, Params, P, FMap>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_pitch_tuning_group<'a, L, Params, P, FMap>(
+pub fn build_pitch_tuning_group<'a, L, Params, P, FMap>(
     cx: &'a mut Context,
     osc_idx: usize,
     params: L,
     params_to_param: FMap,
     dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
+    mod_ui: Arc<dyn ModUiHost>,
     tab_tag: u8,
 ) -> Handle<'a, ZStack>
 where
@@ -580,7 +533,7 @@ where
                 .height(Stretch(1.0));
             }
         })
-        .col_between(Pixels(super::tokens::SPACE_XS))
+        .col_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
         .height(Stretch(1.0));
 
@@ -596,7 +549,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_ratio_tuning_row<'a, L, Params, PR, PH, FMapR, FMapH>(
+pub fn build_ratio_tuning_row<'a, L, Params, PR, PH, FMapR, FMapH>(
     cx: &'a mut Context,
     osc_idx: usize,
     params: L,
@@ -604,7 +557,7 @@ pub(super) fn build_ratio_tuning_row<'a, L, Params, PR, PH, FMapR, FMapH>(
     hz_map: FMapH,
     ratio_dest: ModDestination,
     hz_dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
+    mod_ui: Arc<dyn ModUiHost>,
     tab_tag: u8,
 ) -> Handle<'a, HStack>
 where
@@ -641,40 +594,16 @@ where
         .width(Stretch(1.0))
         .height(Stretch(1.0));
     })
-    .col_between(Pixels(super::tokens::SPACE_XS))
+    .col_between(Pixels(tokens::SPACE_XS))
     .width(Stretch(1.0))
     .height(Stretch(1.0))
 }
 
-pub(super) fn build_module_header(cx: &mut Context, title: &'static str, height_px: f32) {
+pub fn build_module_header(cx: &mut Context, title: &'static str, height_px: f32) {
     HStack::new(cx, move |cx| {
         bold_label(cx, title, "module-title");
     })
     .class("module-header")
     .height(Pixels(height_px))
     .width(Stretch(1.0));
-}
-
-pub(super) fn build_center_tab_button(
-    cx: &mut Context,
-    tab: CenterStageTab,
-    title: &'static str,
-    width_weight: f32,
-) {
-    Button::new(
-        cx,
-        move |cx| match tab {
-            CenterStageTab::Mod(sub) => {
-                cx.emit(UiEvent::SelectTab(BottomTab::ModSeq));
-                cx.emit(UiEvent::SelectModSeqSubTab(sub));
-            }
-            CenterStageTab::Voice => cx.emit(UiEvent::SelectTab(BottomTab::VoiceEnv)),
-            CenterStageTab::Routing => cx.emit(UiEvent::SelectTab(BottomTab::Routing)),
-        },
-        move |cx| bold_label(cx, title, "tab-btn-label").hoverable(false),
-    )
-    .class("tab-btn")
-    .checked(UiData::center_tab.map(move |t| *t == tab))
-    .width(Stretch(width_weight))
-    .height(Stretch(1.0));
 }

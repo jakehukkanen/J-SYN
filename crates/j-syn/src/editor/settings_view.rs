@@ -14,7 +14,7 @@ use super::controls::{
     bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_module_header,
 };
 use super::widgets::LedToggleSwitch;
-use super::{UiData, UiEvent, AMBER_RGB, CORAL_RGB, GOLD_RGB};
+use super::{UiData, UiEvent, UiKitEvent, UiShellState, AMBER_RGB, CORAL_RGB, GOLD_RGB};
 
 const GEAR_MIN: f32 = 0.10;
 const GEAR_MAX: f32 = 0.60;
@@ -163,7 +163,7 @@ pub(super) fn build_settings_view(
                         cx,
                         |cx| {
                             HStack::new(cx, |cx| {
-                                build_dropdown_trigger_labels(cx, UiData::theme_name);
+                                build_dropdown_trigger_labels(cx, UiShellState::theme_name);
                             })
                             .width(Stretch(1.0))
                             .height(Stretch(1.0))
@@ -172,12 +172,12 @@ pub(super) fn build_settings_view(
                             .overflow(Overflow::Hidden)
                         },
                         |cx| {
-                            Binding::new(cx, UiData::themes_rev, |cx, _| {
+                            Binding::new(cx, UiShellState::themes_rev, |cx, _| {
                                 for theme in super::theme::load_all_themes() {
                                     let name = theme.name.clone();
                                     bold_label(cx, &theme.name, "dropdown-item").on_press(
                                         move |cx| {
-                                            cx.emit(UiEvent::SelectTheme(name.clone()));
+                                            cx.emit(UiKitEvent::SelectTheme(name.clone()));
                                             cx.emit(PopupEvent::Close);
                                         },
                                     );

@@ -5,7 +5,9 @@ use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::util::ModifiersExt;
 use nih_plug_vizia::widgets::RawParamEvent;
 
-use crate::editor::controls::bold_label;
+use crate::controls::bold_label;
+use crate::shell::UiKitEvent;
+use crate::theme;
 
 /// Skeuomorphic illuminated hardware push-button / LED switch.
 pub struct LedToggleSwitch {
@@ -22,8 +24,7 @@ impl LedToggleSwitch {
         params_to_param: FMap,
         off_label: &'static str,
         on_label: &'static str,
-        #[allow(dead_code)]
-    accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
     ) -> Handle<'a, Self>
     where
         L: Lens<Target = Params> + Clone,
@@ -38,17 +39,13 @@ impl LedToggleSwitch {
             hovered: false,
         }
         .build(cx, move |cx| {
-            let text_lens = ParamWidgetBase::make_lens(
-                text_params,
-                params_to_param,
-                move |param| {
-                    if param.modulated_normalized_value() >= 0.5 {
-                        on_label
-                    } else {
-                        off_label
-                    }
-                },
-            );
+            let text_lens = ParamWidgetBase::make_lens(text_params, params_to_param, move |param| {
+                if param.modulated_normalized_value() >= 0.5 {
+                    on_label
+                } else {
+                    off_label
+                }
+            });
             HStack::new(cx, move |cx| {
                 Element::new(cx)
                     .width(Pixels(9.0))
@@ -117,11 +114,11 @@ impl View for LedToggleSwitch {
                     self.param_base.begin_set_parameter(cx);
                     self.param_base.set_normalized_value(cx, def);
                     self.param_base.end_set_parameter(cx);
-                    cx.emit(crate::editor::UiEvent::ModUiChanged);
+                    cx.emit(UiKitEvent::ModUiChanged);
                     cx.needs_redraw();
                 } else {
                     self.toggle(cx);
-                    cx.emit(crate::editor::UiEvent::ModUiChanged);
+                    cx.emit(UiKitEvent::ModUiChanged);
                 }
                 meta.consume();
             }
@@ -136,7 +133,7 @@ impl View for LedToggleSwitch {
         }
 
         let dpx = cx.scale_factor();
-        let pal = crate::editor::theme::current_palette(cx);
+        let pal = theme::current_palette(cx);
         let is_on = self.param_base.modulated_normalized_value() >= 0.5;
         let (ar, ag, ab) = pal.accent_rgb();
 
@@ -145,16 +142,16 @@ impl View for LedToggleSwitch {
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, r);
 
         let housing_color = if self.hovered {
-            crate::editor::theme::vg_color(&pal.surface_hover, 255)
+            theme::vg_color(&pal.surface_hover, 255)
         } else {
-            crate::editor::theme::vg_color(&pal.surface_mid, 255)
+            theme::vg_color(&pal.surface_mid, 255)
         };
         canvas.fill_path(&bg, &vg::Paint::color(housing_color));
 
         let mut border = vg::Paint::color(if self.hovered {
-            crate::editor::theme::vg_color(&pal.accent_primary, 255)
+            theme::vg_color(&pal.accent_primary, 255)
         } else {
-            crate::editor::theme::vg_color(&pal.border_dark, 255)
+            theme::vg_color(&pal.border_dark, 255)
         });
         border.set_line_width(1.0 * dpx);
         canvas.stroke_path(&bg, &border);
@@ -182,9 +179,8 @@ impl View for LedToggleSwitch {
         let lamp_color = if is_on {
             vg::Color::rgb(ar, ag, ab)
         } else {
-            crate::editor::theme::vg_color(&pal.border_dark, 255)
+            theme::vg_color(&pal.border_dark, 255)
         };
         canvas.fill_path(&lamp, &vg::Paint::color(lamp_color));
     }
 }
-

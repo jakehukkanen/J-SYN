@@ -6,4 +6,5 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+cargo_metadata = "0.18"
 nih_plug_xtask = { git = "https://github.com/robbert-vdh/nih-plug.git" }

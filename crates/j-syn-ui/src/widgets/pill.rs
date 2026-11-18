@@ -8,9 +8,10 @@ use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::util::ModifiersExt;
 use nih_plug_vizia::widgets::RawParamEvent;
 
-use crate::editor::controls::bold_label;
-use crate::editor::mod_bar::ModUiState;
-use crate::editor::UiEvent;
+use crate::controls::bold_label;
+use crate::shell::{ModUiHost, UiKitEvent};
+use crate::theme;
+
 use super::{
     emit_widget_tooltip, format_mod_range_tooltip, handle_mod_depth_move,
     update_mod_collar_cursor, ModDepthDrag, ModTargetBinding,
@@ -114,7 +115,7 @@ impl ParamStepPill {
         num_steps: usize,
         label: &'static str,
         dest: ModDestination,
-        mod_ui: Arc<ModUiState>,
+        mod_ui: Arc<dyn ModUiHost>,
         tab_tag: u8,
     ) -> Handle<'a, Self>
     where
@@ -163,7 +164,7 @@ impl ParamStepPill {
         num_steps: usize,
         label: &'static str,
         dest: ModDestination,
-        mod_ui: Arc<ModUiState>,
+        mod_ui: Arc<dyn ModUiHost>,
         tab_tag: u8,
     ) -> Handle<'a, Self>
     where
@@ -226,7 +227,7 @@ impl ParamStepPill {
         self.param_base.begin_set_parameter(cx);
         self.param_base.set_normalized_value(cx, def);
         self.param_base.end_set_parameter(cx);
-        cx.emit(UiEvent::ModUiChanged);
+        cx.emit(UiKitEvent::ModUiChanged);
         if self.hovered {
             self.emit_tooltip(cx);
         }
@@ -336,7 +337,7 @@ impl View for ParamStepPill {
             WindowEvent::MouseOut => {
                 self.hovered = false;
                 if !self.drag_active && self.mod_depth_drag.is_none() {
-                    cx.emit(UiEvent::HideTooltip);
+                    cx.emit(UiKitEvent::HideTooltip);
                 }
             }
             WindowEvent::MouseDoubleClick(MouseButton::Left) if !self.click_cycles => {
@@ -357,7 +358,7 @@ impl View for ParamStepPill {
                             mb.mod_ui.focus_slot(mb.dest, slot_idx);
                             cx.capture();
                             update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
-                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             self.emit_tooltip(cx);
                             cx.needs_redraw();
                             meta.consume();
@@ -383,7 +384,7 @@ impl View for ParamStepPill {
                 if let Some(ref mb) = self.mod_binding {
                     if cx.modifiers().shift() {
                         if mb.mod_ui.remove_primary_slot_for_dest(mb.dest) {
-                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             cx.needs_redraw();
                             meta.consume();
                             return;
@@ -391,7 +392,7 @@ impl View for ParamStepPill {
                     } else if self.right_click_opens_menu {
                         let bounds = cx.bounds();
                         let scale = cx.scale_factor().max(0.01);
-                        cx.emit(UiEvent::ShowActionModContextMenu(
+                        cx.emit(UiKitEvent::ShowActionModContextMenu(
                             mb.dest,
                             bounds.x / scale,
                             (bounds.y + bounds.h + 4.0) / scale,
@@ -407,7 +408,7 @@ impl View for ParamStepPill {
                         if mb.mod_ui.has_slots_for_dest(mb.dest) {
                             let bounds = cx.bounds();
                             let scale = cx.scale_factor().max(0.01);
-                            cx.emit(UiEvent::ShowModContextMenu(
+                            cx.emit(UiKitEvent::ShowModContextMenu(
                                 mb.dest,
                                 bounds.x / scale,
                                 (bounds.y + bounds.h + 4.0) / scale,
@@ -431,7 +432,7 @@ impl View for ParamStepPill {
                 self.param_base
                     .set_normalized_value(cx, (prev_idx as f32) * step);
                 self.param_base.end_set_parameter(cx);
-                cx.emit(UiEvent::ModUiChanged);
+                cx.emit(UiKitEvent::ModUiChanged);
                 meta.consume();
             }
             WindowEvent::MouseUp(MouseButton::Left) => {
@@ -442,13 +443,12 @@ impl View for ParamStepPill {
                     if self.hovered {
                         self.emit_tooltip(cx);
                     } else {
-                        cx.emit(UiEvent::HideTooltip);
+                        cx.emit(UiKitEvent::HideTooltip);
                     }
                     cx.needs_redraw();
                     meta.consume();
                 } else if self.drag_active {
                     if self.click_cycles && !self.drag_moved {
-                        // Treat as click: cycle cleanly to next discrete step
                         let step = 1.0 / (self.num_steps - 1) as f32;
                         let cur_idx =
                             (self.start_val * (self.num_steps - 1) as f32).round() as usize;
@@ -463,9 +463,9 @@ impl View for ParamStepPill {
                     if self.hovered {
                         self.emit_tooltip(cx);
                     } else {
-                        cx.emit(UiEvent::HideTooltip);
+                        cx.emit(UiKitEvent::HideTooltip);
                     }
-                    cx.emit(UiEvent::ModUiChanged);
+                    cx.emit(UiKitEvent::ModUiChanged);
                     meta.consume();
                 }
             }
@@ -491,7 +491,7 @@ impl View for ParamStepPill {
                             self.start_val = new_val;
                         }
                         self.emit_tooltip(cx);
-                        cx.emit(UiEvent::ModUiChanged);
+                        cx.emit(UiKitEvent::ModUiChanged);
                     }
                     meta.consume();
                 }
@@ -511,7 +511,7 @@ impl View for ParamStepPill {
                 if self.hovered || self.drag_active {
                     self.emit_tooltip(cx);
                 }
-                cx.emit(UiEvent::ModUiChanged);
+                cx.emit(UiKitEvent::ModUiChanged);
                 meta.consume();
             }
             _ => {}
@@ -559,10 +559,11 @@ fn draw_mod_overlay(
     }
     mb.mod_ui.register_drop_rect(mb.dest, mb.tab_tag, bounds);
     let dpx = cx.scale_factor();
+    let pal = theme::current_palette(cx);
 
     let drag_src = mb.mod_ui.dragging_source();
     if drag_src != ModMatrixSource::None {
-        let (sr, sg, sb) = drag_src.color_rgb();
+        let (sr, sg, sb) = theme::mod_source_rgb(&pal, drag_src);
         let is_hover = mb.mod_ui.is_drop_target(mb.dest);
         let mut hl = vg::Path::new();
         hl.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 3.0 * dpx);
@@ -588,9 +589,9 @@ fn draw_mod_overlay(
 
     for slot in slots.iter().take(count) {
         let (sr, sg, sb) = if slot.bypassed {
-            (110, 100, 92)
+            theme::hex_to_rgb(&pal.text_dim)
         } else {
-            slot.source.color_rgb()
+            theme::mod_source_rgb(&pal, slot.source)
         };
         let alpha = if slot.bypassed { 75 } else { 225 };
         let (lo, hi) = if slot.bipolar {
@@ -602,15 +603,21 @@ fn draw_mod_overlay(
         };
         if hi - lo > 0.005 {
             let mut seg = vg::Path::new();
-            seg.rounded_rect(bar_x + lo * bar_w, bar_y, (hi - lo) * bar_w, bar_h, 1.0 * dpx);
+            seg.rounded_rect(
+                bar_x + lo * bar_w,
+                bar_y,
+                (hi - lo) * bar_w,
+                bar_h,
+                1.0 * dpx,
+            );
             canvas.fill_path(&seg, &vg::Paint::color(vg::Color::rgba(sr, sg, sb, alpha)));
         }
     }
 
-    let live_norm = (base_norm + mb.mod_ui.telemetry.dest_offset(mb.dest)).clamp(0.0, 1.0);
+    let live_norm = (base_norm + mb.mod_ui.dest_offset(mb.dest)).clamp(0.0, 1.0);
     let mut tick = vg::Path::new();
     tick.circle(bar_x + live_norm * bar_w, bar_y + bar_h * 0.5, 1.8 * dpx);
-    canvas.fill_path(&tick, &vg::Paint::color(vg::Color::rgb(255, 248, 232)));
+    canvas.fill_path(&tick, &vg::Paint::color(theme::vg_color(&pal.text_bright, 255)));
 }
 
 /// Hover-passthrough `ZStack` overlay over `[OCT | SEMI | FINE]` that owns the unified
@@ -626,7 +633,7 @@ impl PitchGroupModOverlay {
         params: L,
         params_to_param: FMap,
         dest: ModDestination,
-        mod_ui: Arc<ModUiState>,
+        mod_ui: Arc<dyn ModUiHost>,
         tab_tag: u8,
     ) -> Handle<'a, Self>
     where
@@ -691,7 +698,7 @@ impl PitchDragBox {
         params: L,
         params_to_param: FMap,
         dest: ModDestination,
-        mod_ui: Arc<ModUiState>,
+        mod_ui: Arc<dyn ModUiHost>,
         tab_tag: u8,
     ) -> Handle<'a, Self>
     where
@@ -844,7 +851,7 @@ impl View for PitchDragBox {
             WindowEvent::MouseOut => {
                 self.hovered = false;
                 if !self.drag_active && self.mod_depth_drag.is_none() {
-                    cx.emit(UiEvent::HideTooltip);
+                    cx.emit(UiKitEvent::HideTooltip);
                 }
             }
             WindowEvent::MouseDoubleClick(MouseButton::Left) => {
@@ -864,7 +871,7 @@ impl View for PitchDragBox {
                             mb.mod_ui.focus_slot(mb.dest, slot_idx);
                             cx.capture();
                             update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
-                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             self.emit_tooltip(cx);
                             cx.needs_redraw();
                             meta.consume();
@@ -892,7 +899,7 @@ impl View for PitchDragBox {
                 if let Some(ref mb) = self.mod_binding {
                     if cx.modifiers().shift() {
                         if mb.mod_ui.remove_primary_slot_for_dest(mb.dest) {
-                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             cx.needs_redraw();
                             meta.consume();
                             return;
@@ -900,7 +907,7 @@ impl View for PitchDragBox {
                     } else if let Some(osc_idx) = self.osc_pitch_idx {
                         let bounds = cx.bounds();
                         let scale = cx.scale_factor().max(0.01);
-                        cx.emit(UiEvent::ShowPitchContextMenu(
+                        cx.emit(UiKitEvent::ShowPitchContextMenu(
                             osc_idx,
                             mb.dest,
                             bounds.x / scale,
@@ -912,7 +919,7 @@ impl View for PitchDragBox {
                     } else if mb.mod_ui.has_slots_for_dest(mb.dest) {
                         let bounds = cx.bounds();
                         let scale = cx.scale_factor().max(0.01);
-                        cx.emit(UiEvent::ShowModContextMenu(
+                        cx.emit(UiKitEvent::ShowModContextMenu(
                             mb.dest,
                             bounds.x / scale,
                             (bounds.y + bounds.h + 4.0) / scale,
@@ -933,7 +940,7 @@ impl View for PitchDragBox {
                     if self.hovered {
                         self.emit_tooltip(cx);
                     } else {
-                        cx.emit(UiEvent::HideTooltip);
+                        cx.emit(UiKitEvent::HideTooltip);
                     }
                     cx.needs_redraw();
                     meta.consume();
@@ -944,7 +951,7 @@ impl View for PitchDragBox {
                     if self.hovered {
                         self.emit_tooltip(cx);
                     } else {
-                        cx.emit(UiEvent::HideTooltip);
+                        cx.emit(UiKitEvent::HideTooltip);
                     }
                     cx.needs_redraw();
                     meta.consume();
@@ -997,8 +1004,15 @@ impl View for PitchDragBox {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        draw_pill_with_mod_bar(cx, canvas, &self.param_base, &self.mod_binding_none());
+    }
+}
+
+impl PitchDragBox {
+    #[inline]
+    fn mod_binding_none(&self) -> Option<ModTargetBinding> {
         // Modulation drop rect and spanning bar are rendered by enclosing `PitchGroupModOverlay`.
-        draw_pill_with_mod_bar(cx, canvas, &self.param_base, &None);
+        None
     }
 }
 

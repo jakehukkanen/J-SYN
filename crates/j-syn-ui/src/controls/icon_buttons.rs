@@ -1,12 +1,12 @@
-//! Self-contained vector icon buttons and carets (`ArrowButton`, `CrossButton`, `VectorArrow`).
+//! Self-contained vector icon buttons and carets (`ArrowButton`, `CrossButton`, `VectorArrow`, `CheckIcon`).
 
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 
-use super::super::theme;
+use crate::theme;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ArrowDir {
+pub enum ArrowDir {
     Left,
     Right,
     Up,
@@ -15,7 +15,6 @@ pub(crate) enum ArrowDir {
 
 #[inline]
 fn resolve_glyph_color(cx: &DrawContext) -> vg::Color {
-    use nih_plug_vizia::vizia::vg;
     let fc = cx.font_color();
     if fc.a() == 0 {
         let pal = theme::current_palette(cx);
@@ -26,8 +25,6 @@ fn resolve_glyph_color(cx: &DrawContext) -> vg::Color {
 }
 
 fn paint_button_box(cx: &DrawContext, canvas: &mut Canvas) {
-    use nih_plug_vizia::vizia::vg;
-
     let b = cx.bounds();
     let dpx = cx.scale_factor();
     let rad = cx.border_top_left_radius().max(0.0);
@@ -66,8 +63,6 @@ fn draw_triangle_glyph(
     dir: ArrowDir,
     fixed_size_px: Option<f32>,
 ) {
-    use nih_plug_vizia::vizia::vg;
-
     let b = cx.bounds();
     if b.w <= 1.0 || b.h <= 1.0 {
         return;
@@ -145,17 +140,13 @@ fn handle_icon_button_event(
 
 /// Self-contained arrow button drawing both its rounded border/background and centered triangle
 /// from the exact same `cx.bounds()` rect in one pass.
-pub(crate) struct ArrowButton {
+pub struct ArrowButton {
     action: Option<Box<dyn Fn(&mut EventContext)>>,
     dir_fn: Box<dyn Fn(&mut DrawContext) -> ArrowDir>,
 }
 
 impl ArrowButton {
-    pub(crate) fn new<'a, A>(
-        cx: &'a mut Context,
-        action: A,
-        dir: ArrowDir,
-    ) -> Handle<'a, Self>
+    pub fn new<'a, A>(cx: &'a mut Context, action: A, dir: ArrowDir) -> Handle<'a, Self>
     where
         A: 'static + Fn(&mut EventContext),
     {
@@ -170,7 +161,7 @@ impl ArrowButton {
         .navigable(true)
     }
 
-    pub(crate) fn reactive<'a, A, L, F>(
+    pub fn reactive<'a, A, L, F>(
         cx: &'a mut Context,
         action: A,
         lens: L,
@@ -216,12 +207,12 @@ impl View for ArrowButton {
 }
 
 /// Self-contained close (`×`) button drawing both its rounded box and centered cross in one pass.
-pub(crate) struct CrossButton {
+pub struct CrossButton {
     action: Option<Box<dyn Fn(&mut EventContext)>>,
 }
 
 impl CrossButton {
-    pub(crate) fn new<'a, A>(cx: &'a mut Context, action: A) -> Handle<'a, Self>
+    pub fn new<'a, A>(cx: &'a mut Context, action: A) -> Handle<'a, Self>
     where
         A: 'static + Fn(&mut EventContext),
     {
@@ -246,8 +237,6 @@ impl View for CrossButton {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        use nih_plug_vizia::vizia::vg;
-
         let b = cx.bounds();
         if b.w <= 1.0 || b.h <= 1.0 {
             return;
@@ -270,12 +259,12 @@ impl View for CrossButton {
 }
 
 /// Compact triangle caret view for dropdown triggers and folder disclosure rows.
-pub(crate) struct VectorArrow {
+pub struct VectorArrow {
     dir: ArrowDir,
 }
 
 impl VectorArrow {
-    pub(crate) fn caret<'a>(
+    pub fn caret<'a>(
         cx: &'a mut Context,
         dir: ArrowDir,
         class_name: &str,
@@ -298,10 +287,10 @@ impl View for VectorArrow {
 }
 
 /// Crisp centered vector checkmark used for active menu/mode toggles across all platforms.
-pub(crate) struct CheckIcon;
+pub struct CheckIcon;
 
 impl CheckIcon {
-    pub(crate) fn new<'a>(cx: &'a mut Context) -> Handle<'a, Self> {
+    pub fn new<'a>(cx: &'a mut Context) -> Handle<'a, Self> {
         Self.build(cx, |_| {}).hoverable(false)
     }
 }
@@ -312,8 +301,6 @@ impl View for CheckIcon {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        use nih_plug_vizia::vizia::vg;
-
         let b = cx.bounds();
         if b.w <= 1.0 || b.h <= 1.0 {
             return;

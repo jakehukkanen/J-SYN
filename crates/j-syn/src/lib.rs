@@ -8,7 +8,7 @@ use j_syn_dsp::{
 };
 use nih_plug::prelude::*;
 
-mod editor;
+pub mod editor;
 mod params;
 mod presets;
 
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn theme_css_parses_cleanly() {
-        let css = include_str!("theme.css");
+        let css = j_syn_ui::theme::BASE_THEME_CSS;
         assert!(
             !css.contains(":focus-within"),
             "Vizia's CSS parser does not support :focus-within"

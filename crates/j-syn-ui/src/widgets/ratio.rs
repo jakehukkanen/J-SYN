@@ -1,4 +1,4 @@
-//! FM8-style split-zone `RatioDragBox` (`0.000..=32.000 ×`): left half steps whole/sub-harmonic
+//! Split-zone `RatioDragBox` (`0.000..=32.000 ×`): left half steps whole/sub-harmonic
 //! ratios (`0, 0.25, 0.5, 1..=32`), right half adjusts fine fractional ratios (`0.10`, or `0.01`/`0.001`).
 
 use std::sync::Arc;
@@ -11,10 +11,9 @@ use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::util::ModifiersExt;
 use nih_plug_vizia::widgets::RawParamEvent;
 
-use crate::editor::controls::bold_label;
-use crate::editor::mod_bar::ModUiState;
-use crate::editor::theme;
-use crate::editor::UiEvent;
+use crate::controls::bold_label;
+use crate::shell::{ModUiHost, UiKitEvent};
+use crate::theme;
 
 use super::pill::draw_pill_with_mod_bar;
 use super::{
@@ -54,7 +53,7 @@ impl RatioDragBox {
         params: L,
         params_to_param: FMap,
         dest: ModDestination,
-        mod_ui: Arc<ModUiState>,
+        mod_ui: Arc<dyn ModUiHost>,
         tab_tag: u8,
     ) -> Handle<'a, Self>
     where
@@ -218,7 +217,7 @@ impl View for RatioDragBox {
             WindowEvent::MouseOut => {
                 self.hovered = false;
                 if !self.drag_active && self.mod_depth_drag.is_none() {
-                    cx.emit(UiEvent::HideTooltip);
+                    cx.emit(UiKitEvent::HideTooltip);
                 }
                 cx.needs_redraw();
             }
@@ -239,7 +238,7 @@ impl View for RatioDragBox {
                             mb.mod_ui.focus_slot(mb.dest, slot_idx);
                             cx.capture();
                             update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
-                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             self.emit_tooltip(cx);
                             cx.needs_redraw();
                             meta.consume();
@@ -269,7 +268,7 @@ impl View for RatioDragBox {
                 if let Some(ref mb) = self.mod_binding {
                     if cx.modifiers().shift() {
                         if mb.mod_ui.remove_primary_slot_for_dest(mb.dest) {
-                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             cx.needs_redraw();
                             meta.consume();
                             return;
@@ -277,7 +276,7 @@ impl View for RatioDragBox {
                     }
                     let bounds = cx.bounds();
                     let scale = cx.scale_factor().max(0.01);
-                    cx.emit(UiEvent::ShowPitchContextMenu(
+                    cx.emit(UiKitEvent::ShowPitchContextMenu(
                         self.osc_idx,
                         mb.dest,
                         bounds.x / scale,
@@ -298,7 +297,7 @@ impl View for RatioDragBox {
                     if self.hovered {
                         self.emit_tooltip(cx);
                     } else {
-                        cx.emit(UiEvent::HideTooltip);
+                        cx.emit(UiKitEvent::HideTooltip);
                     }
                     cx.needs_redraw();
                     meta.consume();
@@ -309,7 +308,7 @@ impl View for RatioDragBox {
                     if self.hovered {
                         self.emit_tooltip(cx);
                     } else {
-                        cx.emit(UiEvent::HideTooltip);
+                        cx.emit(UiKitEvent::HideTooltip);
                     }
                     cx.needs_redraw();
                     meta.consume();

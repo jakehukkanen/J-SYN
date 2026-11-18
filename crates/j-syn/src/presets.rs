@@ -51,8 +51,9 @@ impl Default for JSynConfig {
 }
 
 impl JSynConfig {
+    #[allow(dead_code)]
     pub fn themes_dir() -> Option<PathBuf> {
-        Self::config_file_path().and_then(|p| p.parent().map(|d| d.join("themes")))
+        j_syn_ui::theme::themes_dir()
     }
     pub fn config_file_path() -> Option<PathBuf> {
         #[cfg(target_os = "macos")]
@@ -119,38 +120,7 @@ fn write_text_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     std::fs::write(path, content)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DirectoryFileEntry {
-    pub name: String,
-    pub path: PathBuf,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DirectoryFolder {
-    /// Immediate folder name (e.g. `"Analog"` or `"Bass"`).
-    pub name: String,
-    /// Relative folder path from the configured root (e.g. `"Bass/Reese"`).
-    pub rel_path: String,
-    pub files: Vec<DirectoryFileEntry>,
-    pub subfolders: Vec<DirectoryFolder>,
-}
-
-impl DirectoryFolder {
-    pub fn total_file_count(&self) -> usize {
-        self.files.len()
-            + self
-                .subfolders
-                .iter()
-                .map(Self::total_file_count)
-                .sum::<usize>()
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DirectoryTree {
-    pub root_files: Vec<DirectoryFileEntry>,
-    pub folders: Vec<DirectoryFolder>,
-}
+pub use j_syn_ui::controls::{DirectoryFileEntry, DirectoryFolder, DirectoryTree};
 
 fn is_hidden_name(path: &std::path::Path) -> bool {
     path.file_name()

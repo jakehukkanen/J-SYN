@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
     "crates/j-syn-dsp",
+    "crates/j-syn-ui",
     "crates/j-syn",
+    "crates/plugins/j-utility",
     "xtask",
 ]
 
