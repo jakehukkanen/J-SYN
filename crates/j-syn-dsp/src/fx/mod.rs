@@ -24,7 +24,7 @@ use crate::waveshaper::DistortionMode;
 use self::diopser::DiopserStereo;
 use self::dynamics::{DistortionStereo, JSatClipperStereo, OttStereo};
 use self::limiter::LimiterStereo;
-use self::modulation::{ChorusStereo, DelayStereo, PhaserStereo, ReverbStereo};
+use self::modulation::{ChorusStereo, DelayStereo, FlangerStereo, PhaserStereo, ReverbStereo};
 use self::multiband_dist::MultiBandDistStereo;
 use self::tube_resonator::TubeResonatorStereo;
 use self::utility::UtilityStereo;
@@ -36,7 +36,8 @@ pub use self::limiter::{
     limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms,
 };
 pub use self::modulation::{
-    fx_high_cut_hz, fx_low_cut_hz, DELAY_SYNC_LABELS,
+    evaluate_flanger_scope_response, flanger_delay_ms, flanger_feedback, flanger_phase_deg,
+    flanger_rate_hz, fx_high_cut_hz, fx_low_cut_hz, DELAY_SYNC_LABELS,
 };
 pub use self::multiband_dist::{
     mb_band_level_db, mb_band_magnitude_at_hz, mb_ordered_xover_hz, mb_out_gain_db,
@@ -76,10 +77,11 @@ pub enum FxType {
     Utility = 11,
     Limiter = 12,
     MultibandDist = 13,
+    Flanger = 14,
 }
 
 impl FxType {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Off,
         Self::Ott,
         Self::Distortion,
@@ -94,6 +96,7 @@ impl FxType {
         Self::Utility,
         Self::Limiter,
         Self::MultibandDist,
+        Self::Flanger,
     ];
 
     #[inline]
@@ -112,6 +115,7 @@ impl FxType {
             11 => Self::Utility,
             12 => Self::Limiter,
             13 => Self::MultibandDist,
+            14 => Self::Flanger,
             _ => Self::Off,
         }
     }
@@ -132,6 +136,7 @@ impl FxType {
             Self::Utility => "Utility",
             Self::Limiter => "Limiter",
             Self::MultibandDist => "MB Dist",
+            Self::Flanger => "Flanger",
         }
     }
 
@@ -151,6 +156,7 @@ impl FxType {
             Self::Utility => "UTIL",
             Self::Limiter => "LIM",
             Self::MultibandDist => "MBDST",
+            Self::Flanger => "FLANG",
         }
     }
 
@@ -158,6 +164,7 @@ impl FxType {
     pub const fn subtab_label(self) -> Option<&'static str> {
         match self {
             Self::Chorus | Self::Delay | Self::Reverb => Some("EQ"),
+            Self::Flanger => Some("MOD"),
             Self::TubeResonator => Some("LFO"),
             Self::Limiter => Some("ADV"),
             _ => None,
@@ -293,10 +300,12 @@ impl FxSlotParams {
             FxType::Limiter => [0.00, 17.9 / 18.0, 0.50, 1.00],
             // MultibandDist: Low Xov 200 Hz (0.50), High Xov ~2.5 kHz, Out Gain 0 dB (0.50), Mix 100%
             FxType::MultibandDist => [MB_XOVER_LOW_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, 0.50, 1.00],
+            // Flanger: Rate ~0.20 Hz (0.35), Depth 65%, Manual Delay ~0.95 ms (0.45), Mix 100%
+            FxType::Flanger => [0.35, 0.65, 0.45, 1.00],
         }
     }
 
-    /// Default normalized secondary `[P5, P6, P7, P8]` (`EQ` / `LFO` / `ADV`) knob positions for `fx_type`.
+    /// Default normalized secondary `[P5, P6, P7, P8]` (`EQ` / `MOD` / `LFO` / `ADV`) knob positions for `fx_type`.
     pub const fn default_eq_params_for_type(fx_type: FxType) -> [f32; 4] {
         match fx_type {
             // Chorus EQ: Low Cut 20 Hz (0.0), High Cut 20 kHz (1.0), Spread 100% (0.5), Feedback 0% (0.0)
@@ -305,6 +314,8 @@ impl FxSlotParams {
             FxType::Delay => [0.0, 0.77, 0.0, 0.50],
             // Reverb EQ: Low Cut ~60 Hz (0.24), High Cut 20 kHz (1.0), Pre-Dly 0 ms (0.0), Width 100% (0.5)
             FxType::Reverb => [0.24, 1.0, 0.0, 0.50],
+            // Flanger MOD: Feedbk +50% (0.75), Stereo Phase 90° (0.50), Low Cut 20 Hz (0.0), Tone ~11.5 kHz (0.85)
+            FxType::Flanger => [0.75, 0.50, 0.0, 0.85],
             // Tube Res. LFO: LFO Amt 50%, LFO Spd 1.00 Hz (0.42625), Feedbk/Decay 50 ms (0.29922), Mix shared on P4
             FxType::TubeResonator => [0.50, 0.426_25, 0.299_22, 1.00],
             // Limiter ADV: Release ~80 ms (0.53), Knee 0% (0.0), Link 100% (1.0), Punch 100% (1.0)
@@ -583,6 +594,7 @@ struct StereoFxStage {
     utility: UtilityStereo,
     limiter: LimiterStereo,
     mb_dist: Box<MultiBandDistStereo>,
+    flanger: FlangerStereo,
 }
 
 impl StereoFxStage {
@@ -601,6 +613,7 @@ impl StereoFxStage {
             utility: UtilityStereo::new(sample_rate),
             limiter: LimiterStereo::new(sample_rate),
             mb_dist: Box::new(MultiBandDistStereo::new(sample_rate)),
+            flanger: FlangerStereo::new(sample_rate),
         }
     }
 
@@ -617,6 +630,7 @@ impl StereoFxStage {
         self.utility.set_sample_rate(sample_rate);
         self.limiter.set_sample_rate(sample_rate);
         self.mb_dist.set_sample_rate(sample_rate);
+        self.flanger.set_sample_rate(sample_rate);
     }
 
     fn reset(&mut self) {
@@ -633,6 +647,7 @@ impl StereoFxStage {
         self.utility.reset();
         self.limiter.reset();
         self.mb_dist.reset();
+        self.flanger.reset();
     }
 
     #[inline]
@@ -686,6 +701,7 @@ impl StereoFxStage {
                 &slot.mb_bands,
                 p,
             ),
+            FxType::Flanger => self.flanger.process(in_l, in_r, p, eq),
         }
     }
 }
