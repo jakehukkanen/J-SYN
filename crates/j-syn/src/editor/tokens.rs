@@ -24,7 +24,7 @@ pub(crate) const RADIUS_PILL: f32 = 3.0;
 pub(crate) const BORDER_HAIRLINE: f32 = 1.0;
 pub(crate) const STROKE_TRACE: f32 = 1.5;
 
-pub(crate) const KNOB_OSC: f32 = 34.0;
+pub(crate) const KNOB_OSC: f32 = 30.0;
 pub(crate) const KNOB_FLT: f32 = 30.0;
 pub(crate) const KNOB_STD: f32 = 28.0;
 pub(crate) const KNOB_COMPACT: f32 = 24.0;

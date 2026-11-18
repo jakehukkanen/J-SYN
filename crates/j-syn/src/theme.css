@@ -910,7 +910,8 @@ led-toggle:checked .switch-label {
 }
 
 .hardware-module.module-disabled dropdown,
-.hardware-module.module-disabled .compact-pill {
+.hardware-module.module-disabled .compact-pill,
+.hardware-module.module-disabled .inline-pill.stk-pill {
   background-color: #1c1814;
   border-color: #39312a;
 }

@@ -9,8 +9,8 @@ use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown, build_flex_knob_cell_mod_dim,
-    build_inline_pill_cell, build_inline_pill_cell_mod, build_pitch_pill_cell,
-    build_ratio_pill_cell, build_wavetable_dropdown, step_wavetable, ArrowButton, ArrowDir,
+    build_inline_pill_cell, build_inline_pill_cell_mod, build_pitch_tuning_group,
+    build_ratio_tuning_row, build_wavetable_dropdown, step_wavetable, ArrowButton, ArrowDir,
     ScrollDropdown,
 };
 use super::mod_bar::ModUiState;
@@ -141,61 +141,73 @@ pub(super) fn build_osc_panel(
         .width(Stretch(1.0))
         .height(Pixels(tokens::HEADER_STRIP_H));
 
-        // Middle body: [PITCH + Scope] | [WT POS | WARP+dd | < > | MOD+dd | LEVEL]
-        HStack::new(cx, move |cx| {
-            let p_col1_mode = params.clone();
-            let ui_left = mod_ui.clone();
-            let p_scope = params.clone();
-            let bank_scope = bank;
-            let ui_scope = mod_ui.clone();
-            VStack::new(cx, move |cx| {
-                Binding::new(
+        // Row 2: [OCT | SEMI | FINE] (or [RATIO | HZ] in Ratio mode) + [RETRIG]
+        HStack::new(cx, {
+            let p_row2 = params.clone();
+            let u_row2 = mod_ui.clone();
+            move |cx| {
+                let p_mode = p_row2.clone();
+                let u_mode = u_row2.clone();
+                HStack::new(cx, move |cx| {
+                    Binding::new(
+                        cx,
+                        UiData::mod_ui_rev.map(move |_| {
+                            p_mode.oscs[osc_idx].pitch_mode.value() == PitchModeParam::Ratio
+                        }),
+                        move |cx, is_ratio_lens| {
+                            let mod_cell = u_mode.clone();
+                            if !is_ratio_lens.get(cx) {
+                                build_pitch_tuning_group(
+                                    cx,
+                                    osc_idx,
+                                    UiData::params,
+                                    move |p| &get_osc(p, osc_idx).pitch,
+                                    ModDestination::osc_pitch(osc_idx),
+                                    mod_cell,
+                                    0,
+                                );
+                            } else {
+                                build_ratio_tuning_row(
+                                    cx,
+                                    osc_idx,
+                                    UiData::params,
+                                    move |p| &get_osc(p, osc_idx).ratio,
+                                    move |p| &get_osc(p, osc_idx).hz_offset,
+                                    ModDestination::osc_ratio(osc_idx),
+                                    ModDestination::osc_hz_offset(osc_idx),
+                                    mod_cell,
+                                    0,
+                                );
+                            }
+                        },
+                    );
+                })
+                .width(Stretch(3.0))
+                .height(Stretch(1.0));
+
+                LedToggleSwitch::new(
                     cx,
-                    UiData::mod_ui_rev.map(move |_| {
-                        p_col1_mode.oscs[osc_idx].pitch_mode.value() == PitchModeParam::Ratio
-                    }),
-                    move |cx, is_ratio_lens| {
-                        let mod_cell = ui_left.clone();
-                        if !is_ratio_lens.get(cx) {
-                            build_pitch_pill_cell(
-                                cx,
-                                osc_idx,
-                                UiData::params,
-                                move |p| &get_osc(p, osc_idx).pitch,
-                                "PITCH",
-                                ModDestination::osc_pitch(osc_idx),
-                                mod_cell,
-                                0,
-                            )
-                            .width(Stretch(1.0))
-                            .height(Pixels(31.0));
-                        } else {
-                            build_ratio_pill_cell(
-                                cx,
-                                osc_idx,
-                                UiData::params,
-                                move |p| &get_osc(p, osc_idx).ratio,
-                                move |p| &get_osc(p, osc_idx).hz_offset,
-                                ModDestination::osc_ratio(osc_idx),
-                                ModDestination::osc_hz_offset(osc_idx),
-                                mod_cell,
-                                0,
-                            )
-                            .width(Stretch(1.0))
-                            .height(Pixels(31.0));
-                        }
-                    },
-                );
+                    UiData::params,
+                    move |p| &get_osc(p, osc_idx).retrig,
+                    "RETRIG",
+                    "RETRIG",
+                    accent,
+                )
+                .width(Stretch(1.0))
+                .height(Stretch(1.0));
+            }
+        })
+        .col_between(Pixels(tokens::SPACE_XS))
+        .width(Stretch(1.0))
+        .height(Pixels(18.0));
 
-                WavetableScope::new(cx, osc_idx, bank_scope, p_scope, ui_scope)
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0));
-            })
-            .width(Pixels(92.0))
-            .height(Stretch(1.0))
-            .row_between(Pixels(tokens::SPACE_XS));
+        // Row 3: [WavetableScope] | [WT POS | WARP+dd | < > | MOD+dd | LEVEL]
+        HStack::new(cx, move |cx| {
+            WavetableScope::new(cx, osc_idx, bank, params.clone(), mod_ui.clone())
+                .width(Pixels(92.0))
+                .height(Stretch(1.0));
 
-            let p_right = params.clone();
+            let p_right = params;
             let ui_right = mod_ui;
             let gui_right = gui_context;
             VStack::new(cx, move |cx| {
@@ -414,28 +426,15 @@ pub(super) fn build_osc_panel(
         .width(Stretch(1.0))
         .height(Stretch(1.0));
 
-        // Bottom dock: 5 balanced controls (RETRIG + PHS + UNI + DET + SPD)
+        // Row 4: [PHS] [UNI] [DET] [SPREAD] (wider SPREAD, equal remaining share on PHS/UNI/DET)
         HStack::new(cx, move |cx| {
-            LedToggleSwitch::new(
-                cx,
-                UiData::params,
-                move |p| &get_osc(p, osc_idx).retrig,
-                "RETRIG",
-                "RETRIG",
-                accent,
-            )
-            .width(Stretch(1.08))
-            .height(Pixels(18.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
-
             build_inline_pill_cell_mod(
                 cx,
                 UiData::params,
                 move |p| &get_osc(p, osc_idx).phase,
                 "PHS",
                 360,
-                1.0,
+                0.94,
                 ModDestination::osc_phase(osc_idx),
                 m_dock.clone(),
                 0,
@@ -449,7 +448,7 @@ pub(super) fn build_osc_panel(
                 move |p| &get_osc(p, osc_idx).unison,
                 "UNI",
                 8,
-                0.92,
+                0.94,
             )
             .class("stk-pill")
             .height(Pixels(18.0));
@@ -461,7 +460,7 @@ pub(super) fn build_osc_panel(
                 move |p| &get_osc(p, osc_idx).detune,
                 "DET",
                 100,
-                1.0,
+                0.94,
                 ModDestination::osc_detune(osc_idx),
                 m_dock.clone(),
                 0,
@@ -477,9 +476,9 @@ pub(super) fn build_osc_panel(
                 cx,
                 UiData::params,
                 move |p| &get_osc(p, osc_idx).spread,
-                "SPD",
+                "SPREAD",
                 100,
-                1.0,
+                1.18,
                 ModDestination::osc_spread(osc_idx),
                 m_dock,
                 0,
@@ -493,7 +492,7 @@ pub(super) fn build_osc_panel(
         })
         .col_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
-        .height(Pixels(19.0));
+        .height(Pixels(18.0));
     })
     .class("hardware-module")
     .toggle_class(

@@ -68,7 +68,7 @@ pub(super) fn build_noise_panel(
                 "COLOR",
                 true,
                 AMBER_RGB,
-                tokens::KNOB_COMPACT,
+                tokens::KNOB_OSC,
                 ModDestination::NoiseColor,
                 mod_ui.clone(),
                 0,
@@ -83,7 +83,7 @@ pub(super) fn build_noise_panel(
                 "STEREO",
                 false,
                 GOLD_RGB,
-                tokens::KNOB_COMPACT,
+                tokens::KNOB_OSC,
                 ModDestination::NoiseStereo,
                 mod_ui.clone(),
                 0,
@@ -98,7 +98,7 @@ pub(super) fn build_noise_panel(
                 "LEVEL",
                 false,
                 CORAL_RGB,
-                tokens::KNOB_COMPACT,
+                tokens::KNOB_OSC,
                 ModDestination::NoiseLevel,
                 mod_ui,
                 0,
@@ -119,5 +119,5 @@ pub(super) fn build_noise_panel(
     )
     .row_between(Pixels(tokens::SPACE_XS))
     .width(Stretch(1.0))
-    .height(Pixels(76.0));
+    .height(Pixels(170.0));
 }

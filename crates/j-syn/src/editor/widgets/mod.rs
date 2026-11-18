@@ -167,6 +167,6 @@ mod switch;
 
 pub use knob::RotaryKnob;
 pub(super) use knob::KnobDimExt;
-pub use pill::{ParamStepPill, PitchDragBox};
+pub use pill::{ParamStepPill, PitchDragBox, PitchGroupModOverlay, PitchPart};
 pub use ratio::RatioDragBox;
 pub use switch::LedToggleSwitch;
