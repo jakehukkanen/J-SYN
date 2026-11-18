@@ -1,5 +1,5 @@
 //! `ROUTE` Center Stage tab: per-source filter send balance + Direct bus selectors,
-//! Filter topology & bus destinations, feedback bus, and 3-Lane FX Bus Matrix.
+//! Filter topology, bus destinations, mix, and feedback bus.
 
 use std::sync::Arc;
 
@@ -14,9 +14,7 @@ use super::controls::{
 use super::mod_bar::{bottom_tab_tag, ModUiState};
 use super::tokens;
 use super::{BottomTab, AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData};
-use crate::{
-    DirectRouteParam, FilterBusParam, FilterRoutingParam, FxBusTopologyParam, JSynPluginParams,
-};
+use crate::{DirectRouteParam, FilterBusParam, FilterRoutingParam, JSynPluginParams};
 
 pub(super) const FILTER_ROUTING_ITEMS: &[(&str, FilterRoutingParam)] = &[
     ("Serial (F1->F2)", FilterRoutingParam::Serial),
@@ -38,15 +36,6 @@ pub(super) const FILTER_BUS_ITEMS: &[(&str, FilterBusParam)] = &[
     ("A+C", FilterBusParam::AC),
     ("B+C", FilterBusParam::BC),
     ("A+B+C", FilterBusParam::All),
-];
-
-const FX_TOPOLOGY_ITEMS: &[(&str, FxBusTopologyParam)] = &[
-    ("Parallel (A | B | C)", FxBusTopologyParam::Parallel),
-    ("Serial (A -> B | C)", FxBusTopologyParam::Serial),
-    ("Serial All (A -> B -> C)", FxBusTopologyParam::SerialAll),
-    ("A+B -> C", FxBusTopologyParam::ABToC),
-    ("A -> C | B", FxBusTopologyParam::AToC),
-    ("A | B -> C", FxBusTopologyParam::BToC),
 ];
 
 fn build_source_send_column<FB, FD>(
@@ -200,29 +189,15 @@ pub(super) fn build_routing_tab(
         .width(Stretch(1.0))
         .height(Stretch(1.0));
 
-        // Row 2: Filter & 3-Lane FX Bus Topology, Filter Out Buses, Filter Mix, Feedback
+        // Row 2: Filter Mode, Filter Out Buses, Filter Mix, Feedback
         VStack::new(cx, move |cx| {
-            build_module_header(cx, "FILTER, FEEDBACK & 3-LANE FX ROUTING", 18.0);
+            build_module_header(cx, "FILTER ROUTING, BUS OUT & FEEDBACK", tokens::PILL_H);
 
             HStack::new(cx, move |cx| {
                 VStack::new(cx, {
                     let p_fx = params.clone();
                     let g_fx = gui_context.clone();
                     move |cx| {
-                        bold_label(cx, "FX LANE MATRIX", "mini-label")
-                            .width(Stretch(1.0))
-                            .height(Pixels(11.0))
-                            .child_space(Stretch(1.0));
-                        build_enum_dropdown(
-                            cx,
-                            p_fx.clone(),
-                            g_fx.clone(),
-                            |p| &p.fx_bus_topology,
-                            FX_TOPOLOGY_ITEMS,
-                        )
-                        .width(Stretch(1.0))
-                        .height(Pixels(20.0));
-
                         bold_label(cx, "FILTER MODE", "mini-label")
                             .width(Stretch(1.0))
                             .height(Pixels(11.0))
@@ -235,11 +210,13 @@ pub(super) fn build_routing_tab(
                             FILTER_ROUTING_ITEMS,
                         )
                         .width(Stretch(1.0))
-                        .height(Pixels(20.0));
+                        .height(Pixels(tokens::CONTROL_H));
                     }
                 })
-                .width(Pixels(162.0))
+                .width(Pixels(136.0))
                 .height(Auto)
+                .top(Stretch(1.0))
+                .bottom(Stretch(1.0))
                 .row_between(Pixels(tokens::SPACE_XS));
 
                 VStack::new(cx, {

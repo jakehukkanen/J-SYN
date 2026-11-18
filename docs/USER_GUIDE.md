@@ -43,7 +43,7 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 ## 4. Right Wing — 3-Lane Scrollable FX Rack (`BUS A | BUS B | BUS C`)
 - **Three Parallel / Routable 8-Slot FX Lanes (`BUS A`, `BUS B`, `BUS C`):**
   - Each lane features a `54 px` bus header with output routing dropdown (`-> MST`, `-> B`, `-> C` for `BUS A`; `-> MST`, `-> C` for `BUS B`; `-> MST` for `BUS C`) and `30 px` `LEVEL` & `PAN` knobs, above an 8-slot always-visible scrollable stack of variable-height FX Unit cards (`Empty` slots collapse cleanly to a slim selector strip; active FX units expand to match their scope and `27 px` 4-knob footer with `ON/OFF`, effect selector, `STK 1..4` stacking, `↑`/`↓` slot reordering, and live `150 Hz` pre/post visualizer scope).
-  - **Lane-to-Lane Routing:** Use the `BUS A` / `BUS B` header dropdowns (or **`FX LANE MATRIX`** in the **`ROUTE`** tab) to configure 6 routing topologies (defaults to **`Serial (A -> B | C)`**; `Bus C` always outputs `-> MST`):
+  - **Lane-to-Lane Routing:** Use the `BUS A` / `BUS B` header dropdowns to configure 6 routing topologies (defaults to **`Serial (A -> B | C)`**; `Bus C` always outputs `-> MST`):
     - **`Parallel (A | B | C)`:** All 3 lanes sum independently to Master.
     - **`Serial (A -> B | C)`:** `Bus A` feeds `Bus B`; `Bus C` runs in parallel.
     - **`Serial All (A -> B -> C)`:** Cascades all 3 lanes (`24` total serial FX slots).
@@ -80,7 +80,7 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
     - **Double-Click:** Add a new breakpoint node on empty canvas, or delete an interior node.
     - **Drag Midpoint Handle / `Opt/Alt + Left-Drag` / `Right-Drag`:** Bend the enclosing segment's curve **tension**.
   - **`E1`–`E4`:** Edit ADSR envelopes with live curve preview and numeric readouts.
-- **`ROUTE` Center Tab:** Per-source Filter Send balance (`F1 <-> F2`, automatically dimmed with an explanatory hover tooltip when Direct Bus routing is active) and 4-way per-source `DIRECT` sends (`Off | Bus A | Bus B | Bus C`), `FX LANE MATRIX`, `FILTER MODE`, `F1 OUT BUS` / `F2 OUT BUS`, `F1/F2 MIX`, and `FEEDBACK`.
+- **`ROUTE` Center Tab:** Per-source Filter Send balance (`F1 <-> F2`, automatically dimmed with an explanatory hover tooltip when Direct Bus routing is active) and 4-way per-source `DIRECT` sends (`Off | Bus A | Bus B | Bus C`), `FILTER MODE`, `F1 OUT BUS` / `F2 OUT BUS`, `F1/F2 MIX`, and `FEEDBACK`.
 
 ---
 
