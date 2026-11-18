@@ -24,7 +24,7 @@ use super::scope::{
     paint_vertical_gradient_fill, scope_trace_rgb,
 };
 use super::widgets::{set_resize_cursor, ResizeCursorAxis};
-use super::{theme, theme::ThemePalette, UiEvent};
+use super::{theme, theme::ThemePalette, TooltipState, UiEvent};
 use crate::{FxTypeParam, JSynPluginParams};
 
 #[inline]
@@ -1526,6 +1526,31 @@ impl MultibandXoverDragOverlay {
             None
         }
     }
+
+    fn emit_xover_tooltip(&self, cx: &mut EventContext, bounds: BoundingBox, dpx: f32, handle: usize) {
+        let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
+        let (low_hz, high_hz) = mb_ordered_xover_hz(slot.p1.value(), slot.p2.value());
+        let hz = if handle == 0 { low_hz } else { high_hz };
+        let text = if hz >= 10_000.0 {
+            format!("{:.1} kHz", hz / 1000.0)
+        } else if hz >= 1000.0 {
+            format!("{:.2} kHz", hz / 1000.0)
+        } else {
+            format!("{:.0} Hz", hz)
+        };
+        let pad_x = 4.0 * dpx;
+        let ix = bounds.x + pad_x;
+        let iw = (bounds.w - 2.0 * pad_x).max(1.0);
+        let handle_x = ix + filter_freq_to_norm(hz) * iw;
+        let s = dpx.max(0.1);
+        cx.emit(UiEvent::ShowTooltip(TooltipState {
+            visible: true,
+            text,
+            center_x: handle_x / s,
+            anchor_top: bounds.y / s,
+            anchor_bottom: (bounds.y + bounds.h) / s,
+        }));
+    }
 }
 
 impl View for MultibandXoverDragOverlay {
@@ -1548,6 +1573,7 @@ impl View for MultibandXoverDragOverlay {
                     self.hover_cursor_active = true;
                     cx.capture();
                     set_resize_cursor(cx, ResizeCursorAxis::Horizontal);
+                    self.emit_xover_tooltip(cx, bounds, dpx, handle);
                     meta.consume();
                 } else {
                     let hz = self.x_to_hz(bounds, dpx, mx);
@@ -1580,6 +1606,7 @@ impl View for MultibandXoverDragOverlay {
                     setter.begin_set_parameter(param);
                     setter.set_parameter(param, def);
                     setter.end_set_parameter(param);
+                    cx.emit(UiEvent::HideTooltip);
                     cx.emit(UiEvent::ModValChanged);
                     meta.consume();
                 }
@@ -1599,6 +1626,7 @@ impl View for MultibandXoverDragOverlay {
                         setter.set_parameter(&slot.p2, norm);
                     }
                     set_resize_cursor(cx, ResizeCursorAxis::Horizontal);
+                    self.emit_xover_tooltip(cx, bounds, dpx, handle);
                     cx.emit(UiEvent::ModValChanged);
                     meta.consume();
                 } else if self.nearest_handle(bounds, dpx, *x).is_some() {
@@ -1618,6 +1646,7 @@ impl View for MultibandXoverDragOverlay {
                     cx.release();
                     self.hover_cursor_active = false;
                     set_resize_cursor(cx, ResizeCursorAxis::Default);
+                    cx.emit(UiEvent::HideTooltip);
                     meta.consume();
                 }
             }
