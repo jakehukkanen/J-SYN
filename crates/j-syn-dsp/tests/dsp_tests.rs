@@ -2142,6 +2142,7 @@ fn parallel_fx_buses_and_sub_bus_routing_and_modulation() {
 
     // 2. Parallel Filter routing: Filter 1 -> Bus A (panned Left), Filter 2 -> Bus B (panned Right)
     let mut mp = SynthParams::default();
+    mp.fx_bus_topology = FxBusTopology::Parallel;
     mp.amp_attack_s = 0.001;
     mp.oscs[0].enabled = true;
     mp.oscs[0].level = 0.8;

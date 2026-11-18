@@ -60,7 +60,9 @@ pub(crate) const MACRO_PILL_W: f32 = 28.0;
 pub(crate) const MACRO_HDR_H: f32 = 15.0;
 
 // Right Wing: 3-Lane Scrollable FX Rack & Variable-Height FX Units
-pub(crate) const FX_LANE_HEADER_H: f32 = 24.0;
+pub(crate) const FX_LANE_HEADER_H: f32 = 54.0;
+pub(crate) const FX_LANE_ROUTE_COL_W: f32 = 76.0;
+pub(crate) const FX_LANE_KNOBS_W: f32 = 92.0;
 pub(crate) const FX_LANE_SCROLL_GUTTER: f32 = 10.0;
 pub(crate) const FX_UNIT_HEADER_H: f32 = 18.0;
 pub(crate) const FX_UNIT_LED_W: f32 = 34.0;

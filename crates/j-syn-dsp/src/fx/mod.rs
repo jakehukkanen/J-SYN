@@ -409,9 +409,9 @@ pub fn sub_cutoff_hz_to_norm(hz: f32) -> f32 {
 #[repr(u8)]
 pub enum FxBusTopology {
     /// Parallel: `Bus A`, `Bus B`, and `Bus C` process independently and sum into Master (`A | B | C`).
-    #[default]
     Parallel = 0,
     /// Serial: `Bus A` output feeds directly into `Bus B`, while `Bus C` stays parallel (`A -> B | C`).
+    #[default]
     Serial = 1,
     /// Cascade all 3 buses (`A -> B -> C -> Master`).
     SerialAll = 2,

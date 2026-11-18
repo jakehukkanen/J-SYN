@@ -13,13 +13,13 @@ use j_syn_dsp::{
     tube_res_flt_width_oct, tube_res_lfo_rate_hz, utility_gain_db_from_norm,
     utility_width_from_norm, FxBusTopology, FxRackState, FxType, MB_BAND_LEVEL_DEFAULT_NORM,
 };
-use nih_plug::prelude::{FloatParam, GuiContext, Param, ParamSetter};
+use nih_plug::prelude::{GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown,
-    build_enum_dropdown_with_override, build_inline_pill_cell, build_prefixed_enum_dropdown,
-    ArrowButton, ArrowDir, ScrollDropdown, ScrollDropdownExt,
+    build_enum_dropdown_with_override, build_flex_knob_cell_mod, build_inline_pill_cell,
+    build_prefixed_enum_dropdown, ArrowButton, ArrowDir, ScrollDropdown, ScrollDropdownExt,
 };
 use super::fx_scopes::{fx_accent_rgb, FxSlotVisualizer, MultibandXoverDragOverlay};
 use super::mod_bar::ModUiState;
@@ -1418,56 +1418,6 @@ fn build_fx_knob_row(
     .height(Auto);
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_compact_bar_knob<P, FMap>(
-    cx: &mut Context,
-    params: Arc<JSynPluginParams>,
-    params_to_param: FMap,
-    title: &'static str,
-    title_w: f32,
-    knob_sz: f32,
-    bipolar: bool,
-    accent: (u8, u8, u8),
-    dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
-    dim_check: Option<fn(&JSynPluginParams) -> bool>,
-) where
-    P: FloatParamTag + 'static,
-    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
-{
-    HStack::new(cx, move |cx| {
-        let mut knob = RotaryKnob::new_with_mod(
-            cx,
-            UiData::params,
-            params_to_param,
-            bipolar,
-            accent,
-            dest,
-            mod_ui,
-            0,
-        );
-        if let Some(check) = dim_check {
-            knob = knob.enabled_by(params, check);
-        }
-        knob.width(Pixels(knob_sz))
-            .height(Pixels(knob_sz))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
-
-        bold_label(cx, title, "knob-title")
-            .width(Pixels(title_w))
-            .height(Stretch(1.0))
-            .child_top(Stretch(1.0))
-            .child_bottom(Stretch(1.0));
-    })
-    .col_between(Pixels(4.0))
-    .width(Auto)
-    .height(Stretch(1.0));
-}
-
-trait FloatParamTag: nih_plug::prelude::Param {}
-impl FloatParamTag for FloatParam {}
-
 fn set_fx_bus_topology(
     params: &JSynPluginParams,
     gui_context: &Arc<dyn GuiContext>,
@@ -1488,6 +1438,104 @@ fn lane_target_label(target: u8) -> &'static str {
     }
 }
 
+fn build_lane_route_dropdown(
+    cx: &mut Context,
+    bus_idx: usize,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+) {
+    const BUS_A_TARGETS: &[(&str, u8)] = &[("-> MST", 0), ("-> B", 1), ("-> C", 2)];
+    const BUS_B_TARGETS: &[(&str, u8)] = &[("-> MST", 0), ("-> C", 2)];
+
+    let items: &'static [(&'static str, u8)] = if bus_idx == 0 {
+        BUS_A_TARGETS
+    } else {
+        BUS_B_TARGETS
+    };
+    let cur_target = move |topo: FxBusTopology| -> u8 {
+        if bus_idx == 0 {
+            topo.bus_a_target()
+        } else {
+            topo.bus_b_target()
+        }
+    };
+    let next_topo_for = move |topo: FxBusTopology, target: u8| -> FxBusTopologyParam {
+        let next = if bus_idx == 0 {
+            FxBusTopology::from_lane_targets(target, topo.bus_b_target())
+        } else {
+            FxBusTopology::from_lane_targets(topo.bus_a_target(), target)
+        };
+        FxBusTopologyParam::from(next)
+    };
+
+    let p_scroll = params.clone();
+    let g_scroll = gui_context.clone();
+    let p_trig = params.clone();
+    let p_pop = params.clone();
+    let g_pop = gui_context;
+
+    ScrollDropdown::new(
+        cx,
+        move |cx, delta| {
+            let cur: FxBusTopology = p_scroll.fx_bus_topology.value().into();
+            let target = cur_target(cur);
+            let pos = items.iter().position(|&(_, t)| t == target).unwrap_or(0);
+            let next = (pos as isize + delta).clamp(0, items.len() as isize - 1) as usize;
+            if next != pos {
+                set_fx_bus_topology(&p_scroll, &g_scroll, next_topo_for(cur, items[next].1));
+                cx.emit(UiEvent::ModUiChanged);
+            }
+        },
+        move |cx| {
+            let p_trig = p_trig.clone();
+            let p_pop = p_pop.clone();
+            let g_pop = g_pop.clone();
+            Dropdown::new(
+                cx,
+                move |cx| {
+                    let p_lbl = p_trig.clone();
+                    HStack::new(cx, move |cx| {
+                        build_dropdown_trigger_labels(
+                            cx,
+                            UiData::params.map(move |p| {
+                                let topo: FxBusTopology = p.fx_bus_topology.value().into();
+                                let _ = &p_lbl;
+                                lane_target_label(cur_target(topo)).to_string()
+                            }),
+                        );
+                    })
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0))
+                    .child_top(Pixels(0.0))
+                    .child_bottom(Pixels(0.0))
+                    .overflow(Overflow::Hidden)
+                },
+                move |cx| {
+                    for &(label, target) in items {
+                        let p_set = p_pop.clone();
+                        let g_set = g_pop.clone();
+                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                            let cur: FxBusTopology = p_set.fx_bus_topology.value().into();
+                            set_fx_bus_topology(&p_set, &g_set, next_topo_for(cur, target));
+                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(PopupEvent::Close);
+                        });
+                    }
+                },
+            )
+        },
+    )
+    .toggle_class(
+        "routing-pill-active",
+        UiData::params.map(move |p| {
+            let topo: FxBusTopology = p.fx_bus_topology.value().into();
+            cur_target(topo) != 0
+        }),
+    )
+    .width(Stretch(1.0))
+    .height(Pixels(tokens::PILL_H));
+}
+
 fn build_lane_header(
     cx: &mut Context,
     bus_idx: usize,
@@ -1505,106 +1553,68 @@ fn build_lane_header(
         1 => (ModDestination::BusBLevel, ModDestination::BusBPan),
         _ => (ModDestination::BusCLevel, ModDestination::BusCPan),
     };
-    let no_dim: Option<fn(&JSynPluginParams) -> bool> = None;
 
     HStack::new(cx, move |cx| {
-        bold_label(cx, title, "module-title")
-            .width(Auto)
-            .height(Stretch(1.0))
-            .child_top(Stretch(1.0))
-            .child_bottom(Stretch(1.0));
+        let p_hdr = params.clone();
+        let g_hdr = gui_context;
+        VStack::new(cx, move |cx| {
+            bold_label(cx, title, "module-title")
+                .width(Stretch(1.0))
+                .height(Pixels(tokens::MACRO_HDR_H))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0));
 
-        // Phase Plant-style inline lane output target switcher (cycles targets cleanly)
-        if bus_idx < 2 {
-            let p_cyc = params.clone();
-            let g_cyc = gui_context.clone();
-            Button::new(
-                cx,
-                move |cx| {
-                    let cur: FxBusTopology = p_cyc.fx_bus_topology.value().into();
-                    let next_topo = if bus_idx == 0 {
-                        let next_a = match cur.bus_a_target() {
-                            0 => 1,
-                            1 => 2,
-                            _ => 0,
-                        };
-                        FxBusTopology::from_lane_targets(next_a, cur.bus_b_target())
-                    } else {
-                        let next_b = if cur.bus_b_target() == 0 { 2 } else { 0 };
-                        FxBusTopology::from_lane_targets(cur.bus_a_target(), next_b)
-                    };
-                    set_fx_bus_topology(&p_cyc, &g_cyc, FxBusTopologyParam::from(next_topo));
-                    cx.emit(UiEvent::ModUiChanged);
-                },
-                move |cx| {
-                    bold_label(
-                        cx,
-                        UiData::params.map(move |p| {
-                            let topo: FxBusTopology = p.fx_bus_topology.value().into();
-                            let t = if bus_idx == 0 {
-                                topo.bus_a_target()
-                            } else {
-                                topo.bus_b_target()
-                            };
-                            lane_target_label(t).to_string()
-                        }),
-                        "fx-subtab-lbl",
-                    )
-                    .hoverable(false)
-                },
-            )
-            .class("fx-scope-pill")
-            .toggle_class(
-                "routing-pill-active",
-                UiData::params.map(move |p| {
-                    let topo: FxBusTopology = p.fx_bus_topology.value().into();
-                    if bus_idx == 0 {
-                        topo.bus_a_target() != 0
-                    } else {
-                        topo.bus_b_target() != 0
-                    }
-                }),
-            )
-            .width(Pixels(40.0))
-            .height(Pixels(16.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
-        } else {
-            bold_label(cx, "-> MST", "mini-label")
-                .width(Pixels(40.0))
-                .height(Stretch(1.0))
-                .child_space(Stretch(1.0));
-        }
+            if bus_idx < 2 {
+                build_lane_route_dropdown(cx, bus_idx, p_hdr, g_hdr);
+            } else {
+                bold_label(cx, "-> MST", "mini-label")
+                    .width(Stretch(1.0))
+                    .height(Pixels(tokens::PILL_H))
+                    .child_top(Stretch(1.0))
+                    .child_bottom(Stretch(1.0));
+            }
+        })
+        .row_between(Pixels(tokens::SPACE_SM))
+        .child_top(Stretch(1.0))
+        .child_bottom(Stretch(1.0))
+        .width(Pixels(tokens::FX_LANE_ROUTE_COL_W))
+        .height(Stretch(1.0));
 
         Element::new(cx).width(Stretch(1.0));
 
-        build_compact_bar_knob(
-            cx,
-            params.clone(),
-            move |p| p.fx_bus_level_param(bus_idx),
-            "L",
-            8.0,
-            tokens::KNOB_MINI,
-            false,
-            AMBER_RGB,
-            lvl_dest,
-            mod_ui.clone(),
-            no_dim,
-        );
+        let m_lvl = mod_ui.clone();
+        HStack::new(cx, move |cx| {
+            build_flex_knob_cell_mod(
+                cx,
+                UiData::params,
+                move |p| p.fx_bus_level_param(bus_idx),
+                "LEVEL",
+                false,
+                AMBER_RGB,
+                tokens::KNOB_OSC,
+                lvl_dest,
+                m_lvl,
+                0,
+            );
 
-        build_compact_bar_knob(
-            cx,
-            params,
-            move |p| p.fx_bus_pan_param(bus_idx),
-            "P",
-            8.0,
-            tokens::KNOB_MINI,
-            true,
-            GOLD_RGB,
-            pan_dest,
-            mod_ui,
-            no_dim,
-        );
+            build_flex_knob_cell_mod(
+                cx,
+                UiData::params,
+                move |p| p.fx_bus_pan_param(bus_idx),
+                "PAN",
+                true,
+                GOLD_RGB,
+                tokens::KNOB_OSC,
+                pan_dest,
+                mod_ui,
+                0,
+            );
+        })
+        .col_between(Pixels(tokens::SPACE_SM))
+        .child_top(Stretch(1.0))
+        .child_bottom(Stretch(1.0))
+        .width(Pixels(tokens::FX_LANE_KNOBS_W))
+        .height(Stretch(1.0));
     })
     .class("fx-bus-header")
     .col_between(Pixels(tokens::SPACE_SM))

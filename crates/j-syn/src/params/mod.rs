@@ -341,7 +341,7 @@ impl Default for JSynPluginParams {
             bus_a_pan: bipolar_percentage_param("Bus A Pan", 0.0),
             fx_bus_b: Box::new(FxBusPluginParams::new_bus_b()),
             fx_bus_c: Box::new(FxBusPluginParams::new_bus_c()),
-            fx_bus_topology: EnumParam::new("FX Bus Routing", FxBusTopologyParam::Parallel),
+            fx_bus_topology: EnumParam::new("FX Bus Routing", FxBusTopologyParam::Serial),
             sub_bus: SubBusPluginParams::default(),
             macros: std::array::from_fn(MacroPluginParams::new),
             macro_names: Arc::new(Mutex::new(std::array::from_fn(|i| {

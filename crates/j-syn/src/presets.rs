@@ -400,7 +400,7 @@ fn enum_name_alias<'a>(id: &str, name: &'a str) -> &'a str {
         match name {
             "Pre-F1" => "| F1",
             "Between F1->F2" => "F1 | F2",
-            "Post-F2" | "F2 |" | "   | F2" => "| F2",
+            "Post-F2" | "F2 |" | "   | F2" | "        | F2" => "| F2",
             _ => name,
         }
     } else {

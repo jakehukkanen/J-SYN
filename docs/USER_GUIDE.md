@@ -42,8 +42,8 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 
 ## 4. Right Wing — 3-Lane Scrollable FX Rack (`BUS A | BUS B | BUS C`)
 - **Three Parallel / Routable 8-Slot FX Lanes (`BUS A`, `BUS B`, `BUS C`):**
-  - Each lane features an 8-slot scrollable stack of variable-height FX Unit cards (`Empty` slots collapse cleanly to a slim selector strip; active FX units expand to match their scope and `27 px` 4-knob footer with `ON/OFF`, effect selector, `STK 1..4` stacking, `↑`/`↓` slot reordering, and live `150 Hz` pre/post visualizer scope) plus lane header `L` (level) and `P` (pan) mini-knobs.
-  - **Lane-to-Lane Routing:** Click the target badge in the `BUS A` or `BUS B` lane header (or use **`FX LANE MATRIX`** in the **`ROUTE`** tab) to configure 6 routing topologies (`Bus C` always outputs `-> MST`):
+  - Each lane features a `54 px` bus header with output routing dropdown (`-> MST`, `-> B`, `-> C` for `BUS A`; `-> MST`, `-> C` for `BUS B`; `-> MST` for `BUS C`) and `30 px` `LEVEL` & `PAN` knobs, above an 8-slot always-visible scrollable stack of variable-height FX Unit cards (`Empty` slots collapse cleanly to a slim selector strip; active FX units expand to match their scope and `27 px` 4-knob footer with `ON/OFF`, effect selector, `STK 1..4` stacking, `↑`/`↓` slot reordering, and live `150 Hz` pre/post visualizer scope).
+  - **Lane-to-Lane Routing:** Use the `BUS A` / `BUS B` header dropdowns (or **`FX LANE MATRIX`** in the **`ROUTE`** tab) to configure 6 routing topologies (defaults to **`Serial (A -> B | C)`**; `Bus C` always outputs `-> MST`):
     - **`Parallel (A | B | C)`:** All 3 lanes sum independently to Master.
     - **`Serial (A -> B | C)`:** `Bus A` feeds `Bus B`; `Bus C` runs in parallel.
     - **`Serial All (A -> B -> C)`:** Cascades all 3 lanes (`24` total serial FX slots).

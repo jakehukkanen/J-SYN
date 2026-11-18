@@ -144,51 +144,19 @@ impl View for LedToggleSwitch {
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, r);
 
-        let housing_paint = if is_on && self.hovered {
-            vg::Paint::linear_gradient(
-                bounds.x,
-                bounds.y,
-                bounds.x,
-                bounds.y + bounds.h,
-                crate::editor::theme::vg_color(&pal.border_light, 255),
-                crate::editor::theme::vg_color(&pal.surface_hover, 255),
-            )
-        } else if is_on {
-            vg::Paint::linear_gradient(
-                bounds.x,
-                bounds.y,
-                bounds.x,
-                bounds.y + bounds.h,
-                crate::editor::theme::vg_color(&pal.surface_hover, 255),
-                crate::editor::theme::vg_color(&pal.panel_header_bg, 255),
-            )
-        } else if self.hovered {
-            vg::Paint::linear_gradient(
-                bounds.x,
-                bounds.y,
-                bounds.x,
-                bounds.y + bounds.h,
-                crate::editor::theme::vg_color(&pal.panel_header_bg, 255),
-                crate::editor::theme::vg_color(&pal.surface_mid, 255),
-            )
+        let housing_color = if self.hovered {
+            crate::editor::theme::vg_color(&pal.surface_hover, 255)
         } else {
-            vg::Paint::linear_gradient(
-                bounds.x,
-                bounds.y,
-                bounds.x,
-                bounds.y + bounds.h,
-                crate::editor::theme::vg_color(&pal.surface_mid, 255),
-                crate::editor::theme::vg_color(&pal.surface_dark, 255),
-            )
+            crate::editor::theme::vg_color(&pal.surface_mid, 255)
         };
-        canvas.fill_path(&bg, &housing_paint);
+        canvas.fill_path(&bg, &vg::Paint::color(housing_color));
 
-        let mut border = vg::Paint::color(if is_on {
-            vg::Color::rgba(ar, ag, ab, if self.hovered { 235 } else { 175 })
-        } else if self.hovered {
-            vg::Color::rgba(ar, ag, ab, 120)
+        let mut border = vg::Paint::color(if self.hovered {
+            vg::Color::rgba(ar, ag, ab, 235)
+        } else if is_on {
+            vg::Color::rgba(ar, ag, ab, 155)
         } else {
-            crate::editor::theme::vg_color(&pal.border_dark, 235)
+            crate::editor::theme::vg_color(&pal.border_dark, 255)
         });
         border.set_line_width(1.0 * dpx);
         canvas.stroke_path(&bg, &border);

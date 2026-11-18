@@ -1051,8 +1051,32 @@ led-toggle:checked .switch-label {
   border-width: 1px;
   border-color: #463b32;
   border-radius: 4px;
-  child-left: 4px;
-  child-right: 4px;
+  child-left: 6px;
+  child-right: 6px;
+  child-top: 3px;
+  child-bottom: 3px;
+}
+
+scrollview scrollbar {
+  background-color: #1c1814;
+  border-radius: 3px;
+}
+
+scrollview scrollbar.vertical {
+  width: 8px;
+}
+
+scrollview scrollbar .thumb {
+  background-color: #6b6157;
+  border-radius: 3px;
+  opacity: 1;
+}
+
+scrollview scrollbar .thumb:hover,
+scrollview:checked > scrollbar:over .thumb,
+scrollview:checked > scrollbar:active .thumb {
+  background-color: #f5b349;
+  opacity: 1;
 }
 
 .fx-rack-sub {
