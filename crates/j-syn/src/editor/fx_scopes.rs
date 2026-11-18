@@ -23,6 +23,7 @@ use super::scope::{
     paint_filter_response_curve_with_eval, paint_scope_bg, paint_scope_border,
     paint_vertical_gradient_fill, scope_trace_rgb,
 };
+use super::widgets::{set_resize_cursor, ResizeCursorAxis};
 use super::{theme, theme::ThemePalette, UiEvent};
 use crate::{FxTypeParam, JSynPluginParams};
 
@@ -1477,6 +1478,7 @@ pub(super) struct MultibandXoverDragOverlay {
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
     dragging_handle: Option<usize>, // 0 = low xover, 1 = high xover
+    hover_cursor_active: bool,
 }
 
 impl MultibandXoverDragOverlay {
@@ -1495,29 +1497,30 @@ impl MultibandXoverDragOverlay {
             gui_context,
             mod_ui,
             dragging_handle: None,
+            hover_cursor_active: false,
         }
         .build(cx, |_| {})
     }
 
-    fn x_to_hz(&self, bounds: BoundingBox, mouse_x: f32) -> f32 {
-        let pad_x = 4.0;
+    fn x_to_hz(&self, bounds: BoundingBox, dpx: f32, mouse_x: f32) -> f32 {
+        let pad_x = 4.0 * dpx;
         let ix = bounds.x + pad_x;
         let iw = (bounds.w - 2.0 * pad_x).max(1.0);
         let t = ((mouse_x - ix) / iw).clamp(0.0, 1.0);
         20.0 * 1000.0_f32.powf(t)
     }
 
-    fn nearest_handle(&self, bounds: BoundingBox, mouse_x: f32) -> Option<usize> {
+    fn nearest_handle(&self, bounds: BoundingBox, dpx: f32, mouse_x: f32) -> Option<usize> {
         let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
         let (low_hz, high_hz) = mb_ordered_xover_hz(slot.p1.value(), slot.p2.value());
-        let pad_x = 4.0;
+        let pad_x = 4.0 * dpx;
         let ix = bounds.x + pad_x;
         let iw = (bounds.w - 2.0 * pad_x).max(1.0);
         let x_low = ix + filter_freq_to_norm(low_hz) * iw;
         let x_high = ix + filter_freq_to_norm(high_hz) * iw;
         let d_low = (mouse_x - x_low).abs();
         let d_high = (mouse_x - x_high).abs();
-        if d_low.min(d_high) <= 10.0 {
+        if d_low.min(d_high) <= 10.0 * dpx {
             Some(if d_low <= d_high { 0 } else { 1 })
         } else {
             None
@@ -1534,22 +1537,25 @@ impl View for MultibandXoverDragOverlay {
         event.map(|window_event, meta| match window_event {
             WindowEvent::MouseDown(MouseButton::Left) => {
                 let bounds = cx.bounds();
+                let dpx = cx.scale_factor();
                 let mx = cx.mouse().cursorx;
-                if let Some(handle) = self.nearest_handle(bounds, mx) {
+                if let Some(handle) = self.nearest_handle(bounds, dpx, mx) {
                     let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
                     let param = if handle == 0 { &slot.p1 } else { &slot.p2 };
                     let setter = ParamSetter::new(self.gui_context.as_ref());
                     setter.begin_set_parameter(param);
                     self.dragging_handle = Some(handle);
+                    self.hover_cursor_active = true;
                     cx.capture();
-                    cx.emit(WindowEvent::SetCursor(CursorIcon::EwResize));
+                    set_resize_cursor(cx, ResizeCursorAxis::Horizontal);
                     meta.consume();
                 }
             }
             WindowEvent::MouseDoubleClick(MouseButton::Left) => {
                 let bounds = cx.bounds();
+                let dpx = cx.scale_factor();
                 let mx = cx.mouse().cursorx;
-                if let Some(handle) = self.nearest_handle(bounds, mx) {
+                if let Some(handle) = self.nearest_handle(bounds, dpx, mx) {
                     let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
                     let (param, def) = if handle == 0 {
                         (&slot.p1, MB_XOVER_LOW_DEFAULT_NORM)
@@ -1566,8 +1572,9 @@ impl View for MultibandXoverDragOverlay {
             }
             WindowEvent::MouseMove(x, _) => {
                 let bounds = cx.bounds();
+                let dpx = cx.scale_factor();
                 if let Some(handle) = self.dragging_handle {
-                    let hz = self.x_to_hz(bounds, *x);
+                    let hz = self.x_to_hz(bounds, dpx, *x);
                     let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
                     let setter = ParamSetter::new(self.gui_context.as_ref());
                     if handle == 0 {
@@ -1577,12 +1584,15 @@ impl View for MultibandXoverDragOverlay {
                         let norm = mb_xover_high_norm(hz);
                         setter.set_parameter(&slot.p2, norm);
                     }
+                    set_resize_cursor(cx, ResizeCursorAxis::Horizontal);
                     cx.emit(UiEvent::ModValChanged);
                     meta.consume();
-                } else if self.nearest_handle(bounds, *x).is_some() {
-                    cx.emit(WindowEvent::SetCursor(CursorIcon::EwResize));
-                } else {
-                    cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
+                } else if self.nearest_handle(bounds, dpx, *x).is_some() {
+                    self.hover_cursor_active = true;
+                    set_resize_cursor(cx, ResizeCursorAxis::Horizontal);
+                } else if self.hover_cursor_active {
+                    self.hover_cursor_active = false;
+                    set_resize_cursor(cx, ResizeCursorAxis::Default);
                 }
             }
             WindowEvent::MouseUp(MouseButton::Left) => {
@@ -1592,14 +1602,16 @@ impl View for MultibandXoverDragOverlay {
                     let setter = ParamSetter::new(self.gui_context.as_ref());
                     setter.end_set_parameter(param);
                     cx.release();
-                    cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
+                    self.hover_cursor_active = false;
+                    set_resize_cursor(cx, ResizeCursorAxis::Default);
                     let _ = &self.mod_ui;
                     meta.consume();
                 }
             }
             WindowEvent::MouseOut => {
-                if self.dragging_handle.is_none() {
-                    cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
+                if self.dragging_handle.is_none() && self.hover_cursor_active {
+                    self.hover_cursor_active = false;
+                    set_resize_cursor(cx, ResizeCursorAxis::Default);
                 }
             }
             _ => {}

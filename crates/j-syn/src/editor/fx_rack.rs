@@ -33,19 +33,19 @@ use crate::{
 
 const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Empty", FxTypeParam::Off),
+    ("Utility", FxTypeParam::Utility),
     ("OTT", FxTypeParam::Ott),
     ("Distortion", FxTypeParam::Distortion),
+    ("MB Dist", FxTypeParam::MultibandDist),
+    ("Clipper", FxTypeParam::JSatClipper),
+    ("Limiter", FxTypeParam::Limiter),
     ("Chorus", FxTypeParam::Chorus),
     ("Phaser", FxTypeParam::Phaser),
     ("Delay", FxTypeParam::Delay),
     ("Reverb", FxTypeParam::Reverb),
-    ("Clipper", FxTypeParam::JSatClipper),
     ("Filter", FxTypeParam::Filter),
     ("Dispersion", FxTypeParam::Diopser),
     ("Tube Res.", FxTypeParam::TubeResonator),
-    ("Utility", FxTypeParam::Utility),
-    ("Limiter", FxTypeParam::Limiter),
-    ("MB Dist", FxTypeParam::MultibandDist),
 ];
 
 const FX_FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
