@@ -728,7 +728,6 @@ impl View for GearIcon {
 
 fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     HStack::new(cx, move |cx| {
-        Element::new(cx).class("rack-screw");
         HStack::new(cx, move |cx| {
             Element::new(cx).class("brand-pill");
             bold_label(cx, "J-SYN", "header-title");
@@ -916,8 +915,6 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
         .child_bottom(Stretch(1.0))
         .width(Auto)
         .height(Stretch(1.0));
-
-        Element::new(cx).class("rack-screw");
     })
     .class("header-bar")
     .col_between(Pixels(10.0))

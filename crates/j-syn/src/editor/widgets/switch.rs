@@ -140,7 +140,7 @@ impl View for LedToggleSwitch {
         let is_on = self.param_base.modulated_normalized_value() >= 0.5;
         let (ar, ag, ab) = pal.accent_rgb();
 
-        let r = 3.5 * dpx;
+        let r = 3.0 * dpx;
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, r);
 
@@ -152,9 +152,7 @@ impl View for LedToggleSwitch {
         canvas.fill_path(&bg, &vg::Paint::color(housing_color));
 
         let mut border = vg::Paint::color(if self.hovered {
-            vg::Color::rgba(ar, ag, ab, 235)
-        } else if is_on {
-            vg::Color::rgba(ar, ag, ab, 155)
+            crate::editor::theme::vg_color(&pal.accent_primary, 255)
         } else {
             crate::editor::theme::vg_color(&pal.border_dark, 255)
         });
@@ -163,17 +161,17 @@ impl View for LedToggleSwitch {
 
         let led_x = bounds.x + 8.0 * dpx;
         let led_y = bounds.y + bounds.h * 0.5;
-        let led_r = 3.2 * dpx;
+        let led_r = 2.8 * dpx;
 
         if is_on {
             let mut glow = vg::Path::new();
-            glow.circle(led_x, led_y, led_r * 2.0);
+            glow.circle(led_x, led_y, led_r * 1.9);
             let glow_paint = vg::Paint::radial_gradient(
                 led_x,
                 led_y,
-                led_r * 0.2,
-                led_r * 2.0,
-                vg::Color::rgba(ar, ag, ab, 165),
+                led_r * 0.4,
+                led_r * 1.9,
+                vg::Color::rgba(ar, ag, ab, 95),
                 vg::Color::rgba(ar, ag, ab, 0),
             );
             canvas.fill_path(&glow, &glow_paint);
@@ -181,26 +179,12 @@ impl View for LedToggleSwitch {
 
         let mut lamp = vg::Path::new();
         lamp.circle(led_x, led_y, led_r);
-        let lamp_paint = if is_on {
-            vg::Paint::radial_gradient(
-                led_x - led_r * 0.25,
-                led_y - led_r * 0.25,
-                led_r * 0.1,
-                led_r,
-                vg::Color::rgb(255, 250, 240),
-                vg::Color::rgb(ar, ag, ab),
-            )
+        let lamp_color = if is_on {
+            vg::Color::rgb(ar, ag, ab)
         } else {
-            vg::Paint::radial_gradient(
-                led_x - led_r * 0.2,
-                led_y - led_r * 0.2,
-                led_r * 0.1,
-                led_r,
-                vg::Color::rgb(92, 80, 70),
-                vg::Color::rgb(44, 38, 33),
-            )
+            crate::editor::theme::vg_color(&pal.border_dark, 255)
         };
-        canvas.fill_path(&lamp, &lamp_paint);
+        canvas.fill_path(&lamp, &vg::Paint::color(lamp_color));
     }
 }
 

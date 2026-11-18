@@ -49,17 +49,6 @@ button > .inner {
   bottom: 1s;
 }
 
-.rack-screw {
-  width: 12px;
-  height: 12px;
-  border-radius: 6px;
-  background-color: #52463d;
-  border-width: 1px;
-  border-color: #1e1915;
-  top: 1s;
-  bottom: 1s;
-}
-
 .main-chassis {
   child-left: 10px;
   child-right: 10px;
@@ -492,13 +481,18 @@ dropdown popup {
 }
 
 .switch-label {
-  font-size: 10;
+  font-size: 9.5;
   font-weight: bold;
-  color: #e8dacb;
+  color: #9e8a77;
 }
 
 led-toggle:checked .switch-label {
-  color: #fff8ee;
+  color: #ffd382;
+}
+
+led-toggle:hover .switch-label,
+led-toggle:checked:hover .switch-label {
+  color: #fff3dc;
 }
 
 .mini-label {
