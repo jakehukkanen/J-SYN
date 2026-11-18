@@ -69,7 +69,7 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
     - **Double-Click:** Add a new breakpoint node on empty canvas, or delete an interior node.
     - **Drag Midpoint Handle / `Opt/Alt + Left-Drag` / `Right-Drag`:** Bend the enclosing segment's curve **tension**.
   - **`ENV 1`–`ENV 4`:** Click `E1`–`E4` in the mod bar to edit ADSR envelopes with live curve preview.
-- **`ROUTING` Tab:** Filter send balances, 4-way per-source `DIRECT` sends (`Off | Bus A | Bus B | Sub`), per-filter output bus destinations (`Bus A | Bus B | A+B | Sub`), `Serial`/`Parallel` filter routing, and feedback bus.
+- **`ROUTING` Tab:** Filter send balances (`F1 <-> F2`), 4-way per-source `DIRECT` sends (`Off | Bus A | Bus B | Sub` — selecting `Bus A`, `Bus B`, or `Sub` sends that source straight to the chosen bus, **skipping `FILTER 1`, `FILTER 2`, and `INSERT FX`**), per-filter output bus destinations (`Bus A | Bus B | A+B | Sub`), `Serial`/`Parallel` filter routing, and feedback bus.
 - **`MACROS` Tab:** 8 macros (`M1`–`M8`) with click-to-rename custom labels reflected in the `MATRIX` and modulation menus.
 
 ---
