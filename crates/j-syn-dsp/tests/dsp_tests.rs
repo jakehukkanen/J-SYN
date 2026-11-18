@@ -3061,3 +3061,95 @@ fn fx_limiter_lookahead_scurve_transient_clipping_and_modulation() {
     );
     assert_eq!((il, ir), (0.0, 0.0));
 }
+
+#[test]
+fn distortion_all_modes_bounded_bias_asymmetry_linear_fold_and_idle() {
+    use j_syn_dsp::waveshaper::shape_sample;
+    use j_syn_dsp::{
+        DistortionMode, FxRackParams, FxRackState, FxSlotParams, FxType, InsertMode,
+        InsertPosition, SynthEngine, SynthParams, WavetableBank, NUM_MOD_DESTS,
+    };
+
+    let sr = 48_000.0;
+    let mod_zero = [0.0_f32; NUM_MOD_DESTS];
+
+    // 1. Every DistortionMode produces finite, bounded audio and enters idle sleep cleanly
+    for mode in DistortionMode::ALL {
+        let mut rack = FxRackState::new(sr);
+        let mut p = FxRackParams::default();
+        p.buses[0].slots[0] = FxSlotParams {
+            fx_type: FxType::Distortion,
+            enabled: true,
+            stack: 1,
+            distortion_mode: mode,
+            params: [0.50, 0.75, 0.50, 1.0],
+            ..FxSlotParams::default()
+        };
+        let mut peak = 0.0_f32;
+        for n in 0..1024 {
+            let x = 0.6 * (2.0 * std::f32::consts::PI * 220.0 * n as f32 / sr).sin();
+            let (l, r) = rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &p, &mod_zero, 120.0, None);
+            assert!(l.is_finite() && r.is_finite(), "mode {:?} produced NaN/Inf", mode);
+            peak = peak.max(l.abs()).max(r.abs());
+        }
+        assert!(peak > 0.05 && peak <= 1.5, "mode {:?} peak out of range: {}", mode, peak);
+
+        for _ in 0..1500 {
+            let _ = rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &p, &mod_zero, 120.0, None);
+        }
+        let (il, ir) = rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &p, &mod_zero, 120.0, None);
+        assert_eq!((il, ir), (0.0, 0.0), "mode {:?} did not enter idle sleep", mode);
+    }
+
+    // 2. Bias != 0 introduces even-harmonic asymmetry on odd-symmetric shapers (ClassicC, LinearFold, HardClip)
+    for mode in [DistortionMode::ClassicC, DistortionMode::LinearFold, DistortionMode::HardClip] {
+        let sym_sum = shape_sample(mode, 0.45, 0.8, 0.0) + shape_sample(mode, -0.45, 0.8, 0.0);
+        let asym_sum = shape_sample(mode, 0.45, 0.8, 0.6) + shape_sample(mode, -0.45, 0.8, 0.6);
+        assert!(sym_sum.abs() < 1e-5, "{:?} should be odd-symmetric at bias=0: {}", mode, sym_sum);
+        assert!(asym_sum.abs() > 0.01, "{:?} should be asymmetric at bias=0.6: {}", mode, asym_sum);
+    }
+
+    // 3. LinearFold exhibits multi-crossing wavefolding at high drive
+    let mut crossings = 0usize;
+    let mut prev = shape_sample(DistortionMode::LinearFold, -1.0, 1.0, 0.0);
+    for i in 1..=200 {
+        let x = -1.0 + 2.0 * (i as f32 / 200.0);
+        let cur = shape_sample(DistortionMode::LinearFold, x, 1.0, 0.0);
+        if (prev < 0.0 && cur >= 0.0) || (prev > 0.0 && cur <= 0.0) {
+            crossings += 1;
+        }
+        prev = cur;
+    }
+    assert!(crossings >= 5, "LinearFold should cross zero multiple times at full drive, got {}", crossings);
+
+    // 4. Expanded InsertMode variants produce finite, audible audio
+    let bank = WavetableBank::new();
+    for ins_mode in [
+        InsertMode::ClassicA,
+        InsertMode::ClassicB,
+        InsertMode::ClassicC,
+        InsertMode::DiodeA,
+        InsertMode::DiodeB,
+        InsertMode::LinearFold,
+        InsertMode::SineFold,
+        InsertMode::HardClip,
+        InsertMode::HalfRectify,
+        InsertMode::FullRectify,
+    ] {
+        let mut eng = SynthEngine::new(sr);
+        let mut sp = SynthParams::default();
+        sp.oscs[0].enabled = true;
+        sp.oscs[0].level = 0.8;
+        sp.routing.inserts[0].mode = ins_mode;
+        sp.routing.inserts[0].position = InsertPosition::PreFilter;
+        sp.routing.inserts[0].drive = 0.7;
+        eng.note_on(0, 60, 1.0, None, &sp);
+        let mut ins_peak = 0.0_f32;
+        for _ in 0..512 {
+            let (l, r) = eng.process_sample(&sp, &bank);
+            assert!(l.is_finite() && r.is_finite());
+            ins_peak = ins_peak.max(l.abs()).max(r.abs());
+        }
+        assert!(ins_peak > 0.01, "InsertMode {:?} produced silence", ins_mode);
+    }
+}

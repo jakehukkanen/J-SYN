@@ -18,6 +18,7 @@ use crate::filter::{
 use crate::mod_matrix::{ModDestination, ModUiTelemetry, NUM_MOD_DESTS};
 use crate::oscillator::EngineMode;
 use crate::oversample::{Biquad, BiquadCoeffs, Oversampler4x};
+use crate::waveshaper::DistortionMode;
 
 use self::diopser::DiopserStereo;
 use self::dynamics::{DistortionStereo, JSatClipperStereo, OttStereo};
@@ -214,6 +215,8 @@ pub struct FxSlotParams {
     pub utility_inv_r: bool,
     /// Enable 4x True Peak detection in `LIMITER` (default `false`).
     pub limiter_true_peak: bool,
+    /// Master Distortion waveshaping algorithm (default `DistortionMode::Tube`).
+    pub distortion_mode: DistortionMode,
 }
 
 impl Default for FxSlotParams {
@@ -231,6 +234,7 @@ impl Default for FxSlotParams {
             utility_inv_l: false,
             utility_inv_r: false,
             limiter_true_peak: false,
+            distortion_mode: DistortionMode::Tube,
         }
     }
 }
@@ -242,8 +246,8 @@ impl FxSlotParams {
             FxType::Off => [0.5, 0.5, 0.5, 1.0],
             // OTT: Depth 100%, Time 1.00x (0.50), In Gain 0 dB (0.50), Out Gain 0 dB (0.50)
             FxType::Ott => [1.00, 0.50, 0.50, 0.50],
-            // Distortion: Mode=Tube (0.0), Drive 30%, Tone Neutral (0.50), Mix 100%
-            FxType::Distortion => [0.00, 0.30, 0.50, 1.00],
+            // Distortion: Bias Neutral (0.50), Drive 30%, Tone Neutral (0.50), Mix 100%
+            FxType::Distortion => [0.50, 0.30, 0.50, 1.00],
             // Chorus / Dimension: Rate ~0.5 Hz (0.35), Depth 50%, Dim 75%, Mix 100%
             FxType::Chorus => [0.35, 0.50, 0.75, 1.00],
             // Delay: Time=1/8D (0.43), Feedback 38%, Mod 15%, Mix 100%
@@ -300,6 +304,7 @@ impl FxSlotParams {
             utility_inv_l: false,
             utility_inv_r: false,
             limiter_true_peak: false,
+            distortion_mode: DistortionMode::Tube,
         }
     }
 }
@@ -607,7 +612,7 @@ impl StereoFxStage {
         match slot.fx_type {
             FxType::Off => (in_l, in_r, 0.0),
             FxType::Ott => self.ott.process(in_l, in_r, p),
-            FxType::Distortion => self.dist.process(in_l, in_r, p),
+            FxType::Distortion => self.dist.process(in_l, in_r, slot.distortion_mode, p),
             FxType::Chorus => self.chorus.process(in_l, in_r, p, eq),
             FxType::Delay => self.delay.process(in_l, in_r, p, eq, tempo_bpm),
             FxType::Reverb => self.reverb.process(in_l, in_r, p, eq),
@@ -970,12 +975,7 @@ impl FxRackState {
 
     #[inline]
     pub fn format_distortion_submode(p0: f32) -> &'static str {
-        match DistortionStereo::sub_mode_index(p0) {
-            0 => "Tube",
-            1 => "Mech",
-            2 => "Sine",
-            _ => "Crush",
-        }
+        DistortionMode::from_index(DistortionStereo::sub_mode_index(p0)).name()
     }
 
     #[inline]

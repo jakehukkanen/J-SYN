@@ -3,6 +3,10 @@ use std::f32::consts::TAU;
 use crate::filter::fast_tanh;
 use crate::oscillator::EngineMode;
 use crate::oversample::{Biquad, BiquadCoeffs, Oversampler4x};
+use crate::waveshaper::{
+    mech_clip, shape_parabolic, shape_sample, shape_sine, shape_soft_clip, tube_saturate,
+    DistortionMode,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InsertMode {
@@ -15,6 +19,16 @@ pub enum InsertMode {
     Parabolic = 6,
     SoftClip = 7,
     Bitcrush = 8,
+    ClassicA = 9,
+    ClassicB = 10,
+    ClassicC = 11,
+    DiodeA = 12,
+    DiodeB = 13,
+    LinearFold = 14,
+    SineFold = 15,
+    HardClip = 16,
+    HalfRectify = 17,
+    FullRectify = 18,
 }
 
 impl InsertMode {
@@ -28,6 +42,16 @@ impl InsertMode {
             6 => Self::Parabolic,
             7 => Self::SoftClip,
             8 => Self::Bitcrush,
+            9 => Self::ClassicA,
+            10 => Self::ClassicB,
+            11 => Self::ClassicC,
+            12 => Self::DiodeA,
+            13 => Self::DiodeB,
+            14 => Self::LinearFold,
+            15 => Self::SineFold,
+            16 => Self::HardClip,
+            17 => Self::HalfRectify,
+            18 => Self::FullRectify,
             _ => Self::Off,
         }
     }
@@ -153,48 +177,6 @@ impl Default for RoutingParams {
     }
 }
 
-#[inline]
-fn shape_sine(x: f32, drive: f32) -> f32 {
-    let gain = 1.0 + drive * 6.0;
-    (x * gain).sin() * 0.85
-}
-
-#[inline]
-fn shape_parabolic(x: f32, drive: f32) -> f32 {
-    let g = 1.0 + drive * 4.0;
-    let u = x * g;
-    let asym = 0.25 * drive * u * u;
-    fast_tanh(u + asym) - 0.15 * fast_tanh(asym)
-}
-
-#[inline]
-fn shape_soft_clip(x: f32, drive: f32) -> f32 {
-    let g = 1.0 + drive * 8.0;
-    fast_tanh(x * g)
-}
-
-#[inline]
-pub fn tube_saturate(x: f32, drive: f32) -> f32 {
-    let gain = 1.0 + drive * 19.0;
-    let bias = drive * 0.08;
-    let s = (x * gain + bias).tanh();
-    s - bias.tanh()
-}
-
-#[inline]
-pub fn mech_clip(x: f32, drive: f32) -> f32 {
-    let gain = 1.0 + drive * 29.0;
-    let s = x * gain;
-    if s > 1.0 {
-        1.0
-    } else if s < -1.0 {
-        -1.0
-    } else {
-        let k = 0.15 * drive;
-        s - k * (s * s * s)
-    }
-}
-
 /// Per-voice stereo Insert Waveshaper state (pre-allocated per voice, zero heap allocations).
 #[derive(Debug, Clone, Copy)]
 pub struct InsertShaperState {
@@ -288,6 +270,16 @@ impl InsertShaperState {
                 let m = mech_clip(high_shelf.process(low_shelf.process(dry)), drive) * 0.65;
                 tube_saturate(m, drive) * 0.90
             }
+            InsertMode::ClassicA => shape_sample(DistortionMode::ClassicA, dry, drive, 0.0),
+            InsertMode::ClassicB => shape_sample(DistortionMode::ClassicB, dry, drive, 0.0),
+            InsertMode::ClassicC => shape_sample(DistortionMode::ClassicC, dry, drive, 0.0),
+            InsertMode::DiodeA => shape_sample(DistortionMode::DiodeA, dry, drive, 0.0),
+            InsertMode::DiodeB => shape_sample(DistortionMode::DiodeB, dry, drive, 0.0),
+            InsertMode::LinearFold => shape_sample(DistortionMode::LinearFold, dry, drive, 0.0),
+            InsertMode::SineFold => shape_sample(DistortionMode::SineFold, dry, drive, 0.0),
+            InsertMode::HardClip => shape_sample(DistortionMode::HardClip, dry, drive, 0.0),
+            InsertMode::HalfRectify => shape_sample(DistortionMode::HalfRectify, dry, drive, 0.0),
+            InsertMode::FullRectify => shape_sample(DistortionMode::FullRectify, dry, drive, 0.0),
             _ => dry,
         })
     }
@@ -316,7 +308,20 @@ impl InsertShaperState {
 
         let (wet_l, wet_r) = match params.mode {
             InsertMode::Off => (in_l, in_r),
-            InsertMode::Tube | InsertMode::Mech | InsertMode::TubeToMech | InsertMode::MechToTube => {
+            InsertMode::Tube
+            | InsertMode::Mech
+            | InsertMode::TubeToMech
+            | InsertMode::MechToTube
+            | InsertMode::ClassicA
+            | InsertMode::ClassicB
+            | InsertMode::ClassicC
+            | InsertMode::DiodeA
+            | InsertMode::DiodeB
+            | InsertMode::LinearFold
+            | InsertMode::SineFold
+            | InsertMode::HardClip
+            | InsertMode::HalfRectify
+            | InsertMode::FullRectify => {
                 self.prev_in_l = in_l;
                 self.prev_in_r = in_r;
                 let wl = self.process_crush_channel(0, in_l, params.mode, drive);

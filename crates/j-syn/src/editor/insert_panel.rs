@@ -42,6 +42,16 @@ pub(super) const INSERT_MODE_ITEMS: &[(&str, InsertModeParam)] = &[
     ("Parabolic", InsertModeParam::Parabolic),
     ("Soft Clip", InsertModeParam::SoftClip),
     ("Bitcrush", InsertModeParam::Bitcrush),
+    ("Classic A", InsertModeParam::ClassicA),
+    ("Classic B", InsertModeParam::ClassicB),
+    ("Classic C", InsertModeParam::ClassicC),
+    ("Diode A", InsertModeParam::DiodeA),
+    ("Diode B", InsertModeParam::DiodeB),
+    ("Linear Fold", InsertModeParam::LinearFold),
+    ("Sine Fold", InsertModeParam::SineFold),
+    ("Hard Clip", InsertModeParam::HardClip),
+    ("Half Rect", InsertModeParam::HalfRectify),
+    ("Full Rect", InsertModeParam::FullRectify),
 ];
 
 pub(super) const INSERT_POS_ITEMS: &[(&str, InsertPosParam)] = &[

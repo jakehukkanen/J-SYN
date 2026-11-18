@@ -410,6 +410,71 @@ fn migrate_legacy_v1_enum_norm(
     Some(clamp_finite_norm(unsafe { ptr.preview_normalized(old_idx) }, ptr))
 }
 
+fn legacy_distortion_slot_keys(id: &str) -> Option<(String, String, String)> {
+    if let Some(suffix) = id
+        .strip_prefix("bus_b_fx_dist_m_")
+        .or_else(|| id.strip_prefix("bus_b_fx_p1_"))
+    {
+        Some((
+            format!("bus_b_fx_type_{suffix}"),
+            format!("bus_b_fx_dist_m_{suffix}"),
+            format!("bus_b_fx_p1_{suffix}"),
+        ))
+    } else if let Some(suffix) = id
+        .strip_prefix("fx_dist_m_")
+        .or_else(|| id.strip_prefix("fx_p1_"))
+    {
+        Some((
+            format!("fx_type_{suffix}"),
+            format!("fx_dist_m_{suffix}"),
+            format!("fx_p1_{suffix}"),
+        ))
+    } else {
+        None
+    }
+}
+
+fn is_legacy_distortion_slot(patch: &JSynPatch, type_id: &str, dist_m_id: &str) -> bool {
+    if patch.enum_names.contains_key(dist_m_id)
+        || patch.plain_params.contains_key(dist_m_id)
+        || patch.params.contains_key(dist_m_id)
+    {
+        return false;
+    }
+    if patch
+        .enum_names
+        .get(type_id)
+        .is_some_and(|n| n.eq_ignore_ascii_case("Distortion"))
+    {
+        return true;
+    }
+    if patch
+        .plain_params
+        .get(type_id)
+        .is_some_and(|v| v.is_finite() && v.round() as i32 == 2)
+    {
+        return true;
+    }
+    if let Some(&raw_norm) = patch.params.get(type_id) {
+        if raw_norm.is_finite() {
+            let n = raw_norm.clamp(0.0, 1.0);
+            let old_steps = if patch.params.contains_key("fx_tr_flt_1") {
+                10.0
+            } else if patch.params.contains_key("fx_diop_s_1") {
+                9.0
+            } else if patch.params.contains_key("flt_slope_1") {
+                8.0
+            } else if patch.version < 2 {
+                7.0
+            } else {
+                12.0
+            };
+            return (n * old_steps).round() as i32 == 2;
+        }
+    }
+    false
+}
+
 fn resolve_patch_param_norm(patch: &JSynPatch, id: &str, ptr: ParamPtr) -> f32 {
     // SAFETY: Caller passes valid `ParamPtr` from a live `JSynPluginParams`.
     unsafe {
@@ -456,6 +521,23 @@ fn resolve_patch_param_norm(patch: &JSynPatch, id: &str, ptr: ParamPtr) -> f32 {
                     }
                 }
 
+                if id.starts_with("fx_dist_m_") || id.starts_with("bus_b_fx_dist_m_") {
+                    if let Some((type_id, dist_m_id, p1_id)) = legacy_distortion_slot_keys(id) {
+                        if is_legacy_distortion_slot(patch, &type_id, &dist_m_id) {
+                            let old_p1 = patch
+                                .plain_params
+                                .get(&p1_id)
+                                .or_else(|| patch.params.get(&p1_id))
+                                .copied()
+                                .filter(|v| v.is_finite())
+                                .unwrap_or(0.0)
+                                .clamp(0.0, 1.0);
+                            let idx = j_syn_dsp::waveshaper::legacy_distortion_submode_index(old_p1);
+                            return clamp_finite_norm(ptr.preview_normalized(idx as f32), ptr);
+                        }
+                    }
+                }
+
                 ptr.default_normalized_value()
             }
             ParamPtr::IntParam(_) => {
@@ -472,6 +554,13 @@ fn resolve_patch_param_norm(patch: &JSynPatch, id: &str, ptr: ParamPtr) -> f32 {
                 ptr.default_normalized_value()
             }
             ParamPtr::FloatParam(_) => {
+                if id.starts_with("fx_p1_") || id.starts_with("bus_b_fx_p1_") {
+                    if let Some((type_id, dist_m_id, _)) = legacy_distortion_slot_keys(id) {
+                        if is_legacy_distortion_slot(patch, &type_id, &dist_m_id) {
+                            return 0.50;
+                        }
+                    }
+                }
                 if let Some(&plain) = patch.plain_params.get(id) {
                     if plain.is_finite() {
                         return clamp_finite_norm(ptr.preview_normalized(plain), ptr);
@@ -941,5 +1030,62 @@ mod tests {
         );
         assert_eq!(resolved.as_deref(), Some(target_wt.as_path()));
         let _ = std::fs::remove_dir_all(&wt_root);
+    }
+
+    #[test]
+    fn legacy_distortion_quartile_patches_migrate_to_distortion_mode_and_neutral_bias() {
+        let params_obj = JSynPluginParams::default();
+        let param_map = params_obj.param_map();
+        let ptr_for = |id: &str| {
+            *param_map
+                .iter()
+                .find(|(pid, _, _)| pid == id)
+                .map(|(_, ptr, _)| ptr)
+                .unwrap_or_else(|| panic!("missing param id {id}"))
+        };
+
+        let mut legacy = JSynPatch::default();
+        legacy.version = 2;
+        for (slot, &(p1_val, expected_mode)) in [
+            (0.10_f32, "Tube"),
+            (0.35_f32, "Mech"),
+            (0.60_f32, "Sine"),
+            (0.85_f32, "Crush"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let slot_num = slot + 1;
+            let ty_id = format!("fx_type_{slot_num}");
+            let p1_id = format!("fx_p1_{slot_num}");
+            let dm_id = format!("fx_dist_m_{slot_num}");
+            legacy.enum_names.insert(ty_id.clone(), "Distortion".to_string());
+            legacy.params.insert(p1_id.clone(), p1_val);
+
+            let resolved_mode = resolve_patch_param_norm(&legacy, &dm_id, ptr_for(&dm_id));
+            assert_eq!(
+                unsafe { ptr_for(&dm_id).normalized_value_to_string(resolved_mode, false) },
+                *expected_mode
+            );
+            let resolved_bias = resolve_patch_param_norm(&legacy, &p1_id, ptr_for(&p1_id));
+            assert!(
+                (resolved_bias - 0.50).abs() < 1e-6,
+                "legacy Distortion p1 ({p1_id}) should reset to 0.50 neutral Bias, got {resolved_bias}"
+            );
+        }
+
+        // Modern patch with fx_dist_m_1 present preserves custom Bias
+        let mut modern = JSynPatch::default();
+        modern.version = 2;
+        modern.enum_names.insert("fx_type_1".into(), "Distortion".into());
+        modern.enum_names.insert("fx_dist_m_1".into(), "Classic B".into());
+        modern.params.insert("fx_p1_1".into(), 0.72);
+        let dm = resolve_patch_param_norm(&modern, "fx_dist_m_1", ptr_for("fx_dist_m_1"));
+        assert_eq!(
+            unsafe { ptr_for("fx_dist_m_1").normalized_value_to_string(dm, false) },
+            "Classic B"
+        );
+        let bias = resolve_patch_param_norm(&modern, "fx_p1_1", ptr_for("fx_p1_1"));
+        assert!((bias - 0.72).abs() < 1e-6);
     }
 }

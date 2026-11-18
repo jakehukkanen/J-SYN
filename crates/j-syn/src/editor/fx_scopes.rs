@@ -734,20 +734,15 @@ fn paint_distortion_scope(
         1.1 * dpx,
     );
 
-    let submode = (slot.p1.value() * 3.99) as usize;
-    let drive = 1.0 + slot.p2.value().clamp(0.0, 1.0) * 11.0;
+    let dist_mode: j_syn_dsp::DistortionMode = slot.distortion_mode.value().into();
+    let bias = (slot.p1.value().clamp(0.0, 1.0) * 2.0) - 1.0;
+    let drive = slot.p2.value().clamp(0.0, 1.0);
     let mut xfer = vg::Path::new();
-    const PTS: usize = 48;
+    const PTS: usize = 64;
     for i in 0..PTS {
         let t = i as f32 / (PTS - 1) as f32;
         let x_in = t * 2.0 - 1.0;
-        let y_out = match submode {
-            0 => (x_in * drive).tanh(),
-            1 => (x_in * drive).clamp(-1.0, 1.0),
-            2 => (x_in * drive * 1.3).sin(),
-            _ => ((x_in * drive).tanh() * 6.0).round() / 6.0,
-        }
-        .clamp(-1.0, 1.0);
+        let y_out = j_syn_dsp::waveshaper::shape_sample(dist_mode, x_in, drive, bias).clamp(-1.0, 1.0);
         let px = ix + t * iw;
         let py = iy + (1.0 - (y_out * 0.5 + 0.5)) * ih;
         if i == 0 {
