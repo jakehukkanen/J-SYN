@@ -11,7 +11,7 @@ use super::mod_bar::ModUiState;
 use super::widgets::{
     KnobDimExt, ParamStepPill, PitchDragBox, RatioDragBox, RotaryKnob, ValueFormatter,
 };
-use super::{BottomTab, UiData, UiEvent};
+use super::{BottomTab, CenterStageTab, UiData, UiEvent};
 use crate::JSynPluginParams;
 
 mod dropdowns;
@@ -121,35 +121,6 @@ pub(super) fn build_header_knob_cell<L, Params, P, FMap>(
         accent_rgb,
         None,
         None,
-    );
-}
-
-pub(super) fn build_header_knob_cell_mod_dim<L, Params, P, FMap>(
-    cx: &mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    bipolar: bool,
-    accent_rgb: (u8, u8, u8),
-    dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
-    dim_params: Arc<JSynPluginParams>,
-    dim_check: fn(&JSynPluginParams) -> bool,
-) where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    build_header_knob_cell_inner(
-        cx,
-        params,
-        params_to_param,
-        title,
-        bipolar,
-        accent_rgb,
-        Some((dest, mod_ui, 0)),
-        Some((dim_params, dim_check)),
     );
 }
 
@@ -637,19 +608,26 @@ pub(super) fn build_module_header(cx: &mut Context, title: &'static str, height_
     .width(Stretch(1.0));
 }
 
-pub(super) fn build_tab_button(
+pub(super) fn build_center_tab_button(
     cx: &mut Context,
-    tab: BottomTab,
+    tab: CenterStageTab,
     title: &'static str,
-    width_px: f32,
+    width_weight: f32,
 ) {
     Button::new(
         cx,
-        move |cx| cx.emit(UiEvent::SelectTab(tab)),
+        move |cx| match tab {
+            CenterStageTab::Mod(sub) => {
+                cx.emit(UiEvent::SelectTab(BottomTab::ModSeq));
+                cx.emit(UiEvent::SelectModSeqSubTab(sub));
+            }
+            CenterStageTab::Voice => cx.emit(UiEvent::SelectTab(BottomTab::VoiceEnv)),
+            CenterStageTab::Routing => cx.emit(UiEvent::SelectTab(BottomTab::Routing)),
+        },
         move |cx| bold_label(cx, title, "tab-btn-label").hoverable(false),
     )
     .class("tab-btn")
-    .checked(UiData::active_tab.map(move |t| *t == tab))
-    .width(Pixels(width_px))
+    .checked(UiData::center_tab.map(move |t| *t == tab))
+    .width(Stretch(width_weight))
     .height(Stretch(1.0));
 }

@@ -173,6 +173,11 @@ impl Plugin for JSynPlugin {
                 level: self.params.fx_bus_b.level.value(),
                 pan: self.params.fx_bus_b.pan.value(),
             },
+            fx_bus_c: FxBusParams {
+                slots: std::array::from_fn(|i| self.params.fx_bus_c.slots[i].to_dsp()),
+                level: self.params.fx_bus_c.level.value(),
+                pan: self.params.fx_bus_c.pan.value(),
+            },
             fx_bus_topology: self.params.fx_bus_topology.value().into(),
             sub_bus: self.params.sub_bus.to_dsp(),
             tempo_bpm,

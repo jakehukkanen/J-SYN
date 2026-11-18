@@ -1,5 +1,5 @@
-//! `ROUTING` bottom drawer: per-source filter send balance + Direct bus selectors,
-//! Serial/Parallel filter routing + Bus output selectors, feedback bus, and Insert slot mix.
+//! `ROUTE` Center Stage tab: per-source filter send balance + Direct bus selectors,
+//! Filter topology & bus destinations, feedback bus, and 3-Lane FX Bus Matrix.
 
 use std::sync::Arc;
 
@@ -10,28 +10,42 @@ use nih_plug_vizia::vizia::prelude::*;
 use super::controls::{
     bold_label, build_enum_dropdown, build_flex_knob_cell_mod, build_module_header,
 };
-use super::insert_panel::INSERT_MODE_ITEMS;
 use super::mod_bar::{bottom_tab_tag, ModUiState};
+use super::tokens;
 use super::{BottomTab, AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData};
-use crate::{DirectRouteParam, FilterBusParam, FilterRoutingParam, JSynPluginParams};
+use crate::{
+    DirectRouteParam, FilterBusParam, FilterRoutingParam, FxBusTopologyParam, JSynPluginParams,
+};
 
-const FILTER_ROUTING_ITEMS: &[(&str, FilterRoutingParam)] = &[
+pub(super) const FILTER_ROUTING_ITEMS: &[(&str, FilterRoutingParam)] = &[
     ("Serial (F1->F2)", FilterRoutingParam::Serial),
     ("Parallel (F1+F2)", FilterRoutingParam::Parallel),
 ];
 
-const DIRECT_ROUTE_ITEMS: &[(&str, DirectRouteParam)] = &[
+pub(super) const DIRECT_ROUTE_ITEMS: &[(&str, DirectRouteParam)] = &[
     ("Off", DirectRouteParam::Off),
     ("Bus A", DirectRouteParam::BusA),
     ("Bus B", DirectRouteParam::BusB),
-    ("Sub", DirectRouteParam::Sub),
+    ("Bus C", DirectRouteParam::Sub),
 ];
 
-const FILTER_BUS_ITEMS: &[(&str, FilterBusParam)] = &[
+pub(super) const FILTER_BUS_ITEMS: &[(&str, FilterBusParam)] = &[
     ("Bus A", FilterBusParam::BusA),
     ("Bus B", FilterBusParam::BusB),
     ("A+B", FilterBusParam::Both),
-    ("Sub", FilterBusParam::Sub),
+    ("Bus C", FilterBusParam::Sub),
+    ("A+C", FilterBusParam::AC),
+    ("B+C", FilterBusParam::BC),
+    ("A+B+C", FilterBusParam::All),
+];
+
+const FX_TOPOLOGY_ITEMS: &[(&str, FxBusTopologyParam)] = &[
+    ("Parallel (A | B | C)", FxBusTopologyParam::Parallel),
+    ("Serial (A -> B | C)", FxBusTopologyParam::Serial),
+    ("Serial All (A -> B -> C)", FxBusTopologyParam::SerialAll),
+    ("A+B -> C", FxBusTopologyParam::ABToC),
+    ("A -> C | B", FxBusTopologyParam::AToC),
+    ("A | B -> C", FxBusTopologyParam::BToC),
 ];
 
 fn build_source_send_column<FB, FD>(
@@ -57,7 +71,7 @@ fn build_source_send_column<FB, FD>(
             title,
             true,
             accent,
-            26.0,
+            tokens::KNOB_COMPACT,
             dest,
             mod_ui.clone(),
             tab_tag,
@@ -73,7 +87,7 @@ fn build_source_send_column<FB, FD>(
     })
     .width(Stretch(1.0))
     .height(Auto)
-    .row_between(Pixels(2.0));
+    .row_between(Pixels(tokens::SPACE_XS));
 }
 
 pub(super) fn build_routing_tab(
@@ -84,8 +98,8 @@ pub(super) fn build_routing_tab(
 ) {
     let tab_tag = bottom_tab_tag(BottomTab::Routing);
 
-    HStack::new(cx, move |cx| {
-        // Card 1: Per-source filter send balance (-100% F1 <-> +100% F2) + Direct bus selector
+    VStack::new(cx, move |cx| {
+        // Row 1: Per-source filter send balance (-100% F1 <-> +100% F2) + Direct bus selector
         VStack::new(cx, {
             let params = params.clone();
             let gui_context = gui_context.clone();
@@ -155,7 +169,7 @@ pub(super) fn build_routing_tab(
                         |p| &p.routing.noise_direct,
                     );
                 })
-                .col_between(Pixels(6.0))
+                .col_between(Pixels(tokens::SPACE_MD))
                 .child_top(Stretch(1.0))
                 .child_bottom(Stretch(1.0))
                 .width(Stretch(1.0))
@@ -163,227 +177,127 @@ pub(super) fn build_routing_tab(
             }
         })
         .class("hardware-module")
-        .row_between(Pixels(3.0))
-        .width(Stretch(1.65))
+        .row_between(Pixels(tokens::SPACE_XS))
+        .width(Stretch(1.0))
         .height(Stretch(1.0));
 
-        // Card 2: Serial / Parallel routing, Filter Out Buses, Filter Mix, Feedback
-        VStack::new(cx, {
-            let params = params.clone();
-            let gui_context = gui_context.clone();
-            let mod_ui = mod_ui.clone();
-            move |cx| {
-                build_module_header(cx, "FILTER BUS & FEEDBACK", 18.0);
+        // Row 2: Filter & 3-Lane FX Bus Topology, Filter Out Buses, Filter Mix, Feedback
+        VStack::new(cx, move |cx| {
+            build_module_header(cx, "FILTER, FEEDBACK & 3-LANE FX ROUTING", 18.0);
 
-                HStack::new(cx, move |cx| {
-                    VStack::new(cx, {
-                        let params = params.clone();
-                        let gui_context = gui_context.clone();
-                        move |cx| {
-                            bold_label(cx, "TOPOLOGY", "mini-label")
-                                .width(Stretch(1.0))
-                                .height(Pixels(11.0))
-                                .child_space(Stretch(1.0));
-
-                            build_enum_dropdown(
-                                cx,
-                                params.clone(),
-                                gui_context.clone(),
-                                |p| &p.routing.filter_routing,
-                                FILTER_ROUTING_ITEMS,
-                            )
+            HStack::new(cx, move |cx| {
+                VStack::new(cx, {
+                    let p_fx = params.clone();
+                    let g_fx = gui_context.clone();
+                    move |cx| {
+                        bold_label(cx, "FX LANE MATRIX", "mini-label")
                             .width(Stretch(1.0))
-                            .height(Pixels(20.0));
+                            .height(Pixels(11.0))
+                            .child_space(Stretch(1.0));
+                        build_enum_dropdown(
+                            cx,
+                            p_fx.clone(),
+                            g_fx.clone(),
+                            |p| &p.fx_bus_topology,
+                            FX_TOPOLOGY_ITEMS,
+                        )
+                        .width(Stretch(1.0))
+                        .height(Pixels(20.0));
 
-                            HStack::new(cx, move |cx| {
-                                VStack::new(cx, {
-                                    let params = params.clone();
-                                    let gui_context = gui_context.clone();
-                                    move |cx| {
-                                        bold_label(cx, "F1 OUT", "mini-label")
-                                            .width(Stretch(1.0))
-                                            .height(Pixels(11.0))
-                                            .child_space(Stretch(1.0));
-                                        build_enum_dropdown(
-                                            cx,
-                                            params,
-                                            gui_context,
-                                            |p| &p.routing.f1_out_bus,
-                                            FILTER_BUS_ITEMS,
-                                        )
-                                        .width(Stretch(1.0))
-                                        .height(Pixels(18.0));
-                                    }
-                                })
-                                .width(Stretch(1.0))
-                                .height(Auto)
-                                .row_between(Pixels(2.0));
-
-                                VStack::new(cx, move |cx| {
-                                    bold_label(cx, "F2 OUT", "mini-label")
-                                        .width(Stretch(1.0))
-                                        .height(Pixels(11.0))
-                                        .child_space(Stretch(1.0));
-                                    build_enum_dropdown(
-                                        cx,
-                                        params,
-                                        gui_context,
-                                        |p| &p.routing.f2_out_bus,
-                                        FILTER_BUS_ITEMS,
-                                    )
-                                    .width(Stretch(1.0))
-                                    .height(Pixels(18.0));
-                                })
-                                .width(Stretch(1.0))
-                                .height(Auto)
-                                .row_between(Pixels(2.0));
-                            })
-                            .col_between(Pixels(4.0))
+                        bold_label(cx, "FILTER MODE", "mini-label")
                             .width(Stretch(1.0))
-                            .height(Auto);
-                        }
-                    })
-                    .width(Pixels(156.0))
-                    .height(Auto)
-                    .row_between(Pixels(4.0));
-
-                    build_flex_knob_cell_mod(
-                        cx,
-                        UiData::params,
-                        |p| &p.routing.filter_mix,
-                        "F1/F2 MIX",
-                        true,
-                        GOLD_RGB,
-                        36.0,
-                        ModDestination::FilterMix,
-                        mod_ui.clone(),
-                        tab_tag,
-                    );
-
-                    build_flex_knob_cell_mod(
-                        cx,
-                        UiData::params,
-                        |p| &p.routing.feedback_amount,
-                        "FEEDBACK",
-                        false,
-                        CORAL_RGB,
-                        36.0,
-                        ModDestination::FeedbackAmount,
-                        mod_ui.clone(),
-                        tab_tag,
-                    );
+                            .height(Pixels(11.0))
+                            .child_space(Stretch(1.0));
+                        build_enum_dropdown(
+                            cx,
+                            p_fx,
+                            g_fx,
+                            |p| &p.routing.filter_routing,
+                            FILTER_ROUTING_ITEMS,
+                        )
+                        .width(Stretch(1.0))
+                        .height(Pixels(20.0));
+                    }
                 })
-                .col_between(Pixels(8.0))
-                .child_top(Stretch(1.0))
-                .child_bottom(Stretch(1.0))
-                .width(Stretch(1.0))
-                .height(Stretch(1.0));
-            }
+                .width(Pixels(162.0))
+                .height(Auto)
+                .row_between(Pixels(tokens::SPACE_XS));
+
+                VStack::new(cx, {
+                    let p_out = params.clone();
+                    let g_out = gui_context;
+                    move |cx| {
+                        bold_label(cx, "F1 OUT BUS", "mini-label")
+                            .width(Stretch(1.0))
+                            .height(Pixels(11.0))
+                            .child_space(Stretch(1.0));
+                        build_enum_dropdown(
+                            cx,
+                            p_out.clone(),
+                            g_out.clone(),
+                            |p| &p.routing.f1_out_bus,
+                            FILTER_BUS_ITEMS,
+                        )
+                        .width(Stretch(1.0))
+                        .height(Pixels(20.0));
+
+                        bold_label(cx, "F2 OUT BUS", "mini-label")
+                            .width(Stretch(1.0))
+                            .height(Pixels(11.0))
+                            .child_space(Stretch(1.0));
+                        build_enum_dropdown(
+                            cx,
+                            p_out,
+                            g_out,
+                            |p| &p.routing.f2_out_bus,
+                            FILTER_BUS_ITEMS,
+                        )
+                        .width(Stretch(1.0))
+                        .height(Pixels(20.0));
+                    }
+                })
+                .width(Pixels(100.0))
+                .height(Auto)
+                .row_between(Pixels(tokens::SPACE_XS));
+
+                build_flex_knob_cell_mod(
+                    cx,
+                    UiData::params,
+                    |p| &p.routing.filter_mix,
+                    "F1/F2 MIX",
+                    true,
+                    GOLD_RGB,
+                    tokens::KNOB_STD,
+                    ModDestination::FilterMix,
+                    mod_ui.clone(),
+                    tab_tag,
+                );
+
+                build_flex_knob_cell_mod(
+                    cx,
+                    UiData::params,
+                    |p| &p.routing.feedback_amount,
+                    "FEEDBACK",
+                    false,
+                    CORAL_RGB,
+                    tokens::KNOB_STD,
+                    ModDestination::FeedbackAmount,
+                    mod_ui,
+                    tab_tag,
+                );
+            })
+            .col_between(Pixels(tokens::SPACE_LG))
+            .child_top(Stretch(1.0))
+            .child_bottom(Stretch(1.0))
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
         })
         .class("hardware-module")
-        .row_between(Pixels(3.0))
-        .width(Stretch(1.1))
-        .height(Stretch(1.0));
-
-        // Card 3: Insert slot mix & quick mode view
-        VStack::new(cx, {
-            let params = params.clone();
-            let gui_context = gui_context.clone();
-            let mod_ui = mod_ui.clone();
-            move |cx| {
-                build_module_header(cx, "INSERT MIX", 18.0);
-
-                HStack::new(cx, move |cx| {
-                    VStack::new(cx, {
-                        let params = params.clone();
-                        let gui_context = gui_context.clone();
-                        move |cx| {
-                            HStack::new(cx, {
-                                let params = params.clone();
-                                let gui_context = gui_context.clone();
-                                move |cx| {
-                                    bold_label(cx, "INS 1", "mini-label")
-                                        .width(Pixels(38.0))
-                                        .height(Stretch(1.0))
-                                        .child_space(Stretch(1.0));
-                                    build_enum_dropdown(
-                                        cx,
-                                        params.clone(),
-                                        gui_context.clone(),
-                                        |p| &p.routing.inserts[0].mode,
-                                        INSERT_MODE_ITEMS,
-                                    )
-                                    .width(Stretch(1.0))
-                                    .height(Pixels(20.0));
-                                }
-                            })
-                            .col_between(Pixels(4.0))
-                            .height(Pixels(20.0))
-                            .width(Stretch(1.0));
-
-                            HStack::new(cx, move |cx| {
-                                bold_label(cx, "INS 2", "mini-label")
-                                    .width(Pixels(38.0))
-                                    .height(Stretch(1.0))
-                                    .child_space(Stretch(1.0));
-                                build_enum_dropdown(
-                                    cx,
-                                    params.clone(),
-                                    gui_context.clone(),
-                                    |p| &p.routing.inserts[1].mode,
-                                    INSERT_MODE_ITEMS,
-                                )
-                                .width(Stretch(1.0))
-                                .height(Pixels(20.0));
-                            })
-                            .col_between(Pixels(4.0))
-                            .height(Pixels(20.0))
-                            .width(Stretch(1.0));
-                        }
-                    })
-                    .width(Pixels(146.0))
-                    .height(Auto)
-                    .row_between(Pixels(4.0));
-
-                    build_flex_knob_cell_mod(
-                        cx,
-                        UiData::params,
-                        |p| &p.routing.inserts[0].mix,
-                        "INS 1 MIX",
-                        false,
-                        AMBER_RGB,
-                        32.0,
-                        ModDestination::Insert1Mix,
-                        mod_ui.clone(),
-                        tab_tag,
-                    );
-
-                    build_flex_knob_cell_mod(
-                        cx,
-                        UiData::params,
-                        |p| &p.routing.inserts[1].mix,
-                        "INS 2 MIX",
-                        false,
-                        CORAL_RGB,
-                        32.0,
-                        ModDestination::Insert2Mix,
-                        mod_ui.clone(),
-                        tab_tag,
-                    );
-                })
-                .col_between(Pixels(8.0))
-                .child_top(Stretch(1.0))
-                .child_bottom(Stretch(1.0))
-                .width(Stretch(1.0))
-                .height(Stretch(1.0));
-            }
-        })
-        .class("hardware-module")
-        .row_between(Pixels(3.0))
-        .width(Stretch(1.2))
-        .height(Stretch(1.0));
+        .row_between(Pixels(tokens::SPACE_XS))
+        .width(Stretch(1.0))
+        .height(Pixels(106.0));
     })
-    .col_between(Pixels(6.0))
+    .row_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))
     .height(Stretch(1.0));
 }

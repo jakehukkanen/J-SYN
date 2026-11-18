@@ -6,10 +6,9 @@ use j_syn_dsp::mod_matrix::ModDestination;
 use nih_plug::prelude::GuiContext;
 use nih_plug_vizia::vizia::prelude::*;
 
-use super::controls::{
-    bold_label, build_enum_dropdown, build_flex_knob_cell_mod_dim, build_module_header,
-};
+use super::controls::{bold_label, build_enum_dropdown, build_flex_knob_cell_mod_dim};
 use super::mod_bar::ModUiState;
+use super::tokens;
 use super::{AMBER_RGB, CORAL_RGB, UiData};
 use crate::{InsertModeParam, InsertPosParam, JSynPluginParams};
 
@@ -60,7 +59,7 @@ pub(super) const INSERT_POS_ITEMS: &[(&str, InsertPosParam)] = &[
     ("Post-F2", InsertPosParam::PostFilter),
 ];
 
-fn build_insert_slot_row(
+fn build_insert_card(
     cx: &mut Context,
     slot_idx: usize,
     slot_label: &'static str,
@@ -70,99 +69,112 @@ fn build_insert_slot_row(
     accent: (u8, u8, u8),
 ) {
     let slot_check = insert_slot_check(slot_idx);
+    let p_dim = params.clone();
     let p_pos_dim = params.clone();
-    let p_drv_dim = params.clone();
-    let p_knob_dim = params.clone();
-    HStack::new(cx, move |cx| {
-        VStack::new(cx, {
-            let params = params.clone();
-            let gui_context = gui_context.clone();
+
+    VStack::new(cx, move |cx| {
+        // Card header strip: INSERT X + Position dropdown
+        HStack::new(cx, {
+            let p_hdr = params.clone();
+            let g_hdr = gui_context.clone();
             move |cx| {
-                HStack::new(cx, {
-                    let params = params.clone();
-                    let gui_context = gui_context.clone();
-                    move |cx| {
-                        bold_label(cx, slot_label, "mini-label")
-                            .width(Pixels(34.0))
-                            .height(Stretch(1.0))
-                            .child_space(Stretch(1.0));
-
-                        build_enum_dropdown(
-                            cx,
-                            params.clone(),
-                            gui_context.clone(),
-                            move |p| &p.routing.inserts[slot_idx].mode,
-                            INSERT_MODE_ITEMS,
-                        )
-                        .width(Stretch(1.0))
-                        .height(Pixels(19.0));
-                    }
-                })
-                .col_between(Pixels(4.0))
-                .height(Pixels(19.0))
-                .width(Stretch(1.0));
-
-                HStack::new(cx, move |cx| {
-                    bold_label(cx, "POS", "mini-label")
-                        .width(Pixels(34.0))
-                        .height(Stretch(1.0))
-                        .child_space(Stretch(1.0));
-
-                    build_enum_dropdown(
-                        cx,
-                        params.clone(),
-                        gui_context.clone(),
-                        move |p| &p.routing.inserts[slot_idx].position,
-                        INSERT_POS_ITEMS,
-                    )
+                bold_label(cx, slot_label, "module-title")
                     .width(Stretch(1.0))
-                    .height(Pixels(19.0));
-                })
+                    .height(Stretch(1.0))
+                    .child_top(Stretch(1.0))
+                    .child_bottom(Stretch(1.0));
+
+                build_enum_dropdown(
+                    cx,
+                    p_hdr,
+                    g_hdr,
+                    move |p| &p.routing.inserts[slot_idx].position,
+                    INSERT_POS_ITEMS,
+                )
                 .class("insert-pos-row")
                 .toggle_class(
                     "slot-disabled",
                     UiData::mod_ui_rev.map(move |_| !slot_check(&p_pos_dim)),
                 )
-                .col_between(Pixels(4.0))
-                .height(Pixels(19.0))
-                .width(Stretch(1.0));
+                .width(Pixels(96.0))
+                .height(Pixels(tokens::SNAPIN_HEADER_H));
             }
         })
-        .width(Stretch(1.0))
-        .height(Auto)
-        .row_between(Pixels(3.0));
+        .col_between(Pixels(tokens::SPACE_SM))
+        .height(Pixels(tokens::HEADER_STRIP_H))
+        .width(Stretch(1.0));
 
-        HStack::new(cx, {
-            let mod_ui = mod_ui.clone();
-            move |cx| {
-                build_flex_knob_cell_mod_dim(
-                    cx,
-                    UiData::params,
-                    move |p| &p.routing.inserts[slot_idx].drive,
-                    "DRIVE",
-                    false,
-                    accent,
-                    34.0,
-                    ModDestination::insert_drive(slot_idx),
-                    mod_ui.clone(),
-                    0,
-                    p_knob_dim,
-                    slot_check,
-                );
-            }
+        // Body: Mode selector on left + DRIVE & MIX full knobs on right
+        HStack::new(cx, move |cx| {
+            build_enum_dropdown(
+                cx,
+                params.clone(),
+                gui_context,
+                move |p| &p.routing.inserts[slot_idx].mode,
+                INSERT_MODE_ITEMS,
+            )
+            .width(Stretch(1.0))
+            .height(Pixels(22.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+
+            HStack::new(cx, {
+                let p_drv = params.clone();
+                let m_drv = mod_ui.clone();
+                let p_mix = params.clone();
+                move |cx| {
+                    build_flex_knob_cell_mod_dim(
+                        cx,
+                        UiData::params,
+                        move |p| &p.routing.inserts[slot_idx].drive,
+                        "DRIVE",
+                        false,
+                        accent,
+                        tokens::KNOB_STD,
+                        ModDestination::insert_drive(slot_idx),
+                        m_drv,
+                        0,
+                        p_drv,
+                        slot_check,
+                    );
+
+                    build_flex_knob_cell_mod_dim(
+                        cx,
+                        UiData::params,
+                        move |p| &p.routing.inserts[slot_idx].mix,
+                        "MIX",
+                        false,
+                        accent,
+                        tokens::KNOB_STD,
+                        ModDestination::insert_mix(slot_idx),
+                        mod_ui,
+                        0,
+                        p_mix,
+                        slot_check,
+                    );
+                }
+            })
+            .class("insert-drive-cell")
+            .toggle_class(
+                "slot-disabled",
+                UiData::mod_ui_rev.map(move |_| !slot_check(&params)),
+            )
+            .col_between(Pixels(tokens::SPACE_MD))
+            .width(Pixels(86.0))
+            .height(Auto);
         })
-        .class("insert-drive-cell")
-        .toggle_class(
-            "slot-disabled",
-            UiData::mod_ui_rev.map(move |_| !slot_check(&p_drv_dim)),
-        )
-        .width(Pixels(54.0))
-        .height(Auto);
+        .col_between(Pixels(tokens::SPACE_MD))
+        .child_top(Stretch(1.0))
+        .child_bottom(Stretch(1.0))
+        .width(Stretch(1.0))
+        .height(Stretch(1.0));
     })
-    .class("insert-slot-row")
-    .col_between(Pixels(6.0))
-    .child_top(Stretch(1.0))
-    .child_bottom(Stretch(1.0))
+    .class("hardware-module")
+    .toggle_class(
+        "module-disabled",
+        UiData::mod_ui_rev.map(move |_| !slot_check(&p_dim)),
+    )
+    .row_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))
     .height(Stretch(1.0));
 }
@@ -173,22 +185,19 @@ pub(super) fn build_insert_panel(
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
-    VStack::new(cx, move |cx| {
-        build_module_header(cx, "INSERT FX", 18.0);
-
-        build_insert_slot_row(
+    HStack::new(cx, move |cx| {
+        build_insert_card(
             cx,
             0,
-            "INS 1",
+            "INSERT 1",
             params.clone(),
             gui_context.clone(),
             mod_ui.clone(),
             AMBER_RGB,
         );
-        build_insert_slot_row(cx, 1, "INS 2", params, gui_context, mod_ui, CORAL_RGB);
+        build_insert_card(cx, 1, "INSERT 2", params, gui_context, mod_ui, CORAL_RGB);
     })
-    .class("hardware-module")
-    .row_between(Pixels(4.0))
+    .col_between(Pixels(tokens::SPACE_MD))
     .width(Stretch(1.0))
-    .height(Stretch(1.0));
+    .height(Pixels(82.0));
 }

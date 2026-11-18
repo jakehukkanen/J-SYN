@@ -11,15 +11,18 @@ use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::RawParamEvent;
 
 use super::controls::{
-    bold_label, build_enum_dropdown, build_enum_dropdown_with_override, build_flex_knob_cell_mod_dim,
+    bold_label, build_enum_dropdown, build_enum_dropdown_with_override, build_flex_knob_cell_mod,
+    build_flex_knob_cell_mod_dim,
 };
 use super::mod_bar::ModUiState;
+use super::routing_tab::{FILTER_BUS_ITEMS, FILTER_ROUTING_ITEMS};
 use super::scope::{
     filter_db_to_raw_y, filter_freq_to_norm, paint_filter_freq_grid, paint_filter_response_curve,
     paint_scope_bg, paint_scope_border, scope_trace_rgb,
 };
+use super::tokens;
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
-use super::{theme, UiData};
+use super::{theme, UiData, AMBER_RGB, CORAL_RGB, GOLD_RGB};
 use crate::{FilterModeParam, FilterPluginParams, FilterSlopeParam, JSynPluginParams};
 
 #[inline]
@@ -403,7 +406,7 @@ pub(super) fn build_filter_panel(
 
         FilterResponseScope::new(cx, filter_idx, params.clone(), mod_ui.clone(), accent)
             .width(Stretch(1.0))
-            .height(Pixels(92.0));
+            .height(Pixels(52.0));
 
         HStack::new(cx, {
             let params = params.clone();
@@ -416,7 +419,7 @@ pub(super) fn build_filter_panel(
                     "CUTOFF",
                     false,
                     accent,
-                    49.0,
+                    tokens::KNOB_FLT,
                     ModDestination::filter_cutoff(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -430,7 +433,7 @@ pub(super) fn build_filter_panel(
                     "RES",
                     false,
                     accent,
-                    49.0,
+                    tokens::KNOB_FLT,
                     ModDestination::filter_res(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -444,7 +447,7 @@ pub(super) fn build_filter_panel(
                     "DRIVE",
                     false,
                     accent,
-                    49.0,
+                    tokens::KNOB_FLT,
                     ModDestination::filter_drive(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -457,11 +460,11 @@ pub(super) fn build_filter_panel(
                     params.clone(),
                     mod_ui.clone(),
                     accent,
-                    49.0,
+                    tokens::KNOB_FLT,
                 );
             }
         })
-        .col_between(Pixels(4.0))
+        .col_between(Pixels(tokens::SPACE_SM))
         .width(Stretch(1.0))
         .height(Auto);
     })
@@ -470,7 +473,142 @@ pub(super) fn build_filter_panel(
         "module-disabled",
         UiData::mod_ui_rev.map(move |_| !filter_check(&p_dim)),
     )
-    .row_between(Pixels(4.0))
+    .row_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))
-    .height(Pixels(188.0));
+    .height(Stretch(1.0));
+}
+
+pub(super) fn build_dual_filter_section(
+    cx: &mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
+) {
+    VStack::new(cx, move |cx| {
+        // Shared Filter Routing Strip: Topology, F1/F2 Bus Outs, F1/F2 Mix, Feedback
+        let p_bar = params.clone();
+        let g_bar = gui_context.clone();
+        let m_bar = mod_ui.clone();
+        HStack::new(cx, move |cx| {
+            bold_label(cx, "FILTERS", "module-title")
+                .width(Auto)
+                .height(Stretch(1.0))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0));
+
+            build_enum_dropdown(
+                cx,
+                p_bar.clone(),
+                g_bar.clone(),
+                |p| &p.routing.filter_routing,
+                FILTER_ROUTING_ITEMS,
+            )
+            .width(Pixels(106.0))
+            .height(Pixels(tokens::HEADER_STRIP_H));
+
+            bold_label(cx, "F1>", "mini-label")
+                .width(Auto)
+                .height(Stretch(1.0))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0));
+            build_enum_dropdown(
+                cx,
+                p_bar.clone(),
+                g_bar.clone(),
+                |p| &p.routing.f1_out_bus,
+                FILTER_BUS_ITEMS,
+            )
+            .width(Pixels(62.0))
+            .height(Pixels(tokens::HEADER_STRIP_H));
+
+            bold_label(cx, "F2>", "mini-label")
+                .width(Auto)
+                .height(Stretch(1.0))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0));
+            build_enum_dropdown(
+                cx,
+                p_bar,
+                g_bar,
+                |p| &p.routing.f2_out_bus,
+                FILTER_BUS_ITEMS,
+            )
+            .width(Pixels(62.0))
+            .height(Pixels(tokens::HEADER_STRIP_H));
+
+            Element::new(cx).width(Stretch(1.0));
+
+            HStack::new(cx, {
+                let m_mix = m_bar.clone();
+                move |cx| {
+                    bold_label(cx, "F1/2", "mini-label")
+                        .width(Auto)
+                        .height(Stretch(1.0))
+                        .child_top(Stretch(1.0))
+                        .child_bottom(Stretch(1.0));
+                    build_flex_knob_cell_mod(
+                        cx,
+                        UiData::params,
+                        |p| &p.routing.filter_mix,
+                        "",
+                        true,
+                        GOLD_RGB,
+                        tokens::KNOB_MINI,
+                        ModDestination::FilterMix,
+                        m_mix,
+                        0,
+                    );
+                }
+            })
+            .col_between(Pixels(tokens::SPACE_XS))
+            .width(Pixels(54.0))
+            .height(Stretch(1.0));
+
+            HStack::new(cx, move |cx| {
+                bold_label(cx, "FB", "mini-label")
+                    .width(Auto)
+                    .height(Stretch(1.0))
+                    .child_top(Stretch(1.0))
+                    .child_bottom(Stretch(1.0));
+                build_flex_knob_cell_mod(
+                    cx,
+                    UiData::params,
+                    |p| &p.routing.feedback_amount,
+                    "",
+                    false,
+                    CORAL_RGB,
+                    tokens::KNOB_MINI,
+                    ModDestination::FeedbackAmount,
+                    m_bar,
+                    0,
+                );
+            })
+            .col_between(Pixels(tokens::SPACE_XS))
+            .width(Pixels(44.0))
+            .height(Stretch(1.0));
+        })
+        .class("fx-bus-header")
+        .col_between(Pixels(tokens::SPACE_SM))
+        .height(Pixels(24.0))
+        .width(Stretch(1.0));
+
+        // Side-by-side Filter 1 & Filter 2 cards
+        HStack::new(cx, move |cx| {
+            build_filter_panel(
+                cx,
+                0,
+                params.clone(),
+                gui_context.clone(),
+                mod_ui.clone(),
+                AMBER_RGB,
+            );
+            build_filter_panel(cx, 1, params, gui_context, mod_ui, CORAL_RGB);
+        })
+        .col_between(Pixels(tokens::SPACE_MD))
+        .width(Stretch(1.0))
+        .height(Stretch(1.0));
+    })
+    .row_between(Pixels(tokens::SPACE_SM))
+    .width(Stretch(1.0))
+    .height(Pixels(178.0));
 }

@@ -489,7 +489,7 @@ pub enum DirectRouteParam {
     BusA,
     #[name = "Bus B"]
     BusB,
-    #[name = "Sub"]
+    #[name = "Bus C"]
     Sub,
 }
 
@@ -512,8 +512,14 @@ pub enum FilterBusParam {
     BusB,
     #[name = "A+B"]
     Both,
-    #[name = "Sub"]
+    #[name = "Bus C"]
     Sub,
+    #[name = "A+C"]
+    AC,
+    #[name = "B+C"]
+    BC,
+    #[name = "A+B+C"]
+    All,
 }
 
 impl From<FilterBusParam> for FilterBusDest {
@@ -523,6 +529,9 @@ impl From<FilterBusParam> for FilterBusDest {
             FilterBusParam::BusB => Self::BusB,
             FilterBusParam::Both => Self::Both,
             FilterBusParam::Sub => Self::Sub,
+            FilterBusParam::AC => Self::AC,
+            FilterBusParam::BC => Self::BC,
+            FilterBusParam::All => Self::All,
         }
     }
 }
@@ -602,6 +611,26 @@ impl Default for RoutingPluginParams {
 }
 
 impl RoutingPluginParams {
+    #[inline]
+    pub fn osc_filter_send_param(&self, idx: usize) -> &FloatParam {
+        match idx {
+            0 => &self.osc1_flt_bal,
+            1 => &self.osc2_flt_bal,
+            2 => &self.osc3_flt_bal,
+            _ => &self.osc4_flt_bal,
+        }
+    }
+
+    #[inline]
+    pub fn osc_direct_param(&self, idx: usize) -> &EnumParam<DirectRouteParam> {
+        match idx {
+            0 => &self.osc1_direct,
+            1 => &self.osc2_direct,
+            2 => &self.osc3_direct,
+            _ => &self.osc4_direct,
+        }
+    }
+
     pub fn to_dsp(&self) -> RoutingParams {
         RoutingParams {
             osc_filter_balance: [

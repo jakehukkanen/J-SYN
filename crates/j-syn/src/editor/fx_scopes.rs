@@ -1240,11 +1240,13 @@ fn read_ring_snapshot(ring: &FxScopeRing) -> ([f32; FX_SCOPE_LEN], [f32; FX_SCOP
 }
 
 /// Compact clipper scope for the `SUB FX` banner showing pre-clip vs post-clip waveform.
+#[allow(dead_code)]
 pub(super) struct SubClipperScope {
     params: Arc<JSynPluginParams>,
     telemetry: Arc<ModUiTelemetry>,
 }
 
+#[allow(dead_code)]
 impl SubClipperScope {
     pub(super) fn new<'a>(
         cx: &'a mut Context,

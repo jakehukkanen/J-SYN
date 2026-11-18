@@ -11,7 +11,7 @@ use j_syn_dsp::{
     limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, mb_band_level_db, mb_out_gain_db,
     mb_xover_high_hz, mb_xover_low_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
     tube_res_flt_width_oct, tube_res_lfo_rate_hz, utility_gain_db_from_norm,
-    utility_width_from_norm, FxRackState, FxType, MB_BAND_LEVEL_DEFAULT_NORM,
+    utility_width_from_norm, FxBusTopology, FxRackState, FxType, MB_BAND_LEVEL_DEFAULT_NORM,
 };
 use nih_plug::prelude::{FloatParam, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
@@ -21,12 +21,11 @@ use super::controls::{
     build_enum_dropdown_with_override, build_inline_pill_cell, build_prefixed_enum_dropdown,
     ArrowButton, ArrowDir, ScrollDropdown, ScrollDropdownExt,
 };
-use super::fx_scopes::{
-    fx_accent_rgb, FxSlotVisualizer, MultibandXoverDragOverlay, SubClipperScope,
-};
-use super::mod_bar::{ModUiState, FX_VIEW_TAG, MAIN_FX_A_TAG, MAIN_FX_B_TAG};
+use super::fx_scopes::{fx_accent_rgb, FxSlotVisualizer, MultibandXoverDragOverlay};
+use super::mod_bar::ModUiState;
+use super::tokens;
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
-use super::{AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData, UiEvent};
+use super::{AMBER_RGB, GOLD_RGB, UiData, UiEvent};
 use crate::{
     DiopserStagesParam, DistortionModeParam, FilterModeParam, FxBusTopologyParam,
     FxFilterSlopeParam, FxTypeParam, JSynPluginParams,
@@ -117,22 +116,8 @@ const MB_DIST_MODE_ITEMS: &[(&str, DistortionModeParam)] = &[
 ];
 
 #[inline]
-fn sub_bus_enabled(p: &JSynPluginParams) -> bool {
-    p.sub_bus.enabled.value()
-}
-
-#[inline]
 fn slot_enabled_for_bus(p: &JSynPluginParams, bus_idx: usize, slot_idx: usize) -> bool {
     p.fx_bus_slots(bus_idx)[slot_idx].enabled.value()
-}
-
-#[inline]
-fn main_bus_tag(bus_idx: usize) -> u8 {
-    if bus_idx == 0 {
-        MAIN_FX_A_TAG
-    } else {
-        MAIN_FX_B_TAG
-    }
 }
 
 #[inline]
@@ -778,19 +763,7 @@ fn build_fx_slot_header(
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
-    show_reorder: bool,
 ) {
-    let slot_title: &'static str = match slot_idx {
-        0 => "FX 1",
-        1 => "FX 2",
-        2 => "FX 3",
-        3 => "FX 4",
-        4 => "FX 5",
-        5 => "FX 6",
-        6 => "FX 7",
-        _ => "FX 8",
-    };
-
     HStack::new(cx, move |cx| {
         LedToggleSwitch::new(
             cx,
@@ -800,16 +773,10 @@ fn build_fx_slot_header(
             "ON",
             AMBER_RGB,
         )
-        .width(Pixels(if show_reorder { 40.0 } else { 46.0 }))
-        .height(Pixels(17.0))
+        .width(Pixels(30.0))
+        .height(Pixels(16.0))
         .top(Stretch(1.0))
         .bottom(Stretch(1.0));
-
-        bold_label(cx, slot_title, "module-title")
-            .width(Pixels(25.0))
-            .height(Stretch(1.0))
-            .child_top(Stretch(1.0))
-            .child_bottom(Stretch(1.0));
 
         build_fx_type_dropdown(
             cx,
@@ -831,51 +798,53 @@ fn build_fx_slot_header(
             )
             .class("stk-pill");
         })
-        .width(Pixels(if show_reorder { 50.0 } else { 58.0 }))
-        .height(Pixels(18.0));
+        .width(Pixels(36.0))
+        .height(Pixels(tokens::SNAPIN_HEADER_H));
 
-        if show_reorder {
-            let p_up = params.clone();
-            let g_up = gui_context.clone();
-            let m_up = mod_ui.clone();
-            ArrowButton::new(
-                cx,
-                move |cx| {
-                    if slot_idx > 0 {
-                        swap_fx_slots(&p_up, g_up.as_ref(), &m_up, bus_idx, slot_idx, slot_idx - 1);
-                        cx.emit(UiEvent::ModUiChanged);
-                    }
-                },
-                ArrowDir::Up,
-            )
-            .class("fx-move-btn")
-            .class("fx-move-label")
-            .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 0))
-            .width(Pixels(16.0))
-            .height(Pixels(17.0));
+        let p_up = params.clone();
+        let g_up = gui_context.clone();
+        let m_up = mod_ui.clone();
+        ArrowButton::new(
+            cx,
+            move |cx| {
+                if slot_idx > 0 {
+                    swap_fx_slots(&p_up, g_up.as_ref(), &m_up, bus_idx, slot_idx, slot_idx - 1);
+                    cx.emit(UiEvent::ModUiChanged);
+                }
+            },
+            ArrowDir::Up,
+        )
+        .class("fx-move-btn")
+        .class("fx-move-label")
+        .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 0))
+        .width(Pixels(13.0))
+        .height(Pixels(16.0));
 
-            let p_dn = params.clone();
-            let g_dn = gui_context.clone();
-            let m_dn = mod_ui.clone();
-            ArrowButton::new(
-                cx,
-                move |cx| {
-                    if slot_idx < 7 {
-                        swap_fx_slots(&p_dn, g_dn.as_ref(), &m_dn, bus_idx, slot_idx, slot_idx + 1);
-                        cx.emit(UiEvent::ModUiChanged);
-                    }
-                },
-                ArrowDir::Down,
-            )
-            .class("fx-move-btn")
-            .class("fx-move-label")
-            .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 7))
-            .width(Pixels(16.0))
-            .height(Pixels(17.0));
-        }
+        ArrowButton::new(
+            cx,
+            move |cx| {
+                if slot_idx < 7 {
+                    swap_fx_slots(
+                        &params,
+                        gui_context.as_ref(),
+                        &mod_ui,
+                        bus_idx,
+                        slot_idx,
+                        slot_idx + 1,
+                    );
+                    cx.emit(UiEvent::ModUiChanged);
+                }
+            },
+            ArrowDir::Down,
+        )
+        .class("fx-move-btn")
+        .class("fx-move-label")
+        .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 7))
+        .width(Pixels(13.0))
+        .height(Pixels(16.0));
     })
-    .col_between(Pixels(3.0))
-    .height(Pixels(19.0))
+    .col_between(Pixels(tokens::SPACE_XS))
+    .height(Pixels(tokens::SNAPIN_HEADER_H))
     .width(Stretch(1.0));
 }
 
@@ -1293,8 +1262,8 @@ fn build_fx_knob_row(
                         "fx-subtab-active",
                         UiData::mod_ui_rev.map(move |_| m_xov_cls.fx_mb_tab(bus_idx, slot_idx) == 0),
                     )
-                    .width(Pixels(28.0))
-                    .height(Pixels(17.0));
+                    .width(Pixels(22.0))
+                    .height(Pixels(15.0));
 
                     if mb_tab > 0 {
                         let band = (mb_tab - 1) as usize;
@@ -1320,17 +1289,17 @@ fn build_fx_knob_row(
                                 p.fx_bus_slots(bus_idx)[slot_idx].mb_bands[band].enabled.value()
                             }),
                         )
-                        .width(Pixels(28.0))
-                        .height(Pixels(17.0));
+                        .width(Pixels(22.0))
+                        .height(Pixels(15.0));
                     } else {
                         Element::new(cx)
-                            .width(Pixels(28.0))
-                            .height(Pixels(17.0))
+                            .width(Pixels(22.0))
+                            .height(Pixels(15.0))
                             .hoverable(false);
                     }
                 })
-                .row_between(Pixels(3.0))
-                .width(Pixels(28.0))
+                .row_between(Pixels(2.0))
+                .width(Pixels(22.0))
                 .height(Auto)
                 .top(Stretch(1.0))
                 .bottom(Stretch(1.0));
@@ -1474,7 +1443,7 @@ fn build_compact_bar_knob<P, FMap>(
             accent,
             dest,
             mod_ui,
-            FX_VIEW_TAG,
+            0,
         );
         if let Some(check) = dim_check {
             knob = knob.enabled_by(params, check);
@@ -1509,435 +1478,248 @@ fn set_fx_bus_topology(
     setter.end_set_parameter(&params.fx_bus_topology);
 }
 
-fn build_fx_top_banner(
-    cx: &mut Context,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-    mod_ui: Arc<ModUiState>,
-) {
-    let no_dim: Option<fn(&JSynPluginParams) -> bool> = None;
-    let p_sub = params.clone();
-    let p_topo = params;
-
-    HStack::new(cx, move |cx| {
-        // Left Half: SUB / DIRECT BUS
-        HStack::new(cx, move |cx| {
-            LedToggleSwitch::new(
-                cx,
-                UiData::params,
-                |p| &p.sub_bus.enabled,
-                "SUB OFF",
-                "SUB FX",
-                CORAL_RGB,
-            )
-            .width(Pixels(72.0))
-            .height(Pixels(21.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
-
-            build_compact_bar_knob(
-                cx,
-                p_sub.clone(),
-                |p| &p.sub_bus.cutoff,
-                "LP CUTOFF",
-                56.0,
-                26.0,
-                false,
-                GOLD_RGB,
-                ModDestination::SubCutoff,
-                mod_ui.clone(),
-                Some(sub_bus_enabled),
-            );
-
-            build_compact_bar_knob(
-                cx,
-                p_sub.clone(),
-                |p| &p.sub_bus.drive,
-                "CLIP DRIVE",
-                60.0,
-                26.0,
-                false,
-                CORAL_RGB,
-                ModDestination::SubDrive,
-                mod_ui.clone(),
-                Some(sub_bus_enabled),
-            );
-
-            build_compact_bar_knob(
-                cx,
-                p_sub.clone(),
-                |p| &p.sub_bus.level,
-                "LEVEL",
-                36.0,
-                26.0,
-                false,
-                AMBER_RGB,
-                ModDestination::SubLevel,
-                mod_ui.clone(),
-                no_dim,
-            );
-
-            SubClipperScope::new(cx, p_sub, mod_ui.telemetry.clone())
-                .width(Stretch(1.0))
-                .min_width(Pixels(56.0))
-                .height(Pixels(28.0))
-                .top(Stretch(1.0))
-                .bottom(Stretch(1.0));
-        })
-        .class("fx-rack-banner")
-        .col_between(Pixels(12.0))
-        .height(Stretch(1.0))
-        .width(Stretch(1.0));
-
-        // Right Half: BUS ROUTING (Parallel A | B vs Serial A -> B)
-        HStack::new(cx, move |cx| {
-            bold_label(cx, "BUS ROUTING", "module-title")
-                .width(Auto)
-                .height(Stretch(1.0))
-                .child_top(Stretch(1.0))
-                .child_bottom(Stretch(1.0));
-
-            bold_label(
-                cx,
-                "SUB BYPASSES FX -> DIRECT OUT",
-                "fx-rack-sub",
-            )
-            .width(Auto)
-            .height(Stretch(1.0))
-            .child_top(Stretch(1.0))
-            .child_bottom(Stretch(1.0));
-
-            Element::new(cx).width(Stretch(1.0));
-
-            HStack::new(cx, {
-                let p_par = p_topo.clone();
-                let g_par = gui_context.clone();
-                let p_ser = p_topo.clone();
-                let g_ser = gui_context;
-                move |cx| {
-                    Button::new(
-                        cx,
-                        move |cx| {
-                            set_fx_bus_topology(&p_par, &g_par, FxBusTopologyParam::Parallel);
-                            cx.emit(UiEvent::ModUiChanged);
-                        },
-                        |cx| bold_label(cx, "PARALLEL (A | B)", "fx-subtab-lbl").hoverable(false),
-                    )
-                    .class("fx-subtab-btn")
-                    .toggle_class(
-                        "fx-subtab-active",
-                        UiData::params
-                            .map(|p| p.fx_bus_topology.value() == FxBusTopologyParam::Parallel),
-                    )
-                    .width(Pixels(108.0))
-                    .height(Stretch(1.0));
-
-                    Button::new(
-                        cx,
-                        move |cx| {
-                            set_fx_bus_topology(&p_ser, &g_ser, FxBusTopologyParam::Serial);
-                            cx.emit(UiEvent::ModUiChanged);
-                        },
-                        |cx| bold_label(cx, "SERIAL (A -> B)", "fx-subtab-lbl").hoverable(false),
-                    )
-                    .class("fx-subtab-btn")
-                    .toggle_class(
-                        "fx-subtab-active",
-                        UiData::params
-                            .map(|p| p.fx_bus_topology.value() == FxBusTopologyParam::Serial),
-                    )
-                    .width(Pixels(102.0))
-                    .height(Stretch(1.0));
-                }
-            })
-            .class("fx-bus-switch")
-            .col_between(Pixels(2.0))
-            .width(Auto)
-            .height(Pixels(22.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
-        })
-        .class("fx-rack-banner")
-        .col_between(Pixels(10.0))
-        .height(Stretch(1.0))
-        .width(Stretch(1.0));
-    })
-    .col_between(Pixels(10.0))
-    .height(Pixels(38.0))
-    .width(Stretch(1.0));
+#[inline]
+fn lane_target_label(target: u8) -> &'static str {
+    match target {
+        1 => "-> B",
+        2 => "-> C",
+        _ => "-> MST",
+    }
 }
 
-fn build_bus_column_fx_grid(
+fn build_lane_header(
     cx: &mut Context,
     bus_idx: usize,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
-    let title = if bus_idx == 0 { "BUS A (FX 1-8)" } else { "BUS B (FX 1-8)" };
-    let (lvl_dest, pan_dest) = if bus_idx == 0 {
-        (ModDestination::BusALevel, ModDestination::BusAPan)
-    } else {
-        (ModDestination::BusBLevel, ModDestination::BusBPan)
+    let title = match bus_idx {
+        0 => "BUS A",
+        1 => "BUS B",
+        _ => "BUS C",
+    };
+    let (lvl_dest, pan_dest) = match bus_idx {
+        0 => (ModDestination::BusALevel, ModDestination::BusAPan),
+        1 => (ModDestination::BusBLevel, ModDestination::BusBPan),
+        _ => (ModDestination::BusCLevel, ModDestination::BusCPan),
     };
     let no_dim: Option<fn(&JSynPluginParams) -> bool> = None;
 
-    VStack::new(cx, move |cx| {
-        HStack::new(cx, {
-            let p_hdr = params.clone();
-            let m_hdr = mod_ui.clone();
-            move |cx| {
-                bold_label(cx, title, "module-title")
-                    .width(Auto)
-                    .height(Stretch(1.0))
-                    .child_top(Stretch(1.0))
-                    .child_bottom(Stretch(1.0));
+    HStack::new(cx, move |cx| {
+        bold_label(cx, title, "module-title")
+            .width(Auto)
+            .height(Stretch(1.0))
+            .child_top(Stretch(1.0))
+            .child_bottom(Stretch(1.0));
 
-                Element::new(cx).width(Stretch(1.0));
-
-                build_compact_bar_knob(
-                    cx,
-                    p_hdr.clone(),
-                    move |p| p.fx_bus_level_param(bus_idx),
-                    "LEVEL",
-                    36.0,
-                    22.0,
-                    false,
-                    AMBER_RGB,
-                    lvl_dest,
-                    m_hdr.clone(),
-                    no_dim,
-                );
-
-                build_compact_bar_knob(
-                    cx,
-                    p_hdr,
-                    move |p| p.fx_bus_pan_param(bus_idx),
-                    "PAN",
-                    24.0,
-                    22.0,
-                    true,
-                    GOLD_RGB,
-                    pan_dest,
-                    m_hdr,
-                    no_dim,
-                );
-            }
-        })
-        .class("fx-bus-header")
-        .col_between(Pixels(10.0))
-        .height(Pixels(28.0))
-        .width(Stretch(1.0));
-
-        // Column-major 2x4 grid: FX 1..4 down the left column, FX 5..8 down the right column.
-        HStack::new(cx, move |cx| {
-            for col in 0..2 {
-                let p_col = params.clone();
-                let g_col = gui_context.clone();
-                let m_col = mod_ui.clone();
-                VStack::new(cx, move |cx| {
-                    for row in 0..4 {
-                        let slot_idx = col * 4 + row;
-                        let p_card = p_col.clone();
-                        let g_card = g_col.clone();
-                        let m_card = m_col.clone();
-                        let p_dim = p_col.clone();
-                        VStack::new(cx, move |cx| {
-                            build_fx_slot_header(
-                                cx,
-                                bus_idx,
-                                slot_idx,
-                                p_card.clone(),
-                                g_card.clone(),
-                                m_card.clone(),
-                                true,
-                            );
-
-                            build_fx_scope_zstack(
-                                cx,
-                                bus_idx,
-                                slot_idx,
-                                p_card.clone(),
-                                g_card.clone(),
-                                m_card.clone(),
-                            );
-
-                            build_fx_knob_row(
-                                cx,
-                                bus_idx,
-                                slot_idx,
-                                p_card,
-                                g_card,
-                                m_card,
-                                27.0,
-                                FX_VIEW_TAG,
-                            );
-                        })
-                        .class("hardware-module")
-                        .class("fx-full-card")
-                        .toggle_class(
-                            "module-disabled",
-                            UiData::mod_ui_rev
-                                .map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
-                        )
-                        .width(Stretch(1.0))
-                        .height(Stretch(1.0))
-                        .row_between(Pixels(3.0));
+        // Phase Plant-style inline lane output target switcher (cycles targets cleanly)
+        if bus_idx < 2 {
+            let p_cyc = params.clone();
+            let g_cyc = gui_context.clone();
+            Button::new(
+                cx,
+                move |cx| {
+                    let cur: FxBusTopology = p_cyc.fx_bus_topology.value().into();
+                    let next_topo = if bus_idx == 0 {
+                        let next_a = match cur.bus_a_target() {
+                            0 => 1,
+                            1 => 2,
+                            _ => 0,
+                        };
+                        FxBusTopology::from_lane_targets(next_a, cur.bus_b_target())
+                    } else {
+                        let next_b = if cur.bus_b_target() == 0 { 2 } else { 0 };
+                        FxBusTopology::from_lane_targets(cur.bus_a_target(), next_b)
+                    };
+                    set_fx_bus_topology(&p_cyc, &g_cyc, FxBusTopologyParam::from(next_topo));
+                    cx.emit(UiEvent::ModUiChanged);
+                },
+                move |cx| {
+                    bold_label(
+                        cx,
+                        UiData::params.map(move |p| {
+                            let topo: FxBusTopology = p.fx_bus_topology.value().into();
+                            let t = if bus_idx == 0 {
+                                topo.bus_a_target()
+                            } else {
+                                topo.bus_b_target()
+                            };
+                            lane_target_label(t).to_string()
+                        }),
+                        "fx-subtab-lbl",
+                    )
+                    .hoverable(false)
+                },
+            )
+            .class("fx-scope-pill")
+            .toggle_class(
+                "routing-pill-active",
+                UiData::params.map(move |p| {
+                    let topo: FxBusTopology = p.fx_bus_topology.value().into();
+                    if bus_idx == 0 {
+                        topo.bus_a_target() != 0
+                    } else {
+                        topo.bus_b_target() != 0
                     }
+                }),
+            )
+            .width(Pixels(40.0))
+            .height(Pixels(16.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+        } else {
+            bold_label(cx, "-> MST", "mini-label")
+                .width(Pixels(40.0))
+                .height(Stretch(1.0))
+                .child_space(Stretch(1.0));
+        }
+
+        Element::new(cx).width(Stretch(1.0));
+
+        build_compact_bar_knob(
+            cx,
+            params.clone(),
+            move |p| p.fx_bus_level_param(bus_idx),
+            "L",
+            8.0,
+            tokens::KNOB_MINI,
+            false,
+            AMBER_RGB,
+            lvl_dest,
+            mod_ui.clone(),
+            no_dim,
+        );
+
+        build_compact_bar_knob(
+            cx,
+            params,
+            move |p| p.fx_bus_pan_param(bus_idx),
+            "P",
+            8.0,
+            tokens::KNOB_MINI,
+            true,
+            GOLD_RGB,
+            pan_dest,
+            mod_ui,
+            no_dim,
+        );
+    })
+    .class("fx-bus-header")
+    .col_between(Pixels(tokens::SPACE_SM))
+    .height(Pixels(24.0))
+    .width(Stretch(1.0));
+}
+
+fn build_snapin_card(
+    cx: &mut Context,
+    bus_idx: usize,
+    slot_idx: usize,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
+) {
+    let p_dim = params.clone();
+    VStack::new(cx, move |cx| {
+        build_fx_slot_header(
+            cx,
+            bus_idx,
+            slot_idx,
+            params.clone(),
+            gui_context.clone(),
+            mod_ui.clone(),
+        );
+
+        let p_scope = params.clone();
+        let g_scope = gui_context.clone();
+        let m_scope = mod_ui.clone();
+        Binding::new(
+            cx,
+            UiData::params
+                .map(move |p| p.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() as usize),
+            move |cx, fx_idx_lens| {
+                if FxType::from_index(fx_idx_lens.get(cx)) != FxType::Off {
+                    build_fx_scope_zstack(
+                        cx,
+                        bus_idx,
+                        slot_idx,
+                        p_scope.clone(),
+                        g_scope.clone(),
+                        m_scope.clone(),
+                    );
+                }
+            },
+        );
+
+        build_fx_knob_row(
+            cx,
+            bus_idx,
+            slot_idx,
+            params,
+            gui_context,
+            mod_ui,
+            tokens::KNOB_SNAPIN,
+            0,
+        );
+    })
+    .class("hardware-module")
+    .class("fx-full-card")
+    .toggle_class(
+        "module-disabled",
+        UiData::mod_ui_rev.map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
+    )
+    .width(Stretch(1.0))
+    .height(Pixels(tokens::SNAPIN_CARD_H))
+    .row_between(Pixels(tokens::SPACE_XS));
+}
+
+/// Right Wing: Phase Plant-inspired 3-lane Snapin FX Rack (`Bus A`, `Bus B`, `Bus C`, 8 slots each).
+pub(crate) fn build_three_lane_fx_rack(
+    cx: &mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
+) {
+    HStack::new(cx, move |cx| {
+        for bus_idx in 0..3 {
+            let p_lane = params.clone();
+            let g_lane = gui_context.clone();
+            let m_lane = mod_ui.clone();
+            VStack::new(cx, move |cx| {
+                build_lane_header(
+                    cx,
+                    bus_idx,
+                    p_lane.clone(),
+                    g_lane.clone(),
+                    m_lane.clone(),
+                );
+
+                ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+                    VStack::new(cx, move |cx| {
+                        for slot_idx in 0..8 {
+                            build_snapin_card(
+                                cx,
+                                bus_idx,
+                                slot_idx,
+                                p_lane.clone(),
+                                g_lane.clone(),
+                                m_lane.clone(),
+                            );
+                        }
+                    })
+                    .row_between(Pixels(tokens::SPACE_XS))
+                    .width(Stretch(1.0))
+                    .height(Auto);
                 })
-                .row_between(Pixels(4.0))
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
-            }
-        })
-        .col_between(Pixels(4.0))
-        .width(Stretch(1.0))
-        .height(Stretch(1.0));
-    })
-    .row_between(Pixels(4.0))
-    .width(Stretch(1.0))
-    .height(Stretch(1.0));
-}
-
-/// Builds the compact `FX 1`–`FX 4` column on the right side of `MAIN` with a `BUS A | BUS B` switcher.
-pub(crate) fn build_main_fx_column(
-    cx: &mut Context,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-    mod_ui: Arc<ModUiState>,
-) {
-    VStack::new(cx, move |cx| {
-        HStack::new(cx, |cx| {
-            bold_label(cx, "MASTER FX", "module-title")
-                .width(Auto)
-                .height(Stretch(1.0))
-                .child_top(Stretch(1.0))
-                .child_bottom(Stretch(1.0));
-
-            Element::new(cx).width(Stretch(1.0));
-
-            HStack::new(cx, |cx| {
-                Button::new(
-                    cx,
-                    |cx| cx.emit(UiEvent::SelectMainFxBus(0)),
-                    |cx| bold_label(cx, "BUS A", "fx-subtab-lbl").hoverable(false),
-                )
-                .class("fx-subtab-btn")
-                .toggle_class("fx-subtab-active", UiData::main_fx_bus.map(|&b| b == 0))
-                .width(Pixels(42.0))
-                .height(Stretch(1.0));
-
-                Button::new(
-                    cx,
-                    |cx| cx.emit(UiEvent::SelectMainFxBus(1)),
-                    |cx| bold_label(cx, "BUS B", "fx-subtab-lbl").hoverable(false),
-                )
-                .class("fx-subtab-btn")
-                .toggle_class("fx-subtab-active", UiData::main_fx_bus.map(|&b| b == 1))
-                .width(Pixels(42.0))
-                .height(Stretch(1.0));
             })
-            .class("fx-bus-switch")
-            .col_between(Pixels(2.0))
-            .width(Auto)
-            .height(Pixels(18.0));
-        })
-        .class("fx-bus-header")
-        .height(Pixels(22.0))
-        .width(Stretch(1.0));
-
-        Binding::new(cx, UiData::main_fx_bus, move |cx, bus_lens| {
-            let bus_idx = bus_lens.get(cx).min(1);
-            let tag = main_bus_tag(bus_idx);
-            let p_bus = params.clone();
-            let g_bus = gui_context.clone();
-            let m_bus = mod_ui.clone();
-            VStack::new(cx, move |cx| {
-                for slot_idx in 0..4 {
-                    let p_card = p_bus.clone();
-                    let g_card = g_bus.clone();
-                    let m_card = m_bus.clone();
-                    let p_dim = p_bus.clone();
-                    VStack::new(cx, move |cx| {
-                        build_fx_slot_header(
-                            cx,
-                            bus_idx,
-                            slot_idx,
-                            p_card.clone(),
-                            g_card.clone(),
-                            m_card.clone(),
-                            false,
-                        );
-
-                        let p_scope = p_card.clone();
-                        let g_scope = g_card.clone();
-                        let m_scope = m_card.clone();
-                        Binding::new(
-                            cx,
-                            UiData::params
-                                .map(move |p| p.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() as usize),
-                            move |cx, fx_idx_lens| {
-                                if FxType::from_index(fx_idx_lens.get(cx)) != FxType::Off {
-                                    build_fx_scope_zstack(
-                                        cx,
-                                        bus_idx,
-                                        slot_idx,
-                                        p_scope.clone(),
-                                        g_scope.clone(),
-                                        m_scope.clone(),
-                                    );
-                                }
-                            },
-                        );
-
-                        build_fx_knob_row(cx, bus_idx, slot_idx, p_card, g_card, m_card, 32.0, tag);
-                    })
-                    .class("hardware-module")
-                    .class("fx-compact-card")
-                    .toggle_class(
-                        "module-disabled",
-                        UiData::mod_ui_rev.map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
-                    )
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0))
-                    .row_between(Pixels(3.0));
-                }
-            })
-            .row_between(Pixels(4.0))
+            .row_between(Pixels(tokens::SPACE_SM))
             .width(Stretch(1.0))
             .height(Stretch(1.0));
-        });
+        }
     })
-    .row_between(Pixels(4.0))
-    .width(Stretch(1.0))
-    .height(Stretch(1.0));
-}
-
-/// Builds the full-screen `4×4` Parallel Dual-Bus `FX` view + top `SUB BUS` banner (`MainViewMode::Fx`).
-pub(crate) fn build_fx_rack_view(
-    cx: &mut Context,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-    mod_ui: Arc<ModUiState>,
-) {
-    VStack::new(cx, move |cx| {
-        build_fx_top_banner(cx, params.clone(), gui_context.clone(), mod_ui.clone());
-
-        HStack::new(cx, move |cx| {
-            build_bus_column_fx_grid(
-                cx,
-                0,
-                params.clone(),
-                gui_context.clone(),
-                mod_ui.clone(),
-            );
-            build_bus_column_fx_grid(cx, 1, params, gui_context, mod_ui);
-        })
-        .col_between(Pixels(10.0))
-        .width(Stretch(1.0))
-        .height(Stretch(1.0));
-    })
-    .row_between(Pixels(4.0))
+    .col_between(Pixels(tokens::SPACE_MD))
     .width(Stretch(1.0))
     .height(Stretch(1.0));
 }

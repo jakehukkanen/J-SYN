@@ -3386,3 +3386,180 @@ fn fx_flanger_high_feedback_polarity_stack_mod_and_idle() {
     let (il, ir) = idle_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &ip, &mod_zero, 120.0, None);
     assert_eq!((il, ir), (0.0, 0.0));
 }
+
+#[test]
+fn fx_bus_c_8_slots_lane_routing_topologies_and_filter_bus_guards() {
+    use j_syn_dsp::{
+        DirectDest, FilterBusDest, FxBusParams, FxBusTopology, FxRackParams, FxRackState,
+        FxSlotParams, FxType, ModDestination, ModMatrixSource, ModSlot, ModUiTelemetry,
+        FX_SCOPE_LEN, NUM_MOD_DESTS,
+    };
+
+    let sr = 48_000.0;
+    let mod_zero = [0.0_f32; NUM_MOD_DESTS];
+
+    // 1. All 6 FxBusTopology variants round-trip through lane targets
+    for topo in [
+        FxBusTopology::Parallel,
+        FxBusTopology::Serial,
+        FxBusTopology::SerialAll,
+        FxBusTopology::ABToC,
+        FxBusTopology::AToC,
+        FxBusTopology::BToC,
+    ] {
+        assert_eq!(
+            FxBusTopology::from_lane_targets(topo.bus_a_target(), topo.bus_b_target()),
+            topo
+        );
+    }
+
+    // 2. Verify ModDestination coordinates and modulation on Bus C slot 8 + BusCLevel/BusCPan + telemetry
+    assert_eq!(
+        ModDestination::fx_bus_slot_param(2, 0, 0),
+        ModDestination::BusCFx1P1
+    );
+    assert_eq!(
+        ModDestination::fx_bus_slot_param(2, 7, 7),
+        ModDestination::BusCFx8P8
+    );
+    assert_eq!(ModDestination::BusCFx8P8.fx_slot_param_coords(), Some((2, 7, 7)));
+    assert_eq!(ModDestination::BusCLevel.name(), "BUS C LVL");
+    assert_eq!(ModDestination::BusCPan.name(), "BUS C PAN");
+
+    let mut bus_c_rack = FxRackState::new(sr);
+    let telemetry = ModUiTelemetry::new();
+    let mut bus_c_params = FxRackParams::default();
+    bus_c_params.buses[2].slots[7] = FxSlotParams {
+        fx_type: FxType::Utility,
+        enabled: true,
+        stack: 1,
+        params: [0.5, 0.5, 0.5, 1.0],
+        ..FxSlotParams::default()
+    };
+    let (base_l, base_r) = bus_c_rack.process_buses_sample(
+        (0.0, 0.0),
+        (0.0, 0.0),
+        (0.3, 0.3),
+        &bus_c_params,
+        &mod_zero,
+        120.0,
+        Some(&telemetry),
+    );
+    assert!((base_l - 0.3).abs() < 1e-4 && (base_r - 0.3).abs() < 1e-4);
+
+    let mut mod_bus_c = [0.0_f32; NUM_MOD_DESTS];
+    mod_bus_c[ModDestination::BusCFx8P1.index()] = -0.3; // Utility gain reduction
+    mod_bus_c[ModDestination::BusCPan.index()] = 0.8; // Pan hard right
+    let mut attenuated_l = 0.0_f32;
+    let mut panned_r = 0.0_f32;
+    for _ in 0..400 {
+        let (l, r) = bus_c_rack.process_buses_sample(
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (0.3, 0.3),
+            &bus_c_params,
+            &mod_bus_c,
+            120.0,
+            Some(&telemetry),
+        );
+        attenuated_l = l;
+        panned_r = r;
+    }
+    assert!(attenuated_l.abs() < 0.05 && panned_r > attenuated_l);
+
+    let mut pre = [0.0_f32; FX_SCOPE_LEN];
+    let mut post = [0.0_f32; FX_SCOPE_LEN];
+    let _ = telemetry.fx_scope(2, 7).read_snapshot(&mut pre, &mut post);
+    assert!(pre.iter().any(|&v| v > 0.0));
+
+    // 3. Verify all 6 FxBusTopology routing paths using Bus levels as signal gates
+    let route_probe = |topo: FxBusTopology, lvl: [f32; 3], inp: [f32; 3]| -> f32 {
+        let mut r = FxRackState::new(sr);
+        let mut p = FxRackParams::default();
+        p.topology = topo;
+        for b in 0..3 {
+            p.buses[b] = FxBusParams::default();
+            p.buses[b].level = lvl[b];
+        }
+        let (l, _) = r.process_buses_sample(
+            (inp[0], inp[0]),
+            (inp[1], inp[1]),
+            (inp[2], inp[2]),
+            &p,
+            &mod_zero,
+            120.0,
+            None,
+        );
+        l
+    };
+
+    // Parallel (A | B | C): muting B & C preserves A
+    assert!((route_probe(FxBusTopology::Parallel, [1.0, 0.0, 0.0], [0.4, 0.2, 0.1]) - 0.4).abs() < 1e-5);
+    // Serial (A -> B | C): muting B drops A, while C stays audible
+    assert!((route_probe(FxBusTopology::Serial, [1.0, 0.0, 1.0], [0.4, 0.0, 0.15]) - 0.15).abs() < 1e-5);
+    // SerialAll (A -> B -> C): muting C drops A+B; all unmuted sums A+B through C
+    assert!(route_probe(FxBusTopology::SerialAll, [1.0, 1.0, 0.0], [0.4, 0.2, 0.1]).abs() < 1e-5);
+    assert!((route_probe(FxBusTopology::SerialAll, [1.0, 1.0, 1.0], [0.4, 0.2, 0.1]) - 0.7).abs() < 1e-5);
+    // ABToC ((A | B) -> C): muting C drops both A & B; unmuted sums A+B->C
+    assert!(route_probe(FxBusTopology::ABToC, [1.0, 1.0, 0.0], [0.4, 0.2, 0.0]).abs() < 1e-5);
+    assert!((route_probe(FxBusTopology::ABToC, [1.0, 1.0, 1.0], [0.4, 0.2, 0.0]) - 0.6).abs() < 1e-5);
+    // AToC (A -> C | B): muting B still passes A->C
+    assert!((route_probe(FxBusTopology::AToC, [1.0, 0.0, 1.0], [0.4, 0.2, 0.0]) - 0.4).abs() < 1e-5);
+    assert!((route_probe(FxBusTopology::AToC, [1.0, 1.0, 0.0], [0.4, 0.2, 0.0]) - 0.2).abs() < 1e-5);
+    // BToC (A | B -> C): muting C passes A and drops B
+    assert!((route_probe(FxBusTopology::BToC, [1.0, 1.0, 0.0], [0.4, 0.2, 0.0]) - 0.4).abs() < 1e-5);
+    assert!((route_probe(FxBusTopology::BToC, [1.0, 1.0, 1.0], [0.4, 0.2, 0.0]) - 0.6).abs() < 1e-5);
+
+    // 4. FilterBusDest::{AC, BC, All} + no double-feed under downstream topologies in SynthEngine
+    let bank = WavetableBank::new();
+    let render_peak = |f1_bus: FilterBusDest, topo: FxBusTopology, mod_c_lvl: f32| -> f32 {
+        let mut p = SynthParams::default();
+        p.dc_blocker = false;
+        p.master_limiter = false;
+        p.master_gain = 1.0;
+        p.amp_attack_s = 0.001;
+        p.oscs[0].level = 1.0;
+        p.routing.osc_direct[0] = DirectDest::Off;
+        p.routing.osc_filter_balance[0] = -1.0; // 100% Filter 1
+        p.routing.filter_out_bus[0] = f1_bus;
+        p.fx_bus_topology = topo;
+        p.mod_matrix.slots[0] = ModSlot {
+            source: ModMatrixSource::Macro1,
+            destination: ModDestination::BusCLevel,
+            depth: mod_c_lvl,
+            bipolar: false,
+            enabled: true,
+            ..ModSlot::default()
+        };
+        p.macros[0] = 1.0;
+
+        let mut e = SynthEngine::new(sr);
+        e.note_on(0, 60, 1.0, None, &p);
+        let mut pk = 0.0_f32;
+        for _ in 0..1024 {
+            let (l, r) = e.process_sample(&p, &bank);
+            pk = pk.max(l.abs()).max(r.abs());
+        }
+        pk
+    };
+
+    // Guard against double-feeding: A->C cascade under AC matches single BusA->AToC, not 2x
+    let pk_a_atoc = render_peak(FilterBusDest::BusA, FxBusTopology::AToC, 0.0);
+    let pk_ac_atoc = render_peak(FilterBusDest::AC, FxBusTopology::AToC, 0.0);
+    let pk_ac_parallel = render_peak(FilterBusDest::AC, FxBusTopology::Parallel, 0.0);
+    assert!(pk_a_atoc > 0.05 && (pk_a_atoc - pk_ac_atoc).abs() < 1e-5);
+    assert!(pk_ac_parallel > pk_ac_atoc * 1.5);
+
+    let pk_b_btoc = render_peak(FilterBusDest::BusB, FxBusTopology::BToC, 0.0);
+    let pk_bc_btoc = render_peak(FilterBusDest::BC, FxBusTopology::BToC, 0.0);
+    assert!(pk_b_btoc > 0.05 && (pk_b_btoc - pk_bc_btoc).abs() < 1e-5);
+
+    let pk_a_sall = render_peak(FilterBusDest::BusA, FxBusTopology::SerialAll, 0.0);
+    let pk_all_sall = render_peak(FilterBusDest::All, FxBusTopology::SerialAll, 0.0);
+    assert!(pk_a_sall > 0.05 && (pk_a_sall - pk_all_sall).abs() < 1e-5);
+
+    // Sub/Bus C modulation changes final amplitude cleanly
+    let pk_c_full = render_peak(FilterBusDest::Sub, FxBusTopology::Parallel, 0.0);
+    let pk_c_mod_down = render_peak(FilterBusDest::Sub, FxBusTopology::Parallel, -1.0);
+    assert!(pk_c_full > 0.05 && pk_c_mod_down < 1e-5);
+}

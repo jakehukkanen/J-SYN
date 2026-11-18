@@ -17,6 +17,7 @@ use super::mod_bar::{bottom_tab_tag, ModUiState};
 use super::modseq_canvases::{
     AdsrPreviewScope, LfoPresetBar, ModSeqCurveCanvas, ModSeqPaletteGrid,
 };
+use super::tokens;
 use super::{BottomTab, UiData, UiEvent, CORAL_RGB, GOLD_RGB};
 use crate::{
     JSynPluginParams, ModSeqModeParam, ModSeqPlayParam, ModSeqRetrigParam, ModSeqSyncParam,
@@ -176,18 +177,8 @@ pub(super) fn build_modseq_tab(
                                     let u_mode = u_m.clone();
                                     if m.get(cx) {
                                         HStack::new(cx, move |cx| {
-                                            bold_label(
-                                                cx,
-                                                "Double-click to add/delete nodes  •  Right-drag segment to bend",
-                                                "mini-label",
-                                            )
-                                            .width(Auto)
-                                            .height(Auto)
-                                            .top(Stretch(1.0))
-                                            .bottom(Stretch(1.0));
-
                                             LfoPresetBar::new(cx, seq_idx, p_mode.clone())
-                                                .width(Pixels(306.0))
+                                                .width(Stretch(1.0))
                                                 .height(Pixels(18.0));
 
                                             let p_rst = p_mode;
@@ -211,20 +202,12 @@ pub(super) fn build_modseq_tab(
                                             .width(Pixels(44.0))
                                             .height(Pixels(18.0));
                                         })
-                                        .col_between(Pixels(6.0))
-                                        .width(Auto)
+                                        .col_between(Pixels(tokens::SPACE_SM))
+                                        .width(Stretch(1.0))
                                         .height(Pixels(18.0));
                                     } else {
                                         HStack::new(cx, move |cx| {
-                                            bold_label(
-                                                cx,
-                                                "Drag grid to stamp  •  Right-click tile to fill",
-                                                "mini-label",
-                                            )
-                                            .width(Auto)
-                                            .height(Auto)
-                                            .top(Stretch(1.0))
-                                            .bottom(Stretch(1.0));
+                                            Element::new(cx).width(Stretch(1.0));
 
                                             let p_fill = p_mode.clone();
                                             let u_fill = u_mode;
@@ -276,8 +259,8 @@ pub(super) fn build_modseq_tab(
                                             .width(Pixels(44.0))
                                             .height(Pixels(18.0));
                                         })
-                                        .col_between(Pixels(5.0))
-                                        .width(Auto)
+                                        .col_between(Pixels(tokens::SPACE_SM))
+                                        .width(Stretch(1.0))
                                         .height(Pixels(18.0));
                                     }
                                 });
@@ -303,233 +286,244 @@ pub(super) fn build_modseq_tab(
             let m_sub = mod_ui_body.clone();
             match sub.get(cx) {
                 ModSeqSubTab::MSeq(seq_idx) => {
-                    HStack::new(cx, move |cx| {
-                        let p_left = p_sub.clone();
-                        let m_left = m_sub.clone();
-                        HStack::new(
-                            cx,
-                            ParamWidgetBase::build_view(
-                                UiData::params,
-                                move |pr| &pr.modseqs[seq_idx].mode,
-                                move |cx, param_data| {
-                                    let is_mseg = param_data.make_lens(|pr| {
-                                        pr.unmodulated_plain_value() == ModSeqModeParam::Mseg
-                                    });
-                                    let p_c = p_left.clone();
-                                    let u_c = m_left.clone();
-                                    Binding::new(cx, is_mseg, move |cx, m| {
-                                        ModSeqCurveCanvas::new(cx, seq_idx, p_c.clone(), u_c.clone())
-                                            .width(Stretch(1.0))
-                                            .height(Stretch(1.0));
-                                        if !m.get(cx) {
-                                            ModSeqPaletteGrid::new(
-                                                cx,
-                                                seq_idx,
-                                                p_c.clone(),
-                                                u_c.clone(),
-                                            )
-                                            .width(Pixels(286.0))
-                                            .height(Stretch(1.0));
-                                        }
-                                    });
-                                },
-                            ),
-                        )
-                        .col_between(Pixels(6.0))
-                        .width(Stretch(1.0))
-                        .height(Stretch(1.0));
+                    VStack::new(cx, move |cx| {
+                        // Top: full-width tall interactive curve canvas
+                        ModSeqCurveCanvas::new(cx, seq_idx, p_sub.clone(), m_sub.clone())
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0));
 
+                        // Bottom bar: 2x9 shape stamp palette (when MODSEQ) + compact dropdowns & knobs
                         HStack::new(cx, {
-                            let p_ctrl = p_sub.clone();
-                            let g_ctrl = g_sub.clone();
-                            let u_ctrl = m_sub.clone();
-                            let accent = subtab_accent(ModSeqSubTab::MSeq(seq_idx));
+                            let p_bot = p_sub.clone();
+                            let g_bot = g_sub.clone();
+                            let u_bot = m_sub.clone();
                             move |cx| {
-                                VStack::new(cx, {
-                                    let p = p_ctrl.clone();
-                                    let g = g_ctrl.clone();
-                                    move |cx| {
-                                        build_labeled_dropdown(
-                                            cx,
-                                            "MODE",
-                                            p.clone(),
-                                            g.clone(),
-                                            move |pr| &pr.modseqs[seq_idx].mode,
-                                            MODE_ITEMS,
-                                        );
-                                        build_labeled_dropdown(
-                                            cx,
-                                            "PLAY",
-                                            p,
-                                            g,
-                                            move |pr| &pr.modseqs[seq_idx].play_mode,
-                                            PLAY_ITEMS,
-                                        );
-                                    }
-                                })
-                                .row_between(Pixels(2.0))
-                                .width(Pixels(74.0))
-                                .height(Auto)
-                                .top(Stretch(1.0))
-                                .bottom(Stretch(1.0));
+                                let p_pal = p_bot.clone();
+                                let u_pal = u_bot.clone();
+                                HStack::new(
+                                    cx,
+                                    ParamWidgetBase::build_view(
+                                        UiData::params,
+                                        move |pr| &pr.modseqs[seq_idx].mode,
+                                        move |cx, param_data| {
+                                            let is_mseg = param_data.make_lens(|pr| {
+                                                pr.unmodulated_plain_value()
+                                                    == ModSeqModeParam::Mseg
+                                            });
+                                            let p_c = p_pal.clone();
+                                            let u_c = u_pal.clone();
+                                            Binding::new(cx, is_mseg, move |cx, m| {
+                                                if !m.get(cx) {
+                                                    ModSeqPaletteGrid::new(
+                                                        cx,
+                                                        seq_idx,
+                                                        p_c.clone(),
+                                                        u_c.clone(),
+                                                    )
+                                                    .width(Pixels(224.0))
+                                                    .height(Stretch(1.0));
+                                                }
+                                            });
+                                        },
+                                    ),
+                                )
+                                .width(Auto)
+                                .height(Stretch(1.0));
 
-                                VStack::new(cx, {
-                                    let p = p_ctrl.clone();
-                                    let g = g_ctrl.clone();
-                                    move |cx| {
-                                        build_labeled_dropdown(
-                                            cx,
-                                            "SYNC",
-                                            p.clone(),
-                                            g.clone(),
-                                            move |pr| &pr.modseqs[seq_idx].sync_mode,
-                                            SYNC_ITEMS,
-                                        );
-                                        build_labeled_dropdown(
-                                            cx,
-                                            "RETRIG",
-                                            p,
-                                            g,
-                                            move |pr| &pr.modseqs[seq_idx].retrig,
-                                            RETRIG_ITEMS,
-                                        );
-                                    }
-                                })
-                                .row_between(Pixels(2.0))
-                                .width(Pixels(72.0))
-                                .height(Auto)
-                                .top(Stretch(1.0))
-                                .bottom(Stretch(1.0));
-
-                                VStack::new(cx, {
-                                    let u = u_ctrl.clone();
-                                    move |cx| {
-                                        HStack::new(
-                                            cx,
-                                            ParamWidgetBase::build_view(
-                                                UiData::params,
+                                let p_ctrl = p_bot;
+                                let g_ctrl = g_bot;
+                                let u_ctrl = u_bot;
+                                let accent = subtab_accent(ModSeqSubTab::MSeq(seq_idx));
+                                HStack::new(cx, move |cx| {
+                                    VStack::new(cx, {
+                                        let p = p_ctrl.clone();
+                                        let g = g_ctrl.clone();
+                                        move |cx| {
+                                            build_labeled_dropdown(
+                                                cx,
+                                                "MODE",
+                                                p.clone(),
+                                                g.clone(),
                                                 move |pr| &pr.modseqs[seq_idx].mode,
-                                                move |cx, param_data| {
-                                                    let is_mseg = param_data.make_lens(|pr| {
-                                                        pr.unmodulated_plain_value()
-                                                            == ModSeqModeParam::Mseg
-                                                    });
-                                                    let u_s = u.clone();
-                                                    Binding::new(cx, is_mseg, move |cx, m| {
-                                                        if m.get(cx) {
-                                                            let u_press = u_s.clone();
-                                                            let u_chk = u_s.clone();
-                                                            VStack::new(cx, move |cx| {
-                                                                bold_label(cx, "GRID", "mini-label")
-                                                                    .width(Stretch(1.0))
-                                                                    .height(Pixels(9.0))
-                                                                    .child_space(Stretch(1.0));
-                                                                Button::new(
-                                                                    cx,
-                                                                    move |cx| {
-                                                                        u_press.toggle_mseg_snap();
-                                                                        cx.emit(UiEvent::ModUiChanged);
-                                                                        cx.needs_redraw();
-                                                                    },
-                                                                    |cx| {
-                                                                        bold_label(
-                                                                            cx,
-                                                                            "SNAP 1/16",
-                                                                            "snap-btn-label",
-                                                                        )
-                                                                        .child_space(Stretch(1.0))
-                                                                        .hoverable(false)
-                                                                    },
-                                                                )
-                                                                .class("snap-btn")
-                                                                .checked(UiData::mod_ui_rev.map(
-                                                                    move |_| u_chk.mseg_snap(),
-                                                                ))
-                                                                .width(Stretch(1.0))
-                                                                .height(Pixels(18.0));
-                                                            })
-                                                            .width(Stretch(1.0))
-                                                            .height(Auto)
-                                                            .row_between(Pixels(1.0));
-                                                        } else {
-                                                            build_flex_pill_cell(
-                                                                cx,
-                                                                UiData::params,
-                                                                move |pr| {
-                                                                    &pr.modseqs[seq_idx].num_steps
-                                                                },
-                                                                "STEPS",
-                                                                14,
-                                                            );
-                                                        }
-                                                    });
-                                                },
-                                            ),
-                                        )
-                                        .width(Stretch(1.0))
-                                        .height(Pixels(28.0));
-                                    }
-                                })
-                                .width(Pixels(66.0))
-                                .height(Auto)
-                                .top(Stretch(1.0))
-                                .bottom(Stretch(1.0));
-
-                                let p_fmt = p_ctrl.clone();
-                                build_knob_cell_mod_fmt(
-                                    cx,
-                                    UiData::params,
-                                    move |pr| &pr.modseqs[seq_idx].rate,
-                                    "RATE",
-                                    false,
-                                    accent,
-                                    38.0,
-                                    54.0,
-                                    ModDestination::modseq_rate(seq_idx),
-                                    u_ctrl,
-                                    bottom_tab_tag(BottomTab::ModSeq),
-                                    Arc::new(move |norm, _opt_mod_offset| {
-                                        let mode: j_syn_dsp::ModSeqSyncMode =
-                                            p_fmt.modseqs[seq_idx].sync_mode.value().into();
-                                        if mode == j_syn_dsp::ModSeqSyncMode::Free {
-                                            format!(
-                                                "{:.2} Hz",
-                                                j_syn_dsp::modseq_free_norm_to_hz(norm)
-                                            )
-                                        } else {
-                                            j_syn_dsp::modseq_division_label(mode, norm)
-                                                .to_string()
+                                                MODE_ITEMS,
+                                            );
+                                            build_labeled_dropdown(
+                                                cx,
+                                                "PLAY",
+                                                p,
+                                                g,
+                                                move |pr| &pr.modseqs[seq_idx].play_mode,
+                                                PLAY_ITEMS,
+                                            );
                                         }
-                                    }),
-                                );
+                                    })
+                                    .row_between(Pixels(tokens::SPACE_XS))
+                                    .width(Pixels(62.0))
+                                    .height(Auto)
+                                    .top(Stretch(1.0))
+                                    .bottom(Stretch(1.0));
 
-                                build_knob_cell(
-                                    cx,
-                                    UiData::params,
-                                    move |pr| &pr.modseqs[seq_idx].smooth,
-                                    "SMOOTH",
-                                    false,
-                                    CORAL_RGB,
-                                    38.0,
-                                    52.0,
-                                );
+                                    VStack::new(cx, {
+                                        let p = p_ctrl.clone();
+                                        let g = g_ctrl;
+                                        move |cx| {
+                                            build_labeled_dropdown(
+                                                cx,
+                                                "SYNC",
+                                                p.clone(),
+                                                g.clone(),
+                                                move |pr| &pr.modseqs[seq_idx].sync_mode,
+                                                SYNC_ITEMS,
+                                            );
+                                            build_labeled_dropdown(
+                                                cx,
+                                                "RETRIG",
+                                                p,
+                                                g,
+                                                move |pr| &pr.modseqs[seq_idx].retrig,
+                                                RETRIG_ITEMS,
+                                            );
+                                        }
+                                    })
+                                    .row_between(Pixels(tokens::SPACE_XS))
+                                    .width(Pixels(62.0))
+                                    .height(Auto)
+                                    .top(Stretch(1.0))
+                                    .bottom(Stretch(1.0));
+
+                                    VStack::new(cx, {
+                                        let u = u_ctrl.clone();
+                                        move |cx| {
+                                            HStack::new(
+                                                cx,
+                                                ParamWidgetBase::build_view(
+                                                    UiData::params,
+                                                    move |pr| &pr.modseqs[seq_idx].mode,
+                                                    move |cx, param_data| {
+                                                        let is_mseg = param_data.make_lens(|pr| {
+                                                            pr.unmodulated_plain_value()
+                                                                == ModSeqModeParam::Mseg
+                                                        });
+                                                        let u_s = u.clone();
+                                                        Binding::new(cx, is_mseg, move |cx, m| {
+                                                            if m.get(cx) {
+                                                                let u_press = u_s.clone();
+                                                                let u_chk = u_s.clone();
+                                                                VStack::new(cx, move |cx| {
+                                                                    bold_label(cx, "GRID", "mini-label")
+                                                                        .width(Stretch(1.0))
+                                                                        .height(Pixels(9.0))
+                                                                        .child_space(Stretch(1.0));
+                                                                    Button::new(
+                                                                        cx,
+                                                                        move |cx| {
+                                                                            u_press.toggle_mseg_snap();
+                                                                            cx.emit(UiEvent::ModUiChanged);
+                                                                            cx.needs_redraw();
+                                                                        },
+                                                                        |cx| {
+                                                                            bold_label(
+                                                                                cx,
+                                                                                "SNAP",
+                                                                                "snap-btn-label",
+                                                                            )
+                                                                            .child_space(Stretch(1.0))
+                                                                            .hoverable(false)
+                                                                        },
+                                                                    )
+                                                                    .class("snap-btn")
+                                                                    .checked(UiData::mod_ui_rev.map(
+                                                                        move |_| u_chk.mseg_snap(),
+                                                                    ))
+                                                                    .width(Stretch(1.0))
+                                                                    .height(Pixels(18.0));
+                                                                })
+                                                                .width(Stretch(1.0))
+                                                                .height(Auto)
+                                                                .row_between(Pixels(1.0));
+                                                            } else {
+                                                                build_flex_pill_cell(
+                                                                    cx,
+                                                                    UiData::params,
+                                                                    move |pr| {
+                                                                        &pr.modseqs[seq_idx].num_steps
+                                                                    },
+                                                                    "STEPS",
+                                                                    14,
+                                                                );
+                                                            }
+                                                        });
+                                                    },
+                                                ),
+                                            )
+                                            .width(Stretch(1.0))
+                                            .height(Pixels(28.0));
+                                        }
+                                    })
+                                    .width(Pixels(52.0))
+                                    .height(Auto)
+                                    .top(Stretch(1.0))
+                                    .bottom(Stretch(1.0));
+
+                                    let p_fmt = p_ctrl.clone();
+                                    build_knob_cell_mod_fmt(
+                                        cx,
+                                        UiData::params,
+                                        move |pr| &pr.modseqs[seq_idx].rate,
+                                        "RATE",
+                                        false,
+                                        accent,
+                                        tokens::KNOB_STD,
+                                        46.0,
+                                        ModDestination::modseq_rate(seq_idx),
+                                        u_ctrl,
+                                        bottom_tab_tag(BottomTab::ModSeq),
+                                        Arc::new(move |norm, _opt_mod_offset| {
+                                            let mode: j_syn_dsp::ModSeqSyncMode =
+                                                p_fmt.modseqs[seq_idx].sync_mode.value().into();
+                                            if mode == j_syn_dsp::ModSeqSyncMode::Free {
+                                                format!(
+                                                    "{:.2} Hz",
+                                                    j_syn_dsp::modseq_free_norm_to_hz(norm)
+                                                )
+                                            } else {
+                                                j_syn_dsp::modseq_division_label(mode, norm)
+                                                    .to_string()
+                                            }
+                                        }),
+                                    );
+
+                                    build_knob_cell(
+                                        cx,
+                                        UiData::params,
+                                        move |pr| &pr.modseqs[seq_idx].smooth,
+                                        "SMOOTH",
+                                        false,
+                                        CORAL_RGB,
+                                        tokens::KNOB_STD,
+                                        44.0,
+                                    );
+                                })
+                                .col_between(Pixels(tokens::SPACE_XS))
+                                .child_top(Stretch(1.0))
+                                .child_bottom(Stretch(1.0))
+                                .width(Stretch(1.0))
+                                .height(Stretch(1.0));
                             }
                         })
-                        .col_between(Pixels(4.0))
-                        .child_top(Stretch(1.0))
-                        .child_bottom(Stretch(1.0))
-                        .width(Pixels(340.0))
-                        .height(Stretch(1.0));
+                        .col_between(Pixels(tokens::SPACE_MD))
+                        .width(Stretch(1.0))
+                        .height(Pixels(78.0));
                     })
-                    .col_between(Pixels(6.0))
+                    .row_between(Pixels(tokens::SPACE_SM))
                     .width(Stretch(1.0))
                     .height(Stretch(1.0));
                 }
                 ModSeqSubTab::Env(env_idx) => {
                     let (atk_fn, dec_fn, sus_fn, rel_fn) = env_param_fns(env_idx);
-                    HStack::new(cx, move |cx| {
+                    VStack::new(cx, move |cx| {
                         AdsrPreviewScope::new(cx, env_idx, p_sub.clone(), m_sub.clone())
-                            .width(Stretch(1.35))
+                            .width(Stretch(1.0))
                             .height(Stretch(1.0));
 
                         HStack::new(cx, move |cx| {
@@ -541,8 +535,8 @@ pub(super) fn build_modseq_tab(
                                 "ATTACK",
                                 false,
                                 accent,
-                                38.0,
-                                72.0,
+                                tokens::KNOB_FLT,
+                                84.0,
                             );
                             build_knob_cell_with_readout(
                                 cx,
@@ -551,8 +545,8 @@ pub(super) fn build_modseq_tab(
                                 "DECAY",
                                 false,
                                 accent,
-                                38.0,
-                                72.0,
+                                tokens::KNOB_FLT,
+                                84.0,
                             );
                             build_knob_cell_with_readout(
                                 cx,
@@ -561,8 +555,8 @@ pub(super) fn build_modseq_tab(
                                 "SUSTAIN",
                                 false,
                                 GOLD_RGB,
-                                38.0,
-                                72.0,
+                                tokens::KNOB_FLT,
+                                84.0,
                             );
                             build_knob_cell_with_readout(
                                 cx,
@@ -571,19 +565,19 @@ pub(super) fn build_modseq_tab(
                                 "RELEASE",
                                 false,
                                 CORAL_RGB,
-                                38.0,
-                                72.0,
+                                tokens::KNOB_FLT,
+                                84.0,
                             );
                         })
-                        .col_between(Pixels(14.0))
+                        .col_between(Pixels(tokens::SPACE_LG))
                         .child_left(Stretch(1.0))
                         .child_right(Stretch(1.0))
                         .child_top(Stretch(1.0))
                         .child_bottom(Stretch(1.0))
                         .width(Stretch(1.0))
-                        .height(Stretch(1.0));
+                        .height(Pixels(74.0));
                     })
-                    .col_between(Pixels(10.0))
+                    .row_between(Pixels(tokens::SPACE_MD))
                     .width(Stretch(1.0))
                     .height(Stretch(1.0));
                 }

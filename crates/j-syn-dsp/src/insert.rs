@@ -135,6 +135,9 @@ pub enum FilterBusDest {
     BusB = 1,
     Both = 2,
     Sub = 3,
+    AC = 4,
+    BC = 5,
+    All = 6,
 }
 
 impl FilterBusDest {
@@ -143,6 +146,9 @@ impl FilterBusDest {
             1 => Self::BusB,
             2 => Self::Both,
             3 => Self::Sub,
+            4 => Self::AC,
+            5 => Self::BC,
+            6 => Self::All,
             _ => Self::BusA,
         }
     }

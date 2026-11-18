@@ -375,9 +375,20 @@ fn clamp_finite_norm(norm: f32, ptr: ParamPtr) -> f32 {
 }
 
 #[inline]
-fn enum_name_alias<'a>(_id: &str, name: &'a str) -> &'a str {
-    // Hook for any future UI display-name tweaks on `#[name = "..."]` enum variants.
-    name
+fn enum_name_alias<'a>(id: &str, name: &'a str) -> &'a str {
+    if name == "Sub"
+        && (id.ends_with("_direct") || id == "f1_out_bus" || id == "f2_out_bus")
+    {
+        "Bus C"
+    } else if id == "fx_bus_topo" {
+        match name {
+            "Parallel (A | B)" => "Parallel (A | B | C)",
+            "Serial (A -> B)" => "Serial (A -> B | C)",
+            _ => name,
+        }
+    } else {
+        name
+    }
 }
 
 /// Maps `version < 2` normalized enum floats whose variant count expanded in newer builds.

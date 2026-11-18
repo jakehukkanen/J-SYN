@@ -1,7 +1,7 @@
 //! Drag-and-drop Modulation Source Pill bar, live telemetry 60 Hz redraw ticker,
 //! and inline modulation slot inspector (`UNI/BIP`, depth readout, slot cycle, remove).
 
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -18,18 +18,16 @@ use super::{BottomTab, UiData, UiEvent};
 use crate::JSynPluginParams;
 
 const UNSET_U8: u8 = 255;
+const UNSET_DEST: u16 = u16::MAX;
 pub(crate) const FX_VIEW_TAG: u8 = 5;
-pub(crate) const MAIN_FX_A_TAG: u8 = 6;
-pub(crate) const MAIN_FX_B_TAG: u8 = 7;
 
-/// Converts `BottomTab` to the visibility tag used for drop-target hit testing (`1..=4`, `0` = always visible).
+/// Converts `BottomTab` to the visibility tag used for drop-target hit testing (`1..=3`, `0` = always visible).
 #[inline]
 pub(crate) fn bottom_tab_tag(tab: BottomTab) -> u8 {
     match tab {
         BottomTab::VoiceEnv => 1,
         BottomTab::ModSeq => 2,
         BottomTab::Routing => 3,
-        BottomTab::MacrosGlobal => 4,
     }
 }
 
@@ -38,14 +36,13 @@ pub(crate) struct ModUiState {
     pub params: Arc<JSynPluginParams>,
     pub telemetry: Arc<ModUiTelemetry>,
     dragging_source: AtomicU8,
-    hover_dest: AtomicU8,
+    hover_dest: AtomicU16,
     active_bottom_tab: AtomicU8,
     active_modseq_subtab: AtomicU8,
     active_view_mode: AtomicU8,
-    active_main_fx_bus: AtomicU8,
-    fx_eq_mask: AtomicU16,
-    mb_dist_tab: [[AtomicU8; 8]; 2],
-    inspected_dest: AtomicU8,
+    fx_eq_mask: AtomicU32,
+    mb_dist_tab: [[AtomicU8; 8]; 3],
+    inspected_dest: AtomicU16,
     inspected_slot: AtomicU8,
     active_stamp: AtomicU8,
     mseg_snap: AtomicBool,
@@ -63,14 +60,13 @@ impl ModUiState {
             params,
             telemetry,
             dragging_source: AtomicU8::new(0),
-            hover_dest: AtomicU8::new(UNSET_U8),
-            active_bottom_tab: AtomicU8::new(bottom_tab_tag(BottomTab::VoiceEnv)),
+            hover_dest: AtomicU16::new(UNSET_DEST),
+            active_bottom_tab: AtomicU8::new(bottom_tab_tag(BottomTab::ModSeq)),
             active_modseq_subtab: AtomicU8::new(0),
             active_view_mode: AtomicU8::new(0),
-            active_main_fx_bus: AtomicU8::new(0),
-            fx_eq_mask: AtomicU16::new(0),
+            fx_eq_mask: AtomicU32::new(0),
             mb_dist_tab: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU8::new(0))),
-            inspected_dest: AtomicU8::new(UNSET_U8),
+            inspected_dest: AtomicU16::new(UNSET_DEST),
             inspected_slot: AtomicU8::new(UNSET_U8),
             active_stamp: AtomicU8::new(ModSeqStepShape::RampDown as u8),
             mseg_snap: AtomicBool::new(false),
@@ -131,7 +127,7 @@ impl ModUiState {
         Self::fnv1a_mix(&mut h, params.routing.inserts[1].mode.value() as u64);
         Self::fnv1a_mix(&mut h, params.sub_bus.enabled.value() as u64);
         Self::fnv1a_mix(&mut h, params.fx_bus_topology.value() as u64);
-        for bus in 0..2 {
+        for bus in 0..3 {
             for fx in params.fx_bus_slots(bus) {
                 let packed = (fx.enabled.value() as u64)
                     | ((fx.fx_type.value() as u64) << 1)
@@ -216,18 +212,18 @@ impl ModUiState {
 
     pub fn start_drag(&self, src: ModMatrixSource) {
         self.dragging_source.store(src as u8, Ordering::Relaxed);
-        self.hover_dest.store(UNSET_U8, Ordering::Relaxed);
+        self.hover_dest.store(UNSET_DEST, Ordering::Relaxed);
     }
 
     pub fn clear_drag(&self) {
         self.dragging_source.store(0, Ordering::Relaxed);
-        self.hover_dest.store(UNSET_U8, Ordering::Relaxed);
+        self.hover_dest.store(UNSET_DEST, Ordering::Relaxed);
     }
 
     #[inline]
     pub fn hover_destination(&self) -> Option<ModDestination> {
         let idx = self.hover_dest.load(Ordering::Relaxed);
-        if idx == UNSET_U8 {
+        if idx == UNSET_DEST {
             None
         } else {
             ModDestination::from_index(idx as usize)
@@ -237,7 +233,7 @@ impl ModUiState {
     #[inline]
     pub fn is_drop_target(&self, dest: ModDestination) -> bool {
         self.dragging_source() != ModMatrixSource::None
-            && self.hover_dest.load(Ordering::Relaxed) == (dest.index() as u8)
+            && self.hover_dest.load(Ordering::Relaxed) == (dest.index() as u16)
     }
 
     pub fn register_drop_rect(&self, dest: ModDestination, tab_tag: u8, bounds: BoundingBox) {
@@ -250,18 +246,14 @@ impl ModUiState {
         self.active_view_mode.store(mode, Ordering::Relaxed);
     }
 
-    pub fn set_main_fx_bus(&self, bus: usize) {
-        self.active_main_fx_bus.store((bus & 1) as u8, Ordering::Relaxed);
-    }
-
     #[inline]
     pub fn fx_eq_subtab(&self, bus: usize, slot: usize) -> bool {
-        let bit = ((bus & 1) * 8 + (slot & 7)) as u32;
+        let bit = (bus.min(2) * 8 + (slot & 7)) as u32;
         ((self.fx_eq_mask.load(Ordering::Relaxed) >> bit) & 1) != 0
     }
 
     pub fn set_fx_eq_subtab(&self, bus: usize, slot: usize, is_eq: bool) {
-        let bit = 1_u16 << (((bus & 1) * 8 + (slot & 7)) as u32);
+        let bit = 1_u32 << ((bus.min(2) * 8 + (slot & 7)) as u32);
         if is_eq {
             self.fx_eq_mask.fetch_or(bit, Ordering::Relaxed);
         } else {
@@ -278,11 +270,13 @@ impl ModUiState {
 
     #[inline]
     pub fn fx_mb_tab(&self, bus: usize, slot: usize) -> u8 {
-        self.mb_dist_tab[bus & 1][slot & 7].load(Ordering::Relaxed).min(3)
+        self.mb_dist_tab[bus.min(2)][slot & 7]
+            .load(Ordering::Relaxed)
+            .min(3)
     }
 
     pub fn set_fx_mb_tab(&self, bus: usize, slot: usize, tab: u8) {
-        self.mb_dist_tab[bus & 1][slot & 7].store(tab.min(3), Ordering::Relaxed);
+        self.mb_dist_tab[bus.min(2)][slot & 7].store(tab.min(3), Ordering::Relaxed);
     }
 
     pub fn swap_fx_mb_tab(&self, bus: usize, slot_a: usize, slot_b: usize) {
@@ -294,25 +288,16 @@ impl ModUiState {
 
     fn hit_test_cursor(&self, x: f32, y: f32) -> Option<usize> {
         let view_mode = self.active_view_mode.load(Ordering::Relaxed);
-        if view_mode >= 2 {
+        if view_mode != 0 {
             return None;
         }
         let active_tab = self.active_bottom_tab.load(Ordering::Relaxed);
-        let main_bus_tag = if self.active_main_fx_bus.load(Ordering::Relaxed) == 0 {
-            MAIN_FX_A_TAG
-        } else {
-            MAIN_FX_B_TAG
-        };
         let rects = self.drop_rects.lock().ok()?;
         for (idx, &(rx, ry, rw, rh, tag)) in rects.iter().enumerate() {
             if rw <= 1.0 || rh <= 1.0 {
                 continue;
             }
-            let visible = if view_mode == 1 {
-                tag == FX_VIEW_TAG
-            } else {
-                tag == 0 || tag == active_tab || tag == main_bus_tag
-            };
+            let visible = tag == 0 || tag == FX_VIEW_TAG || tag == active_tab;
             if !visible {
                 continue;
             }
@@ -327,8 +312,8 @@ impl ModUiState {
     pub fn update_hover_from_cursor(&self, x: f32, y: f32) -> bool {
         let next = self
             .hit_test_cursor(x, y)
-            .map(|idx| idx as u8)
-            .unwrap_or(UNSET_U8);
+            .map(|idx| idx as u16)
+            .unwrap_or(UNSET_DEST);
         let prev = self.hover_dest.swap(next, Ordering::Relaxed);
         prev != next
     }
@@ -352,7 +337,7 @@ impl ModUiState {
         let slot_idx = mat.assign_or_update(src, dest, 0.25)?;
         self.params.mod_matrix.store_value(mat);
         self.inspected_dest
-            .store(dest.index() as u8, Ordering::Relaxed);
+            .store(dest.index() as u16, Ordering::Relaxed);
         self.inspected_slot.store(slot_idx as u8, Ordering::Relaxed);
         Some(slot_idx)
     }
@@ -400,7 +385,7 @@ impl ModUiState {
 
     pub fn focus_slot(&self, dest: ModDestination, slot_idx: usize) {
         self.inspected_dest
-            .store(dest.index() as u8, Ordering::Relaxed);
+            .store(dest.index() as u16, Ordering::Relaxed);
         self.inspected_slot.store(slot_idx as u8, Ordering::Relaxed);
     }
 
@@ -443,7 +428,7 @@ impl ModUiState {
         }
         if count == 0 {
             self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
-            self.inspected_dest.store(UNSET_U8, Ordering::Relaxed);
+            self.inspected_dest.store(UNSET_DEST, Ordering::Relaxed);
             return;
         }
         let cur = self.inspected_slot.load(Ordering::Relaxed) as usize;
@@ -484,7 +469,7 @@ impl ModUiState {
             self.focus_slot(dest, next_idx);
         } else {
             self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
-            self.inspected_dest.store(UNSET_U8, Ordering::Relaxed);
+            self.inspected_dest.store(UNSET_DEST, Ordering::Relaxed);
         }
         true
     }
@@ -503,7 +488,7 @@ impl ModUiState {
             self.params.mod_matrix.store_value(mat);
             if self.inspected_dest.load(Ordering::Relaxed) as usize == dest.index() {
                 self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
-                self.inspected_dest.store(UNSET_U8, Ordering::Relaxed);
+                self.inspected_dest.store(UNSET_DEST, Ordering::Relaxed);
             }
         }
         cleared
@@ -558,7 +543,7 @@ impl ModUiState {
             self.focus_slot(old_dest, next_idx);
         } else {
             self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
-            self.inspected_dest.store(UNSET_U8, Ordering::Relaxed);
+            self.inspected_dest.store(UNSET_DEST, Ordering::Relaxed);
         }
     }
 
@@ -599,7 +584,7 @@ impl ModUiState {
                 self.focus_slot(old_dest, next_idx);
             } else {
                 self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
-                self.inspected_dest.store(UNSET_U8, Ordering::Relaxed);
+                self.inspected_dest.store(UNSET_DEST, Ordering::Relaxed);
             }
         }
     }
@@ -632,7 +617,7 @@ impl ModUiState {
         }
         self.params.mod_matrix.store_value(mat);
         self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
-        self.inspected_dest.store(UNSET_U8, Ordering::Relaxed);
+        self.inspected_dest.store(UNSET_DEST, Ordering::Relaxed);
     }
 
     pub fn source_display_name(&self, src: ModMatrixSource) -> String {
@@ -967,7 +952,7 @@ pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     HStack::new(cx, move |cx| {
         for &src in &ModMatrixSource::ALL_ACTIVE[..13] {
             ModSourcePill::new(cx, src, ui_for_pills.clone())
-                .width(Pixels(33.5))
+                .width(Pixels(27.0))
                 .height(Pixels(18.0))
                 .top(Stretch(1.0))
                 .bottom(Stretch(1.0));
