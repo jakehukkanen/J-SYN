@@ -5,6 +5,7 @@ pub mod diopser;
 pub mod dynamics;
 pub mod limiter;
 pub mod modulation;
+pub mod multiband_dist;
 pub mod tube_resonator;
 pub mod utility;
 
@@ -24,6 +25,7 @@ use self::diopser::DiopserStereo;
 use self::dynamics::{DistortionStereo, JSatClipperStereo, OttStereo};
 use self::limiter::LimiterStereo;
 use self::modulation::{ChorusStereo, DelayStereo, PhaserStereo, ReverbStereo};
+use self::multiband_dist::MultiBandDistStereo;
 use self::tube_resonator::TubeResonatorStereo;
 use self::utility::UtilityStereo;
 
@@ -35,6 +37,11 @@ pub use self::limiter::{
 };
 pub use self::modulation::{
     fx_high_cut_hz, fx_low_cut_hz, DELAY_SYNC_LABELS,
+};
+pub use self::multiband_dist::{
+    mb_band_level_db, mb_band_magnitude_at_hz, mb_ordered_xover_hz, mb_out_gain_db,
+    mb_xover_high_hz, mb_xover_high_norm, mb_xover_low_hz, mb_xover_low_norm, MbDistBandParams,
+    MB_BAND_LEVEL_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
 };
 pub use self::tube_resonator::{
     evaluate_tube_res_scope_response, format_tube_res_tune, tube_res_decay_ms,
@@ -68,10 +75,11 @@ pub enum FxType {
     TubeResonator = 10,
     Utility = 11,
     Limiter = 12,
+    MultibandDist = 13,
 }
 
 impl FxType {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Off,
         Self::Ott,
         Self::Distortion,
@@ -85,6 +93,7 @@ impl FxType {
         Self::TubeResonator,
         Self::Utility,
         Self::Limiter,
+        Self::MultibandDist,
     ];
 
     #[inline]
@@ -102,6 +111,7 @@ impl FxType {
             10 => Self::TubeResonator,
             11 => Self::Utility,
             12 => Self::Limiter,
+            13 => Self::MultibandDist,
             _ => Self::Off,
         }
     }
@@ -121,6 +131,7 @@ impl FxType {
             Self::TubeResonator => "Tube Res.",
             Self::Utility => "Utility",
             Self::Limiter => "Limiter",
+            Self::MultibandDist => "MB Dist",
         }
     }
 
@@ -139,6 +150,7 @@ impl FxType {
             Self::TubeResonator => "TUBE",
             Self::Utility => "UTIL",
             Self::Limiter => "LIM",
+            Self::MultibandDist => "MBDST",
         }
     }
 
@@ -217,6 +229,8 @@ pub struct FxSlotParams {
     pub limiter_true_peak: bool,
     /// Master Distortion waveshaping algorithm (default `DistortionMode::Tube`).
     pub distortion_mode: DistortionMode,
+    /// Per-band parameters (`[Low, Mid, High]`) for `FxType::MultibandDist`.
+    pub mb_bands: [MbDistBandParams; 3],
 }
 
 impl Default for FxSlotParams {
@@ -235,6 +249,15 @@ impl Default for FxSlotParams {
             utility_inv_r: false,
             limiter_true_peak: false,
             distortion_mode: DistortionMode::Tube,
+            mb_bands: [MbDistBandParams {
+                mode: DistortionMode::Tube,
+                enabled: true,
+                solo: false,
+                drive: 0.30,
+                bias: 0.50,
+                level: MB_BAND_LEVEL_DEFAULT_NORM,
+                mix: 1.00,
+            }; 3],
         }
     }
 }
@@ -268,6 +291,8 @@ impl FxSlotParams {
             FxType::Utility => [UTILITY_WIDTH_DEFAULT_NORM, 0.50, 0.50, 1.00],
             // Limiter: Gain 0.0 dB (0.0), Ceil -0.1 dB (17.9/18.0), Lookahead 1.5 ms (0.50), Mix 100%
             FxType::Limiter => [0.00, 17.9 / 18.0, 0.50, 1.00],
+            // MultibandDist: Low Xov 200 Hz (0.50), High Xov ~2.5 kHz, Out Gain 0 dB (0.50), Mix 100%
+            FxType::MultibandDist => [MB_XOVER_LOW_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, 0.50, 1.00],
         }
     }
 
@@ -305,6 +330,15 @@ impl FxSlotParams {
             utility_inv_r: false,
             limiter_true_peak: false,
             distortion_mode: DistortionMode::Tube,
+            mb_bands: [MbDistBandParams {
+                mode: DistortionMode::Tube,
+                enabled: true,
+                solo: false,
+                drive: 0.30,
+                bias: 0.50,
+                level: MB_BAND_LEVEL_DEFAULT_NORM,
+                mix: 1.00,
+            }; 3],
         }
     }
 }
@@ -548,6 +582,7 @@ struct StereoFxStage {
     tube_res: TubeResonatorStereo,
     utility: UtilityStereo,
     limiter: LimiterStereo,
+    mb_dist: Box<MultiBandDistStereo>,
 }
 
 impl StereoFxStage {
@@ -565,6 +600,7 @@ impl StereoFxStage {
             tube_res: TubeResonatorStereo::new(sample_rate),
             utility: UtilityStereo::new(sample_rate),
             limiter: LimiterStereo::new(sample_rate),
+            mb_dist: Box::new(MultiBandDistStereo::new(sample_rate)),
         }
     }
 
@@ -580,6 +616,7 @@ impl StereoFxStage {
         self.tube_res.set_sample_rate(sample_rate);
         self.utility.set_sample_rate(sample_rate);
         self.limiter.set_sample_rate(sample_rate);
+        self.mb_dist.set_sample_rate(sample_rate);
     }
 
     fn reset(&mut self) {
@@ -595,6 +632,7 @@ impl StereoFxStage {
         self.tube_res.reset();
         self.utility.reset();
         self.limiter.reset();
+        self.mb_dist.reset();
     }
 
     #[inline]
@@ -641,6 +679,12 @@ impl StereoFxStage {
                 p,
                 eq,
                 slot.limiter_true_peak,
+            ),
+            FxType::MultibandDist => self.mb_dist.process(
+                in_l,
+                in_r,
+                &slot.mb_bands,
+                p,
             ),
         }
     }
@@ -975,7 +1019,7 @@ impl FxRackState {
 
     #[inline]
     pub fn format_distortion_submode(p0: f32) -> &'static str {
-        DistortionMode::from_index(DistortionStereo::sub_mode_index(p0)).name()
+        DistortionMode::from_index(crate::waveshaper::legacy_distortion_submode_index(p0)).name()
     }
 
     #[inline]

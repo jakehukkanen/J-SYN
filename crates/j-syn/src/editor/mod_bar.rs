@@ -44,6 +44,7 @@ pub(crate) struct ModUiState {
     active_view_mode: AtomicU8,
     active_main_fx_bus: AtomicU8,
     fx_eq_mask: AtomicU16,
+    mb_dist_tab: [[AtomicU8; 8]; 2],
     inspected_dest: AtomicU8,
     inspected_slot: AtomicU8,
     active_stamp: AtomicU8,
@@ -68,6 +69,7 @@ impl ModUiState {
             active_view_mode: AtomicU8::new(0),
             active_main_fx_bus: AtomicU8::new(0),
             fx_eq_mask: AtomicU16::new(0),
+            mb_dist_tab: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU8::new(0))),
             inspected_dest: AtomicU8::new(UNSET_U8),
             inspected_slot: AtomicU8::new(UNSET_U8),
             active_stamp: AtomicU8::new(ModSeqStepShape::RampDown as u8),
@@ -143,6 +145,12 @@ impl ModUiState {
                     | ((fx.limiter_true_peak.value() as u64) << 22)
                     | ((fx.distortion_mode.value() as u64) << 23);
                 Self::fnv1a_mix(&mut h, packed);
+                for mb in &fx.mb_bands {
+                    let mb_packed = (mb.enabled.value() as u64)
+                        | ((mb.solo.value() as u64) << 1)
+                        | ((mb.mode.value() as u64) << 2);
+                    Self::fnv1a_mix(&mut h, mb_packed);
+                }
             }
         }
         h
@@ -266,6 +274,22 @@ impl ModUiState {
         let b = self.fx_eq_subtab(bus, slot_b);
         self.set_fx_eq_subtab(bus, slot_a, b);
         self.set_fx_eq_subtab(bus, slot_b, a);
+    }
+
+    #[inline]
+    pub fn fx_mb_tab(&self, bus: usize, slot: usize) -> u8 {
+        self.mb_dist_tab[bus & 1][slot & 7].load(Ordering::Relaxed).min(3)
+    }
+
+    pub fn set_fx_mb_tab(&self, bus: usize, slot: usize, tab: u8) {
+        self.mb_dist_tab[bus & 1][slot & 7].store(tab.min(3), Ordering::Relaxed);
+    }
+
+    pub fn swap_fx_mb_tab(&self, bus: usize, slot_a: usize, slot_b: usize) {
+        let a = self.fx_mb_tab(bus, slot_a);
+        let b = self.fx_mb_tab(bus, slot_b);
+        self.set_fx_mb_tab(bus, slot_a, b);
+        self.set_fx_mb_tab(bus, slot_b, a);
     }
 
     fn hit_test_cursor(&self, x: f32, y: f32) -> Option<usize> {

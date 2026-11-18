@@ -3153,3 +3153,161 @@ fn distortion_all_modes_bounded_bias_asymmetry_linear_fold_and_idle() {
         assert!(ins_peak > 0.01, "InsertMode {:?} produced silence", ins_mode);
     }
 }
+
+#[test]
+fn fx_multiband_dist_flat_xover_per_band_harmonics_solo_and_idle() {
+    use j_syn_dsp::{
+        DistortionMode, FxRackParams, FxRackState, FxSlotParams, FxType, MbDistBandParams,
+        ModDestination, MB_BAND_LEVEL_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM,
+        MB_XOVER_LOW_DEFAULT_NORM, NUM_MOD_DESTS,
+    };
+
+    let sr = 96_000.0;
+    let mod_zero = [0.0_f32; NUM_MOD_DESTS];
+
+    // 1. Flat unity magnitude sum (+-0.1 dB across 20 Hz .. 20 kHz) when bands are neutral (mix=0 or bypassed)
+    for bypass_mode in [false, true] {
+        let mut p = FxRackParams::default();
+        p.buses[0].slots[0] = FxSlotParams {
+            fx_type: FxType::MultibandDist,
+            enabled: true,
+            stack: 1,
+            params: [MB_XOVER_LOW_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, 0.50, 1.0],
+            mb_bands: [MbDistBandParams {
+                mode: DistortionMode::Tube,
+                enabled: !bypass_mode,
+                solo: false,
+                drive: 0.0,
+                bias: 0.5,
+                level: MB_BAND_LEVEL_DEFAULT_NORM,
+                mix: 0.0,
+            }; 3],
+            ..FxSlotParams::default()
+        };
+
+        for freq_hz in [25.0_f32, 60.0, 150.0, 200.0, 650.0, 1500.0, 2500.0, 6000.0, 12000.0, 18000.0] {
+            let mut rack = FxRackState::new(sr);
+            let mut rms_in_sq = 0.0_f64;
+            let mut rms_out_sq = 0.0_f64;
+            // Measure over an exact integer number of cycles after settling the 200 Hz LR4 phase response
+            let period_samples = (sr / freq_hz).round().max(1.0) as usize;
+            let cycles = ((9_600.0 / period_samples as f32).ceil() as usize).max(4);
+            let measure = cycles * period_samples;
+            let settle = 24_000;
+            for n in 0..(settle + measure) {
+                let x = 0.25 * (2.0 * std::f32::consts::PI * freq_hz * n as f32 / sr).sin();
+                let (l, r) = rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &p, &mod_zero, 120.0, None);
+                assert!(l.is_finite() && r.is_finite());
+                if n >= settle {
+                    rms_in_sq += (x as f64) * (x as f64);
+                    rms_out_sq += (l as f64) * (l as f64);
+                }
+            }
+            let gain_db = 10.0 * (rms_out_sq / rms_in_sq).log10();
+            assert!(
+                gain_db.abs() <= 0.1,
+                "LR4 sum not flat at {freq_hz} Hz (bypass={bypass_mode}): {gain_db:+.4} dB"
+            );
+        }
+    }
+
+    // 2. Independent harmonic generation per band: Low driven with SineFold, High bypassed
+    let measure_thd_energy = |freq_hz: f32, bands: [MbDistBandParams; 3]| -> f64 {
+        let mut rack = FxRackState::new(sr);
+        let mut p = FxRackParams::default();
+        p.buses[0].slots[0] = FxSlotParams {
+            fx_type: FxType::MultibandDist,
+            enabled: true,
+            stack: 1,
+            params: [MB_XOVER_LOW_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, 0.50, 1.0],
+            mb_bands: bands,
+            ..FxSlotParams::default()
+        };
+        let n_fft = 8192;
+        let settle = 4096;
+        let mut out_buf = Vec::with_capacity(n_fft);
+        for n in 0..(settle + n_fft) {
+            let x = 0.5 * (2.0 * std::f32::consts::PI * freq_hz * n as f32 / sr).sin();
+            let (l, _) = rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &p, &mod_zero, 120.0, None);
+            if n >= settle {
+                out_buf.push(l as f64);
+            }
+        }
+        // Goertzel at fundamental vs 3rd harmonic
+        let goertzel = |target_hz: f32| -> f64 {
+            let omega = 2.0 * std::f64::consts::PI * target_hz as f64 / sr as f64;
+            let coeff = 2.0 * omega.cos();
+            let (mut s1, mut s2) = (0.0, 0.0);
+            for &s in &out_buf {
+                let s0 = s + coeff * s1 - s2;
+                s2 = s1;
+                s1 = s0;
+            }
+            (s1 * s1 + s2 * s2 - coeff * s1 * s2).max(0.0).sqrt()
+        };
+        let h1 = goertzel(freq_hz).max(1e-9);
+        let h3 = goertzel(freq_hz * 3.0);
+        h3 / h1
+    };
+
+    let low_only_bands = [
+        MbDistBandParams {
+            mode: DistortionMode::LinearFold,
+            enabled: true,
+            solo: false,
+            drive: 0.85,
+            bias: 0.5,
+            level: MB_BAND_LEVEL_DEFAULT_NORM,
+            mix: 1.0,
+        },
+        MbDistBandParams {
+            enabled: false,
+            ..MbDistBandParams::default()
+        },
+        MbDistBandParams {
+            enabled: false,
+            ..MbDistBandParams::default()
+        },
+    ];
+    let low_h3 = measure_thd_energy(60.0, low_only_bands);
+    let high_h3 = measure_thd_energy(8_000.0, low_only_bands);
+    assert!(low_h3 > 0.05, "Low band should generate strong harmonics on 60 Hz: {low_h3}");
+    assert!(high_h3 < 0.002, "Bypassed High band should leave 8 kHz clean: {high_h3}");
+
+    // 3. Band solo isolates the soloed band + idle recovery + modulated xover
+    let mut solo_rack = FxRackState::new(sr);
+    let mut sp = FxRackParams::default();
+    sp.buses[0].slots[0] = FxSlotParams {
+        fx_type: FxType::MultibandDist,
+        enabled: true,
+        stack: 1,
+        params: [MB_XOVER_LOW_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, 0.50, 1.0],
+        mb_bands: [
+            MbDistBandParams { solo: true, drive: 0.0, mix: 0.0, ..MbDistBandParams::default() },
+            MbDistBandParams { solo: false, drive: 0.0, mix: 0.0, ..MbDistBandParams::default() },
+            MbDistBandParams { solo: false, drive: 0.0, mix: 0.0, ..MbDistBandParams::default() },
+        ],
+        ..FxSlotParams::default()
+    };
+    let mut high_rms = 0.0_f64;
+    for n in 0..8000 {
+        let x = 0.4 * (2.0 * std::f32::consts::PI * 8000.0 * n as f32 / sr).sin();
+        let (l, _) = solo_rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
+        if n >= 4000 {
+            high_rms += (l as f64) * (l as f64);
+        }
+    }
+    assert!(high_rms < 1e-3, "Soloing Low band should attenuate 8 kHz high content: {high_rms}");
+
+    // Modulate P1 (LOW XOV) cleanly and verify idle sleep recovery
+    let mut mod_xov = [0.0_f32; NUM_MOD_DESTS];
+    mod_xov[ModDestination::fx_bus_slot_param(0, 0, 0).index()] = 0.4;
+    let (ml, mr) = solo_rack.process_buses_sample((0.1, -0.1), (0.0, 0.0), (0.0, 0.0), &sp, &mod_xov, 120.0, None);
+    assert!(ml.is_finite() && mr.is_finite());
+
+    for _ in 0..1500 {
+        let _ = solo_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
+    }
+    let (il, ir) = solo_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
+    assert_eq!((il, ir), (0.0, 0.0));
+}

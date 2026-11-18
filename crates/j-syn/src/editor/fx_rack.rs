@@ -7,9 +7,10 @@ use j_syn_dsp::filter::cutoff_norm_to_hz;
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{
     diopser_freq_hz, format_tube_res_tune, format_utility_pan, fx_high_cut_hz, fx_low_cut_hz,
-    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, tube_res_decay_ms,
-    tube_res_flt_freq_hz, tube_res_flt_width_oct, tube_res_lfo_rate_hz,
-    utility_gain_db_from_norm, utility_width_from_norm, FxRackState, FxType,
+    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, mb_band_level_db,
+    mb_out_gain_db, mb_xover_high_hz, mb_xover_low_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
+    tube_res_flt_width_oct, tube_res_lfo_rate_hz, utility_gain_db_from_norm,
+    utility_width_from_norm, FxRackState, FxType, MB_BAND_LEVEL_DEFAULT_NORM,
 };
 use nih_plug::prelude::{FloatParam, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
@@ -17,9 +18,11 @@ use nih_plug_vizia::vizia::prelude::*;
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown,
     build_enum_dropdown_with_override, build_inline_pill_cell, build_prefixed_enum_dropdown,
-    ArrowButton, ArrowDir, ScrollDropdown,
+    ArrowButton, ArrowDir, ScrollDropdown, ScrollDropdownExt,
 };
-use super::fx_scopes::{fx_accent_rgb, FxSlotVisualizer, SubClipperScope};
+use super::fx_scopes::{
+    fx_accent_rgb, FxSlotVisualizer, MultibandXoverDragOverlay, SubClipperScope,
+};
 use super::mod_bar::{ModUiState, FX_VIEW_TAG, MAIN_FX_A_TAG, MAIN_FX_B_TAG};
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
 use super::{AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData, UiEvent};
@@ -30,18 +33,19 @@ use crate::{
 
 const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Empty", FxTypeParam::Off),
+    ("Utility", FxTypeParam::Utility),
     ("OTT", FxTypeParam::Ott),
     ("Distortion", FxTypeParam::Distortion),
+    ("MB Dist", FxTypeParam::MultibandDist),
+    ("Clipper", FxTypeParam::JSatClipper),
+    ("Limiter", FxTypeParam::Limiter),
     ("Chorus", FxTypeParam::Chorus),
     ("Phaser", FxTypeParam::Phaser),
     ("Delay", FxTypeParam::Delay),
     ("Reverb", FxTypeParam::Reverb),
-    ("Clipper", FxTypeParam::JSatClipper),
     ("Filter", FxTypeParam::Filter),
     ("Dispersion", FxTypeParam::Diopser),
     ("Tube Res.", FxTypeParam::TubeResonator),
-    ("Utility", FxTypeParam::Utility),
-    ("Limiter", FxTypeParam::Limiter),
 ];
 
 const FX_FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
@@ -93,6 +97,23 @@ const DISTORTION_MODE_ITEMS: &[(&str, DistortionModeParam)] = &[
     ("Full Rect", DistortionModeParam::FullRectify),
 ];
 
+const MB_DIST_MODE_ITEMS: &[(&str, DistortionModeParam)] = &[
+    ("Tube", DistortionModeParam::Tube),
+    ("Mech", DistortionModeParam::Mech),
+    ("Sine", DistortionModeParam::Sine),
+    ("Crush", DistortionModeParam::Crush),
+    ("Classic A", DistortionModeParam::ClassicA),
+    ("Classic B", DistortionModeParam::ClassicB),
+    ("Classic C", DistortionModeParam::ClassicC),
+    ("Diode A", DistortionModeParam::DiodeA),
+    ("Diode B", DistortionModeParam::DiodeB),
+    ("Lin Fold", DistortionModeParam::LinearFold),
+    ("Sin Fold", DistortionModeParam::SineFold),
+    ("Hard Clip", DistortionModeParam::HardClip),
+    ("Half Rect", DistortionModeParam::HalfRectify),
+    ("Full Rect", DistortionModeParam::FullRectify),
+];
+
 #[inline]
 fn sub_bus_enabled(p: &JSynPluginParams) -> bool {
     p.sub_bus.enabled.value()
@@ -117,8 +138,26 @@ fn fx_slot_param_label(
     fx_ty: FxTypeParam,
     is_eq: bool,
     is_scream: bool,
+    mb_tab: u8,
     param_idx: usize,
 ) -> &'static str {
+    if fx_ty == FxTypeParam::MultibandDist {
+        return if mb_tab == 0 {
+            match param_idx {
+                0 => "LOW XOV",
+                1 => "HIGH XOV",
+                2 => "OUT GN",
+                _ => "MIX",
+            }
+        } else {
+            match param_idx {
+                0 => "DRIVE",
+                1 => "BIAS",
+                2 => "LEVEL",
+                _ => "MIX",
+            }
+        };
+    }
     if is_eq {
         return match fx_ty {
             FxTypeParam::Chorus => match param_idx {
@@ -235,6 +274,7 @@ fn fx_slot_param_label(
             2 => "LOOKAHD",
             _ => "MIX",
         },
+        FxTypeParam::MultibandDist => "--",
     }
 }
 
@@ -253,10 +293,27 @@ fn format_hz(hz: f32) -> String {
 fn format_fx_slot_param_value(
     fx_ty: FxTypeParam,
     is_eq: bool,
+    mb_tab: u8,
     param_idx: usize,
     norm: f32,
 ) -> String {
     let n = norm.clamp(0.0, 1.0);
+    if fx_ty == FxTypeParam::MultibandDist {
+        return if mb_tab == 0 {
+            match param_idx {
+                0 => format_hz(mb_xover_low_hz(n)),
+                1 => format_hz(mb_xover_high_hz(n)),
+                2 => format!("{:+.1} dB", mb_out_gain_db(n)),
+                _ => format!("{:.0}%", n * 100.0),
+            }
+        } else {
+            match param_idx {
+                0 | 3 => format!("{:.0}%", n * 100.0),
+                1 => format!("{:+.0}%", (n - 0.5) * 200.0),
+                _ => format!("{:+.1} dB", mb_band_level_db(n)),
+            }
+        };
+    }
     if is_eq {
         if fx_ty == FxTypeParam::TubeResonator {
             return match param_idx {
@@ -359,6 +416,7 @@ fn format_fx_slot_param_value(
             }
             _ => format!("{:.0}%", n * 100.0),
         },
+        FxTypeParam::MultibandDist => String::new(),
     }
 }
 
@@ -400,6 +458,7 @@ struct SlotSnapshot {
     util_inv_r: bool,
     lim_tp: bool,
     dist_m: DistortionModeParam,
+    mb_bands: [(DistortionModeParam, bool, bool, f32, f32, f32, f32); 3],
 }
 
 /// Swaps all settings, EQ sub-tabs, and modulation assignments between two slots of `bus_idx`.
@@ -432,6 +491,18 @@ fn swap_fx_slots(
             util_inv_r: s.utility_inv_r.value(),
             lim_tp: s.limiter_true_peak.value(),
             dist_m: s.distortion_mode.value(),
+            mb_bands: std::array::from_fn(|b| {
+                let mb = &s.mb_bands[b];
+                (
+                    mb.mode.value(),
+                    mb.enabled.value(),
+                    mb.solo.value(),
+                    mb.drive.value(),
+                    mb.bias.value(),
+                    mb.level.value(),
+                    mb.mix.value(),
+                )
+            }),
         }
     };
     let a = capture(slot_a);
@@ -494,11 +565,35 @@ fn swap_fx_slots(
         setter.begin_set_parameter(&s.distortion_mode);
         setter.set_parameter(&s.distortion_mode, snap.dist_m);
         setter.end_set_parameter(&s.distortion_mode);
+
+        for (b, (m, en, solo, drv, bias, lvl, mix)) in snap.mb_bands.into_iter().enumerate() {
+            let mb = &s.mb_bands[b];
+            setter.begin_set_parameter(&mb.mode);
+            setter.set_parameter(&mb.mode, m);
+            setter.end_set_parameter(&mb.mode);
+            setter.begin_set_parameter(&mb.enabled);
+            setter.set_parameter(&mb.enabled, en);
+            setter.end_set_parameter(&mb.enabled);
+            setter.begin_set_parameter(&mb.solo);
+            setter.set_parameter(&mb.solo, solo);
+            setter.end_set_parameter(&mb.solo);
+            for (fp, val) in [
+                (&mb.drive, drv),
+                (&mb.bias, bias),
+                (&mb.level, lvl),
+                (&mb.mix, mix),
+            ] {
+                setter.begin_set_parameter(fp);
+                setter.set_parameter(fp, val);
+                setter.end_set_parameter(fp);
+            }
+        }
     };
 
     write(slot_a, b);
     write(slot_b, a);
     mod_ui.swap_fx_eq_subtab(bus_idx, slot_a, slot_b);
+    mod_ui.swap_fx_mb_tab(bus_idx, slot_a, slot_b);
     swap_mod_destinations_for_slots(params, bus_idx, slot_a, slot_b);
 }
 
@@ -542,7 +637,29 @@ fn set_fx_slot_type_with_defaults(
         setter.begin_set_parameter(&slot.limiter_true_peak);
         setter.set_parameter(&slot.limiter_true_peak, false);
         setter.end_set_parameter(&slot.limiter_true_peak);
+        for mb in &slot.mb_bands {
+            setter.begin_set_parameter(&mb.mode);
+            setter.set_parameter(&mb.mode, DistortionModeParam::Tube);
+            setter.end_set_parameter(&mb.mode);
+            setter.begin_set_parameter(&mb.enabled);
+            setter.set_parameter(&mb.enabled, true);
+            setter.end_set_parameter(&mb.enabled);
+            setter.begin_set_parameter(&mb.solo);
+            setter.set_parameter(&mb.solo, false);
+            setter.end_set_parameter(&mb.solo);
+            for (fp, val) in [
+                (&mb.drive, 0.30),
+                (&mb.bias, 0.50),
+                (&mb.level, MB_BAND_LEVEL_DEFAULT_NORM),
+                (&mb.mix, 1.00),
+            ] {
+                setter.begin_set_parameter(fp);
+                setter.set_parameter(fp, val);
+                setter.end_set_parameter(fp);
+            }
+        }
         mod_ui.set_fx_eq_subtab(bus_idx, slot_idx, false);
+        mod_ui.set_fx_mb_tab(bus_idx, slot_idx, 0);
     }
 }
 
@@ -764,6 +881,114 @@ fn build_fx_scope_zstack(
                 let p_ov = p_top.clone();
                 let g_ov = g_top.clone();
                 let m_ov = m_top.clone();
+
+                if fx_ty == FxTypeParam::MultibandDist {
+                    MultibandXoverDragOverlay::new(
+                        cx,
+                        bus_idx,
+                        slot_idx,
+                        p_ov.clone(),
+                        g_ov.clone(),
+                        m_ov.clone(),
+                    )
+                    .position_type(PositionType::SelfDirected)
+                    .z_index(5)
+                    .top(Pixels(22.0))
+                    .left(Pixels(0.0))
+                    .right(Pixels(0.0))
+                    .bottom(Pixels(0.0));
+
+                    HStack::new(cx, move |cx| {
+                        for band in 0..3 {
+                            if band > 0 {
+                                Element::new(cx).width(Stretch(1.0)).hoverable(false);
+                            }
+                            let p_band = p_ov.clone();
+                            let g_band = g_ov.clone();
+                            let m_band = m_ov.clone();
+                            HStack::new(cx, move |cx| {
+                                let m_act = m_band.clone();
+                                let m_cls = m_band.clone();
+                                build_enum_dropdown(
+                                    cx,
+                                    p_band.clone(),
+                                    g_band.clone(),
+                                    move |p| &p.fx_bus_slots(bus_idx)[slot_idx].mb_bands[band].mode,
+                                    MB_DIST_MODE_ITEMS,
+                                )
+                                .on_activate(move |cx| {
+                                    m_act.set_fx_mb_tab(bus_idx, slot_idx, band as u8 + 1);
+                                    cx.emit(UiEvent::ModUiChanged);
+                                })
+                                .class("fx-scope-dd")
+                                .toggle_class(
+                                    "fx-mb-band-active",
+                                    UiData::mod_ui_rev.map(move |_| {
+                                        m_cls.fx_mb_tab(bus_idx, slot_idx) == (band as u8 + 1)
+                                    }),
+                                )
+                                .width(Pixels(60.0))
+                                .height(Pixels(17.0));
+
+                                let p_s = p_band.clone();
+                                let g_s = g_band.clone();
+                                Button::new(
+                                    cx,
+                                    move |cx| {
+                                        let slot = &p_s.fx_bus_slots(bus_idx)[slot_idx];
+                                        let setter = ParamSetter::new(g_s.as_ref());
+                                        let multi_solo = cx.modifiers().contains(Modifiers::SHIFT);
+                                        if multi_solo {
+                                            let p = &slot.mb_bands[band].solo;
+                                            let next = !p.value();
+                                            setter.begin_set_parameter(p);
+                                            setter.set_parameter(p, next);
+                                            setter.end_set_parameter(p);
+                                        } else {
+                                            let sole_active = slot.mb_bands[band].solo.value()
+                                                && (0..3).all(|i| {
+                                                    i == band || !slot.mb_bands[i].solo.value()
+                                                });
+                                            for (i, mb) in slot.mb_bands.iter().enumerate() {
+                                                let target = !sole_active && i == band;
+                                                if mb.solo.value() != target {
+                                                    setter.begin_set_parameter(&mb.solo);
+                                                    setter.set_parameter(&mb.solo, target);
+                                                    setter.end_set_parameter(&mb.solo);
+                                                }
+                                            }
+                                        }
+                                        cx.emit(UiEvent::ModUiChanged);
+                                    },
+                                    |cx| bold_label(cx, "S", "fx-subtab-lbl").hoverable(false),
+                                )
+                                .class("fx-scope-pill")
+                                .class("fx-scope-flt-btn")
+                                .toggle_class(
+                                    "fx-subtab-active",
+                                    UiData::params.map(move |p| {
+                                        p.fx_bus_slots(bus_idx)[slot_idx].mb_bands[band]
+                                            .solo
+                                            .value()
+                                    }),
+                                )
+                                .width(Pixels(14.0))
+                                .height(Pixels(17.0));
+                            })
+                            .col_between(Pixels(2.0))
+                            .width(Auto)
+                            .height(Pixels(17.0));
+                        }
+                    })
+                    .position_type(PositionType::SelfDirected)
+                    .z_index(10)
+                    .width(Stretch(1.0))
+                    .height(Pixels(17.0))
+                    .top(Pixels(4.0))
+                    .left(Pixels(4.0))
+                    .right(Pixels(4.0));
+                    return;
+                }
                 HStack::new(cx, move |cx| {
                     let add_util_inv_pill =
                         |cx: &mut Context,
@@ -982,6 +1207,7 @@ struct FxKnobViewKey {
     fx_type: FxTypeParam,
     is_scream: bool,
     is_eq: bool,
+    mb_tab: u8,
 }
 
 impl Data for FxKnobViewKey {
@@ -995,11 +1221,95 @@ fn build_fx_knob_row(
     bus_idx: usize,
     slot_idx: usize,
     params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
     knob_sz: f32,
     tab_tag: u8,
 ) {
+    let p_side_key = params.clone();
+    let m_side_key = mod_ui.clone();
+    let p_side_btn = params.clone();
+    let g_side_btn = gui_context;
+    let m_side_btn = mod_ui.clone();
+
     HStack::new(cx, move |cx| {
+        Binding::new(
+            cx,
+            UiData::mod_ui_rev.map(move |_| {
+                let s = &p_side_key.fx_bus_slots(bus_idx)[slot_idx];
+                if s.fx_type.value() == FxTypeParam::MultibandDist {
+                    Some(m_side_key.fx_mb_tab(bus_idx, slot_idx))
+                } else {
+                    None
+                }
+            }),
+            move |cx, side_lens| {
+                let Some(mb_tab) = side_lens.get(cx) else {
+                    return;
+                };
+                let p_col = p_side_btn.clone();
+                let g_col = g_side_btn.clone();
+                let m_col = m_side_btn.clone();
+                VStack::new(cx, move |cx| {
+                    let m_xov = m_col.clone();
+                    let m_xov_cls = m_col.clone();
+                    Button::new(
+                        cx,
+                        move |cx| {
+                            m_xov.set_fx_mb_tab(bus_idx, slot_idx, 0);
+                            cx.emit(UiEvent::ModUiChanged);
+                        },
+                        |cx| bold_label(cx, "XOV", "fx-subtab-lbl").hoverable(false),
+                    )
+                    .class("fx-mb-side-btn")
+                    .toggle_class(
+                        "fx-subtab-active",
+                        UiData::mod_ui_rev.map(move |_| m_xov_cls.fx_mb_tab(bus_idx, slot_idx) == 0),
+                    )
+                    .width(Pixels(28.0))
+                    .height(Pixels(17.0));
+
+                    if mb_tab > 0 {
+                        let band = (mb_tab - 1) as usize;
+                        let p_on = p_col.clone();
+                        let g_on = g_col.clone();
+                        Button::new(
+                            cx,
+                            move |cx| {
+                                let setter = ParamSetter::new(g_on.as_ref());
+                                let p = &p_on.fx_bus_slots(bus_idx)[slot_idx].mb_bands[band].enabled;
+                                let next = !p.value();
+                                setter.begin_set_parameter(p);
+                                setter.set_parameter(p, next);
+                                setter.end_set_parameter(p);
+                                cx.emit(UiEvent::ModUiChanged);
+                            },
+                            |cx| bold_label(cx, "ON", "fx-subtab-lbl").hoverable(false),
+                        )
+                        .class("fx-mb-side-btn")
+                        .toggle_class(
+                            "fx-subtab-active",
+                            UiData::params.map(move |p| {
+                                p.fx_bus_slots(bus_idx)[slot_idx].mb_bands[band].enabled.value()
+                            }),
+                        )
+                        .width(Pixels(28.0))
+                        .height(Pixels(17.0));
+                    } else {
+                        Element::new(cx)
+                            .width(Pixels(28.0))
+                            .height(Pixels(17.0))
+                            .hoverable(false);
+                    }
+                })
+                .row_between(Pixels(3.0))
+                .width(Pixels(28.0))
+                .height(Auto)
+                .top(Stretch(1.0))
+                .bottom(Stretch(1.0));
+            },
+        );
+
         for p_idx in 0..4 {
             let p_dim = params.clone();
             let p_key = params.clone();
@@ -1015,6 +1325,11 @@ fn build_fx_knob_row(
                         is_scream: s.filter_mode.value() == FilterModeParam::Scream,
                         is_eq: FxType::from(fx_type).subtab_label().is_some()
                             && mod_key.fx_eq_subtab(bus_idx, slot_idx),
+                        mb_tab: if fx_type == FxTypeParam::MultibandDist {
+                            mod_key.fx_mb_tab(bus_idx, slot_idx)
+                        } else {
+                            0
+                        },
                     }
                 }),
                 move |cx, key_lens| {
@@ -1028,17 +1343,27 @@ fn build_fx_knob_row(
                     } else {
                         0
                     };
-                    let def_norm = if key.is_eq {
+                    let mb_band = (key.mb_tab > 0 && key.fx_type == FxTypeParam::MultibandDist)
+                        .then(|| (key.mb_tab - 1) as usize);
+                    let def_norm = if mb_band.is_some() {
+                        [0.30, 0.50, MB_BAND_LEVEL_DEFAULT_NORM, 1.00][p_idx]
+                    } else if key.is_eq {
                         j_syn_dsp::FxSlotParams::default_eq_params_for_type(key.fx_type.into())[p_idx]
                     } else {
                         j_syn_dsp::FxSlotParams::default_params_for_type(key.fx_type.into())[p_idx]
                     };
-                    let title = fx_slot_param_label(key.fx_type, key.is_eq, key.is_scream, p_idx);
+                    let title = fx_slot_param_label(
+                        key.fx_type,
+                        key.is_eq,
+                        key.is_scream,
+                        key.mb_tab,
+                        p_idx,
+                    );
                     let accent = fx_accent_rgb(key.fx_type);
                     let p_cell = p_dim.clone();
                     let mod_cell = mod_ui.clone();
                     let formatter = Arc::new(move |norm: f32, _off: Option<f32>| {
-                        format_fx_slot_param_value(key.fx_type, key.is_eq, p_idx, norm)
+                        format_fx_slot_param_value(key.fx_type, key.is_eq, key.mb_tab, p_idx, norm)
                     });
                     VStack::new(cx, move |cx| {
                         bold_label(cx, title, "knob-title")
@@ -1046,24 +1371,42 @@ fn build_fx_knob_row(
                             .height(Pixels(12.0))
                             .child_space(Stretch(1.0));
 
-                        RotaryKnob::new_with_mod_formatter(
-                            cx,
-                            UiData::params,
-                            move |p| p.fx_bus_slots(bus_idx)[slot_idx].param_at(param_slot),
-                            false,
-                            accent,
-                            ModDestination::fx_bus_slot_param(bus_idx, slot_idx, param_slot),
-                            mod_cell,
-                            tab_tag,
-                            formatter,
-                        )
-                        .default_norm(Some(def_norm))
-                        .snap_steps(snap_steps)
-                        .enabled_by(p_cell, move |p| slot_enabled_for_bus(p, bus_idx, slot_idx))
-                        .width(Pixels(knob_sz))
-                        .height(Pixels(knob_sz))
-                        .left(Stretch(1.0))
-                        .right(Stretch(1.0));
+                        let knob = if let Some(band) = mb_band {
+                            RotaryKnob::new_with_formatter(
+                                cx,
+                                UiData::params,
+                                move |p| p.fx_bus_slots(bus_idx)[slot_idx].mb_bands[band].param_at(p_idx),
+                                p_idx == 1,
+                                accent,
+                                formatter,
+                            )
+                        } else {
+                            RotaryKnob::new_with_mod_formatter(
+                                cx,
+                                UiData::params,
+                                move |p| p.fx_bus_slots(bus_idx)[slot_idx].param_at(param_slot),
+                                false,
+                                accent,
+                                ModDestination::fx_bus_slot_param(bus_idx, slot_idx, param_slot),
+                                mod_cell,
+                                tab_tag,
+                                formatter,
+                            )
+                        };
+                        knob.default_norm(Some(def_norm))
+                            .snap_steps(snap_steps)
+                            .enabled_by(p_cell, move |p| {
+                                slot_enabled_for_bus(p, bus_idx, slot_idx)
+                                    && mb_band.is_none_or(|b| {
+                                        p.fx_bus_slots(bus_idx)[slot_idx].mb_bands[b]
+                                            .enabled
+                                            .value()
+                                    })
+                            })
+                            .width(Pixels(knob_sz))
+                            .height(Pixels(knob_sz))
+                            .left(Stretch(1.0))
+                            .right(Stretch(1.0));
                     })
                     .class("knob-cell")
                     .width(Stretch(1.0))
@@ -1388,7 +1731,7 @@ fn build_bus_column_fx_grid(
                                 bus_idx,
                                 slot_idx,
                                 p_card.clone(),
-                                g_card,
+                                g_card.clone(),
                                 m_card.clone(),
                             );
 
@@ -1397,6 +1740,7 @@ fn build_bus_column_fx_grid(
                                 bus_idx,
                                 slot_idx,
                                 p_card,
+                                g_card,
                                 m_card,
                                 27.0,
                                 FX_VIEW_TAG,
@@ -1519,7 +1863,7 @@ pub(crate) fn build_main_fx_column(
                             },
                         );
 
-                        build_fx_knob_row(cx, bus_idx, slot_idx, p_card, m_card, 32.0, tag);
+                        build_fx_knob_row(cx, bus_idx, slot_idx, p_card, g_card, m_card, 32.0, tag);
                     })
                     .class("hardware-module")
                     .class("fx-compact-card")

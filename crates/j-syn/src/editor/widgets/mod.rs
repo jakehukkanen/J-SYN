@@ -113,17 +113,24 @@ pub(super) fn handle_mod_depth_move(
     true
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::editor) enum ResizeCursorAxis {
+    Default,
+    Vertical,
+    Horizontal,
+}
+
 #[cfg(target_os = "macos")]
 #[allow(unexpected_cfgs)]
-fn set_macos_cursor(row_resize: bool) {
+fn set_macos_cursor(axis: ResizeCursorAxis) {
     use objc::runtime::Object;
     use objc::{class, msg_send, sel, sel_impl};
 
     unsafe {
-        let cursor: *mut Object = if row_resize {
-            msg_send![class!(NSCursor), resizeUpDownCursor]
-        } else {
-            msg_send![class!(NSCursor), arrowCursor]
+        let cursor: *mut Object = match axis {
+            ResizeCursorAxis::Vertical => msg_send![class!(NSCursor), resizeUpDownCursor],
+            ResizeCursorAxis::Horizontal => msg_send![class!(NSCursor), resizeLeftRightCursor],
+            ResizeCursorAxis::Default => msg_send![class!(NSCursor), arrowCursor],
         };
         if !cursor.is_null() {
             let _: () = msg_send![cursor, set];
@@ -131,16 +138,23 @@ fn set_macos_cursor(row_resize: bool) {
     }
 }
 
+pub(in crate::editor) fn set_resize_cursor(cx: &mut EventContext, axis: ResizeCursorAxis) {
+    let icon = match axis {
+        ResizeCursorAxis::Vertical => CursorIcon::RowResize,
+        ResizeCursorAxis::Horizontal => CursorIcon::ColResize,
+        ResizeCursorAxis::Default => CursorIcon::Default,
+    };
+    cx.emit(WindowEvent::SetCursor(icon));
+    #[cfg(target_os = "macos")]
+    set_macos_cursor(axis);
+}
+
 pub(super) fn update_mod_collar_cursor(cx: &mut EventContext, active: bool, cursor_active: &mut bool) {
     if active {
-        cx.emit(WindowEvent::SetCursor(CursorIcon::RowResize));
-        #[cfg(target_os = "macos")]
-        set_macos_cursor(true);
+        set_resize_cursor(cx, ResizeCursorAxis::Vertical);
         *cursor_active = true;
     } else if *cursor_active {
-        cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
-        #[cfg(target_os = "macos")]
-        set_macos_cursor(false);
+        set_resize_cursor(cx, ResizeCursorAxis::Default);
         *cursor_active = false;
     }
 }

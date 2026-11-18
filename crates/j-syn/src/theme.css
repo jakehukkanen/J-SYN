@@ -1214,6 +1214,46 @@ led-toggle:checked .switch-label {
   color: #ffd382e6;
 }
 
+.fx-scope-dd.fx-mb-band-active dropdown {
+  background-color: #59463159;
+  border-color: #f5b349b8;
+}
+
+.fx-scope-dd.fx-mb-band-active .compact-pill-text {
+  color: #ffd38280;
+}
+
+.fx-scope-dd.fx-mb-band-active dropdown:hover .compact-pill-text,
+.fx-scope-dd.fx-mb-band-active dropdown:checked .compact-pill-text {
+  color: #ffd382;
+}
+
+.fx-mb-side-btn {
+  background-color: #211c17;
+  border-width: 1px;
+  border-color: #463b32;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.fx-mb-side-btn:hover {
+  background-color: #473828;
+  border-color: #f5b349;
+}
+
+.fx-mb-side-btn .fx-subtab-lbl {
+  color: #a99582;
+}
+
+.fx-mb-side-btn.fx-subtab-active {
+  background-color: #594631;
+  border-color: #f5b349;
+}
+
+.fx-mb-side-btn.fx-subtab-active .fx-subtab-lbl {
+  color: #ffd382;
+}
+
 .routing-pill-active dropdown {
   border-color: #f5b349;
 }
