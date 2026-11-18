@@ -24,11 +24,54 @@ fn format_inline_value(raw: String) -> String {
         format!("{v}°")
     } else if let Some(v) = raw.strip_suffix(" ct") {
         format!("{v}c")
+    } else if let Some(v) = raw.strip_suffix(" Hz") {
+        v.to_string()
     } else if let Some(v) = raw.strip_suffix(" st") {
         v.to_string()
     } else {
         raw
     }
+}
+
+/// Which tuning sub-field a `PitchDragBox` edits within an oscillator's `[-48..=+48 st]` pitch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PitchPart {
+    Octave,
+    Semitone,
+    Fine,
+}
+
+impl PitchPart {
+    #[inline]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Octave => "OCT",
+            Self::Semitone => "SEMI",
+            Self::Fine => "FINE",
+        }
+    }
+
+    #[inline]
+    fn value_from_st(self, pitch_st: f32) -> i32 {
+        let (oct, semi, fine) = decompose_pitch_st(pitch_st);
+        match self {
+            Self::Octave => oct,
+            Self::Semitone => semi,
+            Self::Fine => fine,
+        }
+    }
+}
+
+/// Decomposes a continuous `[-48.0, +48.0]` semitone pitch into signed `(oct, semi, fine_cents)`
+/// using truncation toward zero so e.g. `-0.05 st -> (0, 0, -5)` and `-13.25 st -> (-1, -1, -25)`.
+#[inline]
+pub fn decompose_pitch_st(pitch_st: f32) -> (i32, i32, i32) {
+    let total_cents = (pitch_st.clamp(-48.0, 48.0) * 100.0).round() as i32;
+    let oct = total_cents / 1200;
+    let rem = total_cents % 1200;
+    let semi = rem / 100;
+    let fine = rem % 100;
+    (oct, semi, fine)
 }
 
 /// Clickable / draggable compact pill for discrete Enum/Int or continuous parameters (with optional modulation bar).
@@ -63,42 +106,13 @@ impl ParamStepPill {
         Self::build_inner(cx, params, params_to_param, num_steps, true, false, None, None)
     }
 
-    pub fn new_with_mod<'a, L, Params, P, FMap>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_inline_with_mod_menu<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         params: L,
         params_to_param: FMap,
         num_steps: usize,
-        dest: ModDestination,
-        mod_ui: Arc<ModUiState>,
-        tab_tag: u8,
-    ) -> Handle<'a, Self>
-    where
-        L: Lens<Target = Params> + Clone,
-        Params: 'static,
-        P: Param + 'static,
-        FMap: Fn(&Params) -> &P + Copy + 'static,
-    {
-        Self::build_inner(
-            cx,
-            params,
-            params_to_param,
-            num_steps,
-            num_steps <= 16,
-            false,
-            Some(ModTargetBinding {
-                dest,
-                mod_ui,
-                tab_tag,
-            }),
-            None,
-        )
-    }
-
-    pub fn new_with_mod_menu<'a, L, Params, P, FMap>(
-        cx: &'a mut Context,
-        params: L,
-        params_to_param: FMap,
-        num_steps: usize,
+        label: &'static str,
         dest: ModDestination,
         mod_ui: Arc<ModUiState>,
         tab_tag: u8,
@@ -121,7 +135,7 @@ impl ParamStepPill {
                 mod_ui,
                 tab_tag,
             }),
-            None,
+            Some(label),
         )
     }
 
@@ -139,6 +153,39 @@ impl ParamStepPill {
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
         Self::build_inner(cx, params, params_to_param, num_steps, true, false, None, Some(label))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_inline_with_mod<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        num_steps: usize,
+        label: &'static str,
+        dest: ModDestination,
+        mod_ui: Arc<ModUiState>,
+        tab_tag: u8,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self::build_inner(
+            cx,
+            params,
+            params_to_param,
+            num_steps,
+            num_steps <= 16,
+            true,
+            Some(ModTargetBinding {
+                dest,
+                mod_ui,
+                tab_tag,
+            }),
+            Some(label),
+        )
     }
 
     fn format_tooltip_text(&self) -> Option<String> {
@@ -491,10 +538,22 @@ pub(super) fn draw_pill_with_mod_bar(
     cx.draw_inset_box_shadows(canvas, &mut path);
     cx.draw_outline(canvas);
 
+    if mod_binding.is_some() {
+        draw_mod_overlay(cx, canvas, cx.bounds(), param_base, mod_binding);
+    }
+}
+
+/// Draws drop-target outline, modulation range bar(s), and live marker dot over `bounds`.
+fn draw_mod_overlay(
+    cx: &DrawContext,
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    param_base: &ParamWidgetBase,
+    mod_binding: &Option<ModTargetBinding>,
+) {
     let Some(mb) = mod_binding else {
         return;
     };
-    let bounds = cx.bounds();
     if bounds.w <= 2.0 || bounds.h <= 2.0 {
         return;
     }
@@ -554,10 +613,64 @@ pub(super) fn draw_pill_with_mod_bar(
     canvas.fill_path(&tick, &vg::Paint::color(vg::Color::rgb(255, 248, 232)));
 }
 
-/// Pitch drag pill (`-48.00..=+48.00 st`) with semitone, fine (`Shift`), and octave (`Cmd+Opt` / `Ctrl+Alt`) drag/scroll steps.
+/// Hover-passthrough `ZStack` overlay over `[OCT | SEMI | FINE]` that owns the unified
+/// `ModDestination::osc_pitch` drop rect and draws the spanning modulation range bar.
+pub struct PitchGroupModOverlay {
+    param_base: ParamWidgetBase,
+    mod_binding: Option<ModTargetBinding>,
+}
+
+impl PitchGroupModOverlay {
+    pub fn new<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        dest: ModDestination,
+        mod_ui: Arc<ModUiState>,
+        tab_tag: u8,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self {
+            param_base: ParamWidgetBase::new(cx, params, params_to_param),
+            mod_binding: Some(ModTargetBinding {
+                dest,
+                mod_ui,
+                tab_tag,
+            }),
+        }
+        .build(cx, |_| {})
+        .hoverable(false)
+    }
+}
+
+impl View for PitchGroupModOverlay {
+    fn element(&self) -> Option<&'static str> {
+        Some("pitch-group-mod-overlay")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|raw_param_event, _| {
+            if let RawParamEvent::ParametersChanged = raw_param_event {
+                cx.needs_redraw();
+            }
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        draw_mod_overlay(cx, canvas, cx.bounds(), &self.param_base, &self.mod_binding);
+    }
+}
+
+/// Inline tuning pill (`OCT`, `SEMI`, `FINE`) over the oscillator's `[-48.00..=+48.00 st]` pitch param.
 pub struct PitchDragBox {
     param_base: ParamWidgetBase,
     osc_pitch_idx: Option<usize>,
+    part: PitchPart,
     hovered: bool,
     drag_active: bool,
     last_y: f32,
@@ -570,9 +683,11 @@ pub struct PitchDragBox {
 }
 
 impl PitchDragBox {
-    pub fn new_osc_pitch<'a, L, Params, P, FMap>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_osc_pitch_part<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         osc_idx: usize,
+        part: PitchPart,
         params: L,
         params_to_param: FMap,
         dest: ModDestination,
@@ -589,6 +704,7 @@ impl PitchDragBox {
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
             osc_pitch_idx,
+            part,
             hovered: false,
             drag_active: false,
             last_y: 0.0,
@@ -604,28 +720,47 @@ impl PitchDragBox {
             }),
         }
         .build(cx, move |cx| {
-            ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
-                let text_lens = param_data.make_lens(|param| {
-                    param.normalized_value_to_string(param.modulated_normalized_value(), false)
-                });
-                bold_label(cx, text_lens, "compact-pill-text")
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0))
-                    .child_space(Stretch(1.0))
+            let text_lens = ParamWidgetBase::make_lens(params, params_to_param, move |param| {
+                let st = param.modulated_normalized_value() * 96.0 - 48.0;
+                format!("{}", part.value_from_st(st))
+            });
+            HStack::new(cx, move |cx| {
+                bold_label(cx, part.label(), "inline-pill-label")
+                    .width(Auto)
+                    .height(Auto)
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0))
                     .hoverable(false);
-            })(cx);
+                bold_label(cx, text_lens, "inline-pill-value")
+                    .width(Stretch(1.0))
+                    .height(Auto)
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0))
+                    .hoverable(false);
+            })
+            .col_between(Pixels(3.0))
+            .width(Stretch(1.0))
+            .height(Stretch(1.0))
+            .child_left(Pixels(4.0))
+            .child_right(Pixels(4.0))
+            .hoverable(false);
         })
-        .class("compact-pill")
+        .class("inline-pill")
+        .class("stk-pill")
     }
 
     #[inline]
-    fn pitch_mode(cx: &EventContext) -> (u8, f32, f32) {
-        if cx.modifiers().contains(Modifiers::ALT) {
-            (2, 12.0, 14.0)
-        } else if cx.modifiers().shift() {
-            (1, 0.01, 2.5)
-        } else {
-            (0, 1.0, 4.0)
+    fn pitch_mode(&self, cx: &EventContext) -> (u8, f32, f32) {
+        match self.part {
+            PitchPart::Octave => (2, 12.0, 14.0),
+            PitchPart::Semitone => {
+                if cx.modifiers().shift() {
+                    (1, 0.01, 2.5)
+                } else {
+                    (0, 1.0, 5.0)
+                }
+            }
+            PitchPart::Fine => (1, 0.01, if cx.modifiers().shift() { 5.0 } else { 2.0 }),
         }
     }
 
@@ -653,7 +788,7 @@ impl PitchDragBox {
         emit_widget_tooltip(cx, self.format_tooltip_text());
     }
 
-    fn reset_to_default(&mut self, cx: &mut EventContext) {
+    fn reset_part_or_all(&mut self, cx: &mut EventContext, reset_all: bool) {
         if self.drag_active || self.mod_depth_drag.is_some() {
             let was_drag = self.drag_active;
             self.drag_active = false;
@@ -664,9 +799,20 @@ impl PitchDragBox {
             }
             update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
         }
-        let def = self.param_base.default_normalized_value();
+        let next_norm = if reset_all {
+            self.param_base.default_normalized_value()
+        } else {
+            let cur_st = self.param_base.unmodulated_normalized_value() * 96.0 - 48.0;
+            let (oct, semi, fine) = decompose_pitch_st(cur_st);
+            let new_cents = match self.part {
+                PitchPart::Octave => semi * 100 + fine,
+                PitchPart::Semitone => oct * 1200 + fine,
+                PitchPart::Fine => oct * 1200 + semi * 100,
+            };
+            ((new_cents as f32 * 0.01 + 48.0) / 96.0).clamp(0.0, 1.0)
+        };
         self.param_base.begin_set_parameter(cx);
-        self.param_base.set_normalized_value(cx, def);
+        self.param_base.set_normalized_value(cx, next_norm);
         self.param_base.end_set_parameter(cx);
         if self.hovered {
             self.emit_tooltip(cx);
@@ -702,20 +848,39 @@ impl View for PitchDragBox {
                 }
             }
             WindowEvent::MouseDoubleClick(MouseButton::Left) => {
-                self.reset_to_default(cx);
+                self.reset_part_or_all(cx, false);
                 meta.consume();
             }
             WindowEvent::MouseDown(MouseButton::Left)
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
+                if cx.modifiers().contains(Modifiers::ALT) {
+                    if let Some(ref mb) = self.mod_binding {
+                        if let Some((slot_idx, slot)) = mb.mod_ui.primary_slot_for_dest(mb.dest) {
+                            self.mod_depth_drag = Some(ModDepthDrag {
+                                slot_idx,
+                                start_y: cx.mouse().cursory,
+                                start_depth: slot.depth,
+                            });
+                            mb.mod_ui.focus_slot(mb.dest, slot_idx);
+                            cx.capture();
+                            update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
+                            cx.emit(UiEvent::ModUiChanged);
+                            self.emit_tooltip(cx);
+                            cx.needs_redraw();
+                            meta.consume();
+                            return;
+                        }
+                    }
+                }
                 let cmd_or_ctrl =
                     cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL);
                 if cmd_or_ctrl {
-                    self.reset_to_default(cx);
+                    self.reset_part_or_all(cx, true);
                 } else {
                     self.drag_active = true;
                     self.last_y = cx.mouse().cursory;
                     self.accum_y = 0.0;
-                    self.last_mode = Self::pitch_mode(cx).0;
+                    self.last_mode = self.pitch_mode(cx).0;
                     cx.capture();
                     self.param_base.begin_set_parameter(cx);
                     self.emit_tooltip(cx);
@@ -757,7 +922,7 @@ impl View for PitchDragBox {
                         return;
                     }
                 }
-                self.reset_to_default(cx);
+                self.reset_part_or_all(cx, false);
                 meta.consume();
             }
             WindowEvent::MouseUp(MouseButton::Left) => {
@@ -793,7 +958,7 @@ impl View for PitchDragBox {
                     return;
                 }
                 if self.drag_active {
-                    let (mode, step_st, base_px) = Self::pitch_mode(cx);
+                    let (mode, step_st, base_px) = self.pitch_mode(cx);
                     if mode != self.last_mode {
                         self.accum_y = 0.0;
                         self.last_mode = mode;
@@ -816,7 +981,7 @@ impl View for PitchDragBox {
                 if self.scrolled_lines.abs() >= 0.5 {
                     let dir = self.scrolled_lines.signum();
                     self.scrolled_lines = 0.0;
-                    let (_, step_st, _) = Self::pitch_mode(cx);
+                    let (_, step_st, _) = self.pitch_mode(cx);
                     self.param_base.begin_set_parameter(cx);
                     self.step_semitones(cx, dir * step_st);
                     self.param_base.end_set_parameter(cx);
@@ -832,6 +997,23 @@ impl View for PitchDragBox {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        draw_pill_with_mod_bar(cx, canvas, &self.param_base, &self.mod_binding);
+        // Modulation drop rect and spanning bar are rendered by enclosing `PitchGroupModOverlay`.
+        draw_pill_with_mod_bar(cx, canvas, &self.param_base, &None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decompose_pitch_st;
+
+    #[test]
+    fn pitch_decomposition_is_sign_symmetric_and_bijective() {
+        assert_eq!(decompose_pitch_st(0.0), (0, 0, 0));
+        assert_eq!(decompose_pitch_st(12.25), (1, 0, 25));
+        assert_eq!(decompose_pitch_st(-0.05), (0, 0, -5));
+        assert_eq!(decompose_pitch_st(-1.50), (0, -1, -50));
+        assert_eq!(decompose_pitch_st(-13.25), (-1, -1, -25));
+        assert_eq!(decompose_pitch_st(48.0), (4, 0, 0));
+        assert_eq!(decompose_pitch_st(-48.0), (-4, 0, 0));
     }
 }

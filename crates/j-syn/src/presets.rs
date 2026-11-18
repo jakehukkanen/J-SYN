@@ -375,9 +375,37 @@ fn clamp_finite_norm(norm: f32, ptr: ParamPtr) -> f32 {
 }
 
 #[inline]
-fn enum_name_alias<'a>(_id: &str, name: &'a str) -> &'a str {
-    // Hook for any future UI display-name tweaks on `#[name = "..."]` enum variants.
-    name
+fn enum_name_alias<'a>(id: &str, name: &'a str) -> &'a str {
+    if name == "Sub"
+        && (id.ends_with("_direct") || id == "f1_out_bus" || id == "f2_out_bus")
+    {
+        "Bus C"
+    } else if id == "fx_bus_topo" {
+        match name {
+            "Parallel (A | B)" => "Parallel (A | B | C)",
+            "Serial (A -> B)" => "Serial (A -> B | C)",
+            _ => name,
+        }
+    } else if id.starts_with("ins_mode_") {
+        match name {
+            "Tube -> Mech" => "T -> M",
+            "Mech -> Tube" => "M -> T",
+            "Sine Shaper" => "Sine",
+            "Bitcrush" => "Crush",
+            "Linear Fold" => "Lin Fold",
+            "Sine Fold" => "Sin Fold",
+            _ => name,
+        }
+    } else if id.starts_with("ins_pos_") {
+        match name {
+            "Pre-F1" => "| F1",
+            "Between F1->F2" => "F1 | F2",
+            "Post-F2" | "F2 |" | "   | F2" | "        | F2" => "| F2",
+            _ => name,
+        }
+    } else {
+        name
+    }
 }
 
 /// Maps `version < 2` normalized enum floats whose variant count expanded in newer builds.
@@ -1087,5 +1115,38 @@ mod tests {
         );
         let bias = resolve_patch_param_norm(&modern, "fx_p1_1", ptr_for("fx_p1_1"));
         assert!((bias - 0.72).abs() < 1e-6);
+    }
+
+    #[test]
+    fn legacy_insert_enum_names_alias_to_compact_labels() {
+        let params_obj = JSynPluginParams::default();
+        let param_map = params_obj.param_map();
+        let ptr_for = |id: &str| {
+            *param_map
+                .iter()
+                .find(|(pid, _, _)| pid == id)
+                .map(|(_, ptr, _)| ptr)
+                .unwrap_or_else(|| panic!("missing param id {id}"))
+        };
+
+        let mut legacy = JSynPatch::default();
+        legacy.enum_names.insert("ins_mode_1".into(), "Tube -> Mech".into());
+        legacy.enum_names.insert("ins_mode_2".into(), "Linear Fold".into());
+        legacy.enum_names.insert("ins_pos_1".into(), "Pre-F1".into());
+        legacy.enum_names.insert("ins_pos_2".into(), "Post-F2".into());
+
+        for (id, expected) in [
+            ("ins_mode_1", "T -> M"),
+            ("ins_mode_2", "Lin Fold"),
+            ("ins_pos_1", "| F1"),
+            ("ins_pos_2", "| F2"),
+        ] {
+            let ptr = ptr_for(id);
+            let norm = resolve_patch_param_norm(&legacy, id, ptr);
+            assert_eq!(
+                unsafe { ptr.normalized_value_to_string(norm, false) },
+                expected
+            );
+        }
     }
 }

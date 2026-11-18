@@ -73,6 +73,7 @@ pub struct SynthParams {
     pub macros: [f32; 8],
     pub fx_bus_a: FxBusParams,
     pub fx_bus_b: FxBusParams,
+    pub fx_bus_c: FxBusParams,
     pub fx_bus_topology: FxBusTopology,
     pub sub_bus: SubBusParams,
     pub tempo_bpm: f32,
@@ -115,6 +116,11 @@ impl Default for SynthParams {
                 pan: 0.0,
             },
             fx_bus_b: FxBusParams {
+                slots: init_slots,
+                level: 1.0,
+                pan: 0.0,
+            },
+            fx_bus_c: FxBusParams {
                 slots: init_slots,
                 level: 1.0,
                 pan: 0.0,
@@ -326,28 +332,38 @@ fn route_filter_to_bus(
     l: f32,
     r: f32,
 ) {
-    match dest {
-        FilterBusDest::BusA => {
-            out.bus_a_l += l;
-            out.bus_a_r += r;
-        }
-        FilterBusDest::BusB => {
-            out.bus_b_l += l;
-            out.bus_b_r += r;
-        }
-        FilterBusDest::Both => {
-            out.bus_a_l += l;
-            out.bus_a_r += r;
-            // In Serial (A -> B), Bus A already feeds Bus B, so send A+B to Bus A only.
-            if topology == FxBusTopology::Parallel {
-                out.bus_b_l += l;
-                out.bus_b_r += r;
-            }
-        }
-        FilterBusDest::Sub => {
-            out.sub_l += l;
-            out.sub_r += r;
-        }
+    let (want_a, mut want_b, mut want_c) = match dest {
+        FilterBusDest::BusA => (true, false, false),
+        FilterBusDest::BusB => (false, true, false),
+        FilterBusDest::Both => (true, true, false),
+        FilterBusDest::Sub => (false, false, true),
+        FilterBusDest::AC => (true, false, true),
+        FilterBusDest::BC => (false, true, true),
+        FilterBusDest::All => (true, true, true),
+    };
+    let a_target = topology.bus_a_target();
+    let b_target = topology.bus_b_target();
+    if want_a && want_b && a_target == 1 {
+        want_b = false;
+    }
+    if want_c
+        && ((want_a && a_target == 2)
+            || (want_b && b_target == 2)
+            || (want_a && a_target == 1 && b_target == 2))
+    {
+        want_c = false;
+    }
+    if want_a {
+        out.bus_a_l += l;
+        out.bus_a_r += r;
+    }
+    if want_b {
+        out.bus_b_l += l;
+        out.bus_b_r += r;
+    }
+    if want_c {
+        out.sub_l += l;
+        out.sub_r += r;
     }
 }
 

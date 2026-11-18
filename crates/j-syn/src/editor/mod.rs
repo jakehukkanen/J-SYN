@@ -1,9 +1,9 @@
 //! Warm dark-mode skeuomorphic Vizia GUI for `J-SYN`.
 //!
 //! Maintainability and readability for both humans and AI are top priorities in this layout:
-//! - [`mod@self`] holds top-level UI state (`UiData`, `BottomTab`, `UiEvent`), macOS `baseview`
-//!   resize notification, and the high-level window section builders (`create`, `build_header_bar`,
-//!   `build_osc_column`, `build_filter_column`, `build_fx_column`, `build_bottom_tabs`).
+//! - [`mod@self`] holds top-level UI state (`UiData`, `BottomTab`, `CenterStageTab`, `UiEvent`),
+//!   macOS `baseview` resize notification, and the 3-Wing `1760 × 840` layout builders
+//!   (`create`, `build_header_bar`, `build_left_wing`, `build_center_wing`, `build_right_wing`).
 //! - [`controls`] centralizes shared label typography, dropdowns, readouts, knob/pill cells, and
 //!   module chrome (`bold_label`, `build_dropdown_trigger_labels`, `build_param_readout_box`, etc.).
 //! - [`widgets`] implements custom `femtovg` / `ParamWidgetBase` controls (`RotaryKnob`,
@@ -43,24 +43,26 @@ mod routing_tab;
 mod scope;
 mod settings_view;
 mod theme;
+mod tokens;
 mod voice_tab;
 mod widgets;
 
 use controls::{
-    bold_label, build_dropdown_trigger_labels, build_header_knob_cell, build_tab_button,
+    bold_label, build_center_tab_button, build_dropdown_trigger_labels, build_header_knob_cell,
     build_ui_scale_dropdown, ArrowButton, ArrowDir, CheckIcon, CrossButton,
 };
-use filter_panel::build_filter_panel;
+use filter_panel::build_dual_filter_section;
+use fx_rack::build_three_lane_fx_rack;
 use insert_panel::build_insert_panel;
 use macros_tab::build_macros_tab;
-use mod_bar::{build_mod_source_bar, ModUiState};
+use mod_bar::{ModSourcePill, ModUiState};
 use modseq_tab::{build_modseq_tab, ModSeqSubTab};
 use noise_panel::build_noise_panel;
 use osc_panel::build_osc_panel;
 use routing_tab::build_routing_tab;
 
-const BASE_WIDTH: u32 = 1160;
-const BASE_HEIGHT: u32 = 778;
+const BASE_WIDTH: u32 = tokens::WINDOW_W;
+const BASE_HEIGHT: u32 = tokens::WINDOW_H;
 
 pub(super) const AMBER_RGB: (u8, u8, u8) = (245, 179, 73);
 pub(super) const GOLD_RGB: (u8, u8, u8) = (242, 203, 97);
@@ -69,7 +71,6 @@ pub(super) const CORAL_RGB: (u8, u8, u8) = (235, 140, 85);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MainViewMode {
     Main,
-    Fx,
     Matrix,
     Settings,
 }
@@ -85,10 +86,22 @@ pub(crate) enum BottomTab {
     VoiceEnv,
     ModSeq,
     Routing,
-    MacrosGlobal,
 }
 
 impl Data for BottomTab {
+    fn same(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CenterStageTab {
+    Mod(ModSeqSubTab),
+    Voice,
+    Routing,
+}
+
+impl Data for CenterStageTab {
     fn same(&self, other: &Self) -> bool {
         self == other
     }
@@ -138,7 +151,6 @@ pub(crate) enum UiEvent {
     SelectViewMode(MainViewMode),
     SelectTab(BottomTab),
     SelectModSeqSubTab(ModSeqSubTab),
-    SelectMainFxBus(usize),
     ModUiChanged,
     ModValChanged,
     SetUiScale(u32),
@@ -182,7 +194,7 @@ pub(crate) struct UiData {
     pub view_mode: MainViewMode,
     pub active_tab: BottomTab,
     pub modseq_subtab: ModSeqSubTab,
-    pub main_fx_bus: usize,
+    pub center_tab: CenterStageTab,
     pub mod_ui_rev: u64,
     pub mod_val_rev: u64,
     pub ui_scale_pct: u32,
@@ -212,7 +224,6 @@ impl Model for UiData {
                 self.view_mode = *mode;
                 self.mod_ui.set_view_mode(match mode {
                     MainViewMode::Main => 0,
-                    MainViewMode::Fx => 1,
                     MainViewMode::Matrix => 2,
                     MainViewMode::Settings => 3,
                 });
@@ -223,19 +234,20 @@ impl Model for UiData {
             UiEvent::SelectTab(tab) => {
                 self.active_tab = *tab;
                 self.mod_ui.set_active_tab(*tab);
+                self.center_tab = match *tab {
+                    BottomTab::VoiceEnv => CenterStageTab::Voice,
+                    BottomTab::Routing => CenterStageTab::Routing,
+                    BottomTab::ModSeq => CenterStageTab::Mod(self.modseq_subtab),
+                };
                 self.tooltip.visible = false;
                 meta.consume();
             }
             UiEvent::SelectModSeqSubTab(sub) => {
                 self.modseq_subtab = *sub;
                 self.mod_ui.set_modseq_subtab(*sub);
-                self.tooltip.visible = false;
-                meta.consume();
-            }
-            UiEvent::SelectMainFxBus(bus) => {
-                let next = (*bus).min(1);
-                self.main_fx_bus = next;
-                self.mod_ui.set_main_fx_bus(next);
+                if self.active_tab == BottomTab::ModSeq {
+                    self.center_tab = CenterStageTab::Mod(*sub);
+                }
                 self.tooltip.visible = false;
                 meta.consume();
             }
@@ -716,7 +728,6 @@ impl View for GearIcon {
 
 fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     HStack::new(cx, move |cx| {
-        Element::new(cx).class("rack-screw");
         HStack::new(cx, move |cx| {
             Element::new(cx).class("brand-pill");
             bold_label(cx, "J-SYN", "header-title");
@@ -735,16 +746,6 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             .class("view-switch-btn")
             .checked(UiData::view_mode.map(|m| *m == MainViewMode::Main))
             .width(Pixels(48.0))
-            .height(Pixels(24.0));
-
-            Button::new(
-                cx,
-                |cx| cx.emit(UiEvent::SelectViewMode(MainViewMode::Fx)),
-                |cx| bold_label(cx, "FX", "view-switch-label").hoverable(false),
-            )
-            .class("view-switch-btn")
-            .checked(UiData::view_mode.map(|m| *m == MainViewMode::Fx))
-            .width(Pixels(38.0))
             .height(Pixels(24.0));
 
             Button::new(
@@ -914,20 +915,18 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
         .child_bottom(Stretch(1.0))
         .width(Auto)
         .height(Stretch(1.0));
-
-        Element::new(cx).class("rack-screw");
     })
     .class("header-bar")
     .col_between(Pixels(10.0))
     .width(Stretch(1.0))
-    .height(Pixels(48.0))
+    .height(Pixels(tokens::HEADER_H))
     .child_left(Pixels(12.0))
     .child_right(Pixels(12.0))
     .child_top(Stretch(1.0))
     .child_bottom(Stretch(1.0));
 }
 
-fn build_osc_column(
+fn build_left_wing(
     cx: &mut Context,
     bank: Arc<WavetableBank>,
     params: Arc<JSynPluginParams>,
@@ -955,101 +954,107 @@ fn build_osc_column(
         // Per-voice stereo Noise generator strip below OSC 4
         build_noise_panel(cx, params, gui_context, mod_ui);
     })
-    .row_between(Pixels(4.0))
-    .width(Stretch(2.2))
+    .row_between(Pixels(tokens::SPACE_SM))
+    .width(Pixels(tokens::LEFT_WING_W))
     .height(Stretch(1.0));
 }
 
-fn build_filter_column(
+fn build_center_wing(
     cx: &mut Context,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
     VStack::new(cx, move |cx| {
-        build_filter_panel(
+        build_dual_filter_section(
             cx,
-            0,
             params.clone(),
             gui_context.clone(),
             mod_ui.clone(),
-            AMBER_RGB,
         );
-        build_filter_panel(
-            cx,
-            1,
-            params.clone(),
-            gui_context.clone(),
-            mod_ui.clone(),
-            CORAL_RGB,
-        );
-        build_insert_panel(cx, params, gui_context, mod_ui);
-    })
-    .row_between(Pixels(5.0))
-    .width(Stretch(1.0))
-    .height(Stretch(1.0));
-}
 
-fn build_fx_column(
-    cx: &mut Context,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-    mod_ui: Arc<ModUiState>,
-) {
-    VStack::new(cx, move |cx| {
-        fx_rack::build_main_fx_column(cx, params, gui_context, mod_ui);
-    })
-    .row_between(Pixels(4.0))
-    .width(Stretch(1.0))
-    .height(Stretch(1.0));
-}
+        let p_stage = params.clone();
+        let g_stage = gui_context.clone();
+        let u_stage = mod_ui.clone();
+        let u_tabs = mod_ui.clone();
+        VStack::new(cx, move |cx| {
+            HStack::new(cx, move |cx| {
+                for &src in &ModMatrixSource::ALL_ACTIVE[0..4] {
+                    ModSourcePill::new(cx, src, u_tabs.clone())
+                        .width(Stretch(0.9))
+                        .height(Stretch(1.0));
+                }
+                for &src in &ModMatrixSource::ALL_ACTIVE[4..8] {
+                    ModSourcePill::new(cx, src, u_tabs.clone())
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0));
+                }
+                build_center_tab_button(cx, CenterStageTab::Voice, "VOICE", 1.2);
+                build_center_tab_button(cx, CenterStageTab::Routing, "ROUTE", 1.2);
+            })
+            .class("tab-bar")
+            .col_between(Pixels(tokens::SPACE_XS))
+            .height(Pixels(24.0))
+            .width(Stretch(1.0));
 
-fn build_bottom_tabs(
-    cx: &mut Context,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-    mod_ui: Arc<ModUiState>,
-) {
-    VStack::new(cx, move |cx| {
-        let mod_ui_bar = mod_ui.clone();
-        HStack::new(cx, move |cx| {
-            build_tab_button(cx, BottomTab::VoiceEnv, "VOICE", 58.0);
-            build_tab_button(cx, BottomTab::ModSeq, "MODSEQ", 64.0);
-            build_tab_button(cx, BottomTab::Routing, "ROUTING", 66.0);
-            build_tab_button(cx, BottomTab::MacrosGlobal, "MACROS", 66.0);
-            build_mod_source_bar(cx, mod_ui_bar);
+            Binding::new(cx, UiData::active_tab, move |cx, active| {
+                match active.get(cx) {
+                    BottomTab::VoiceEnv => {
+                        voice_tab::build_voice_tab(
+                            cx,
+                            p_stage.clone(),
+                            g_stage.clone(),
+                            u_stage.clone(),
+                        );
+                    }
+                    BottomTab::ModSeq => {
+                        build_modseq_tab(
+                            cx,
+                            p_stage.clone(),
+                            g_stage.clone(),
+                            u_stage.clone(),
+                        );
+                    }
+                    BottomTab::Routing => {
+                        build_routing_tab(
+                            cx,
+                            p_stage.clone(),
+                            g_stage.clone(),
+                            u_stage.clone(),
+                        );
+                    }
+                }
+            });
         })
-        .class("tab-bar")
-        .col_between(Pixels(4.0))
-        .height(Pixels(26.0))
-        .width(Stretch(1.0));
+        .row_between(Pixels(tokens::SPACE_XS))
+        .width(Stretch(1.0))
+        .height(Stretch(1.0));
 
-        let mod_ui_tabs = mod_ui.clone();
-        Binding::new(cx, UiData::active_tab, move |cx, active| {
-            match active.get(cx) {
-                BottomTab::VoiceEnv => {
-                    voice_tab::build_voice_tab(
-                        cx,
-                        params.clone(),
-                        gui_context.clone(),
-                        mod_ui_tabs.clone(),
-                    );
-                }
-                BottomTab::ModSeq => {
-                    build_modseq_tab(cx, params.clone(), gui_context.clone(), mod_ui_tabs.clone());
-                }
-                BottomTab::Routing => {
-                    build_routing_tab(cx, params.clone(), gui_context.clone(), mod_ui_tabs.clone());
-                }
-                BottomTab::MacrosGlobal => {
-                    build_macros_tab(cx, mod_ui_tabs.clone());
-                }
-            }
-        });
+        build_insert_panel(
+            cx,
+            params.clone(),
+            gui_context.clone(),
+            mod_ui.clone(),
+        );
+
+        build_macros_tab(cx, mod_ui);
     })
-    .row_between(Pixels(3.0))
+    .row_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))
-    .height(Pixels(136.0));
+    .height(Stretch(1.0));
+}
+
+fn build_right_wing(
+    cx: &mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
+) {
+    VStack::new(cx, move |cx| {
+        build_three_lane_fx_rack(cx, params, gui_context, mod_ui);
+    })
+    .width(Pixels(tokens::RIGHT_WING_W))
+    .height(Stretch(1.0));
 }
 
 pub(crate) fn create(
@@ -1081,9 +1086,9 @@ pub(crate) fn create(
             gui_context: gui_context.clone(),
             bank: bank.clone(),
             view_mode: MainViewMode::Main,
-            active_tab: BottomTab::VoiceEnv,
+            active_tab: BottomTab::ModSeq,
             modseq_subtab: ModSeqSubTab::MSeq(0),
-            main_fx_bus: 0,
+            center_tab: CenterStageTab::Mod(ModSeqSubTab::MSeq(0)),
             mod_ui_rev: 0,
             mod_val_rev: 0,
             ui_scale_pct: initial_scale_pct,
@@ -1126,14 +1131,14 @@ pub(crate) fn create(
                 });
             });
 
+            mod_bar::start_ui_redraw_timer(cx, mod_ui_for_ui.clone());
+
             build_header_bar(cx, mod_ui_for_ui.clone());
 
-            // Main chassis: 3-Column Rack or MATRIX Overview + 4-Tab Bottom Drawer
+            // Main chassis: 3-Wing Widescreen Layout (Left Oscs + Noise, Center Synth Core, Right 3-Lane FX),
+            // MATRIX Overview, or Settings.
             VStack::new(cx, move |cx| {
                 VStack::new(cx, move |cx| {
-                    let params_tabs = params_for_ui.clone();
-                    let gui_ctx_tabs = gui_ctx_for_ui.clone();
-                    let mod_ui_tabs = mod_ui_for_ui.clone();
                     let bank_m = bank_for_ui.clone();
                     let params_m = params_for_ui.clone();
                     let gui_m = gui_ctx_for_ui.clone();
@@ -1147,32 +1152,24 @@ pub(crate) fn create(
                                 let gui_c = gui_m.clone();
                                 let mod_ui_c = mod_ui_m.clone();
                                 HStack::new(cx, move |cx| {
-                                    build_osc_column(
+                                    build_left_wing(
                                         cx,
                                         bank_c,
                                         params_c.clone(),
                                         gui_c.clone(),
                                         mod_ui_c.clone(),
                                     );
-                                    build_filter_column(
+                                    build_center_wing(
                                         cx,
                                         params_c.clone(),
                                         gui_c.clone(),
                                         mod_ui_c.clone(),
                                     );
-                                    build_fx_column(cx, params_c, gui_c, mod_ui_c);
+                                    build_right_wing(cx, params_c, gui_c, mod_ui_c);
                                 })
-                                .col_between(Pixels(8.0))
+                                .col_between(Pixels(tokens::SPACE_MD))
                                 .width(Stretch(1.0))
                                 .height(Stretch(1.0));
-                            }
-                            MainViewMode::Fx => {
-                                fx_rack::build_fx_rack_view(
-                                    cx,
-                                    params_m.clone(),
-                                    gui_m.clone(),
-                                    mod_ui_m.clone(),
-                                );
                             }
                             MainViewMode::Matrix => {
                                 matrix_tab::build_matrix_view(cx, mod_ui_m.clone());
@@ -1186,11 +1183,8 @@ pub(crate) fn create(
                             }
                         }
                     });
-
-                    build_bottom_tabs(cx, params_tabs, gui_ctx_tabs, mod_ui_tabs);
                 })
                 .class("section-panel")
-                .row_between(Pixels(6.0))
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
             })

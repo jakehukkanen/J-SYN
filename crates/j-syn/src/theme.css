@@ -49,17 +49,6 @@ button > .inner {
   bottom: 1s;
 }
 
-.rack-screw {
-  width: 12px;
-  height: 12px;
-  border-radius: 6px;
-  background-color: #52463d;
-  border-width: 1px;
-  border-color: #1e1915;
-  top: 1s;
-  bottom: 1s;
-}
-
 .main-chassis {
   child-left: 10px;
   child-right: 10px;
@@ -86,12 +75,12 @@ button > .inner {
   background-color: #3e362f;
   border-width: 1px;
   border-color: #594d43;
-  border-radius: 5px;
-  child-left: 8px;
-  child-right: 8px;
-  child-top: 5px;
-  child-bottom: 5px;
-  row-between: 3px;
+  border-radius: 4px;
+  child-left: 6px;
+  child-right: 6px;
+  child-top: 4px;
+  child-bottom: 4px;
+  row-between: 2px;
 }
 
 .module-header {
@@ -492,13 +481,18 @@ dropdown popup {
 }
 
 .switch-label {
-  font-size: 10;
+  font-size: 9.5;
   font-weight: bold;
-  color: #e8dacb;
+  color: #9e8a77;
 }
 
 led-toggle:checked .switch-label {
-  color: #fff8ee;
+  color: #ffd382;
+}
+
+led-toggle:hover .switch-label,
+led-toggle:checked:hover .switch-label {
+  color: #fff3dc;
 }
 
 .mini-label {
@@ -537,7 +531,7 @@ led-toggle:checked .switch-label {
 }
 
 .tab-btn-label {
-  font-size: 10;
+  font-size: 9;
   font-weight: bold;
   color: #cbb9a6;
 }
@@ -910,7 +904,8 @@ led-toggle:checked .switch-label {
 }
 
 .hardware-module.module-disabled dropdown,
-.hardware-module.module-disabled .compact-pill {
+.hardware-module.module-disabled .compact-pill,
+.hardware-module.module-disabled .inline-pill.stk-pill {
   background-color: #1c1814;
   border-color: #39312a;
 }
@@ -1026,10 +1021,10 @@ led-toggle:checked .switch-label {
 }
 
 .fx-full-card {
-  child-left: 5px;
-  child-right: 5px;
-  child-top: 4px;
-  child-bottom: 4px;
+  child-left: 4px;
+  child-right: 4px;
+  child-top: 3px;
+  child-bottom: 3px;
 }
 
 .fx-full-card .knob-title {
@@ -1050,8 +1045,32 @@ led-toggle:checked .switch-label {
   border-width: 1px;
   border-color: #463b32;
   border-radius: 4px;
-  child-left: 8px;
-  child-right: 8px;
+  child-left: 6px;
+  child-right: 6px;
+  child-top: 3px;
+  child-bottom: 3px;
+}
+
+scrollview scrollbar {
+  background-color: #1c1814;
+  border-radius: 3px;
+}
+
+scrollview scrollbar.vertical {
+  width: 8px;
+}
+
+scrollview scrollbar .thumb {
+  background-color: #6b6157;
+  border-radius: 3px;
+  opacity: 1;
+}
+
+scrollview scrollbar .thumb:hover,
+scrollview:checked > scrollbar:over .thumb,
+scrollview:checked > scrollbar:active .thumb {
+  background-color: #f5b349;
+  opacity: 1;
 }
 
 .fx-rack-sub {
@@ -1349,12 +1368,25 @@ led-toggle:checked .switch-label {
   border-color: #f5b349;
 }
 
+.inline-pill.stk-pill.pill-dimmed {
+  background-color: #1c1814;
+  border-color: #362f28;
+}
+
+.inline-pill.stk-pill.pill-dimmed .inline-pill-label,
+.inline-pill.stk-pill.pill-dimmed .inline-pill-value {
+  color: #5f554c;
+}
+
 .macro-card {
   background-color: #211c18;
   border-width: 1px;
   border-color: #463b33;
   border-radius: 4px;
-  padding: 5px;
+  child-left: 5px;
+  child-right: 5px;
+  child-top: 4px;
+  child-bottom: 4px;
 }
 
 .macro-name-input {
@@ -1363,7 +1395,7 @@ led-toggle:checked .switch-label {
   border-color: #3f352e;
   border-radius: 3px;
   color: #f3e6d3;
-  font-size: 10;
+  font-size: 9.5;
   font-weight: bold;
   child-space: 1s;
 }

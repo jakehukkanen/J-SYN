@@ -91,6 +91,7 @@ impl FilterRouting {
 
 #[derive(Debug, Clone, Copy)]
 pub struct InsertParams {
+    pub enabled: bool,
     pub mode: InsertMode,
     pub position: InsertPosition,
     pub drive: f32, // 0.0 to 1.0
@@ -100,6 +101,7 @@ pub struct InsertParams {
 impl Default for InsertParams {
     fn default() -> Self {
         Self {
+            enabled: true,
             mode: InsertMode::Off,
             position: InsertPosition::BetweenFilters,
             drive: 0.25,
@@ -135,6 +137,9 @@ pub enum FilterBusDest {
     BusB = 1,
     Both = 2,
     Sub = 3,
+    AC = 4,
+    BC = 5,
+    All = 6,
 }
 
 impl FilterBusDest {
@@ -143,6 +148,9 @@ impl FilterBusDest {
             1 => Self::BusB,
             2 => Self::Both,
             3 => Self::Sub,
+            4 => Self::AC,
+            5 => Self::BC,
+            6 => Self::All,
             _ => Self::BusA,
         }
     }
@@ -196,6 +204,35 @@ pub type InsertState = InsertShaperState;
 impl Default for InsertShaperState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[inline]
+pub fn evaluate_insert_curve(mode: InsertMode, x: f32, drive: f32) -> f32 {
+    let drive = drive.clamp(0.0, 1.0);
+    match mode {
+        InsertMode::Off => x,
+        InsertMode::Tube => tube_saturate(x, drive),
+        InsertMode::Mech => mech_clip(x, drive),
+        InsertMode::TubeToMech => mech_clip(tube_saturate(x, drive) * 0.75, drive) * 0.85,
+        InsertMode::MechToTube => tube_saturate(mech_clip(x, drive) * 0.65, drive) * 0.90,
+        InsertMode::SineShaper => shape_sine(x, drive),
+        InsertMode::Parabolic => shape_parabolic(x, drive),
+        InsertMode::SoftClip => shape_soft_clip(x, drive),
+        InsertMode::Bitcrush => {
+            let levels = 2.0_f32.powf(11.0 - drive * 8.5);
+            (x.clamp(-1.5, 1.5) * levels).round() / levels
+        }
+        InsertMode::ClassicA => shape_sample(DistortionMode::ClassicA, x, drive, 0.0),
+        InsertMode::ClassicB => shape_sample(DistortionMode::ClassicB, x, drive, 0.0),
+        InsertMode::ClassicC => shape_sample(DistortionMode::ClassicC, x, drive, 0.0),
+        InsertMode::DiodeA => shape_sample(DistortionMode::DiodeA, x, drive, 0.0),
+        InsertMode::DiodeB => shape_sample(DistortionMode::DiodeB, x, drive, 0.0),
+        InsertMode::LinearFold => shape_sample(DistortionMode::LinearFold, x, drive, 0.0),
+        InsertMode::SineFold => shape_sample(DistortionMode::SineFold, x, drive, 0.0),
+        InsertMode::HardClip => shape_sample(DistortionMode::HardClip, x, drive, 0.0),
+        InsertMode::HalfRectify => shape_sample(DistortionMode::HalfRectify, x, drive, 0.0),
+        InsertMode::FullRectify => shape_sample(DistortionMode::FullRectify, x, drive, 0.0),
     }
 }
 
@@ -256,7 +293,6 @@ impl InsertShaperState {
         let high_shelf = &mut self.mech_high_shelf[ch];
 
         self.oversamplers[ch].process_sample(input, |dry| match mode {
-            InsertMode::Tube => tube_saturate(dry, drive),
             InsertMode::Mech => {
                 let m = high_shelf.process(low_shelf.process(dry));
                 mech_clip(m, drive)
@@ -270,17 +306,7 @@ impl InsertShaperState {
                 let m = mech_clip(high_shelf.process(low_shelf.process(dry)), drive) * 0.65;
                 tube_saturate(m, drive) * 0.90
             }
-            InsertMode::ClassicA => shape_sample(DistortionMode::ClassicA, dry, drive, 0.0),
-            InsertMode::ClassicB => shape_sample(DistortionMode::ClassicB, dry, drive, 0.0),
-            InsertMode::ClassicC => shape_sample(DistortionMode::ClassicC, dry, drive, 0.0),
-            InsertMode::DiodeA => shape_sample(DistortionMode::DiodeA, dry, drive, 0.0),
-            InsertMode::DiodeB => shape_sample(DistortionMode::DiodeB, dry, drive, 0.0),
-            InsertMode::LinearFold => shape_sample(DistortionMode::LinearFold, dry, drive, 0.0),
-            InsertMode::SineFold => shape_sample(DistortionMode::SineFold, dry, drive, 0.0),
-            InsertMode::HardClip => shape_sample(DistortionMode::HardClip, dry, drive, 0.0),
-            InsertMode::HalfRectify => shape_sample(DistortionMode::HalfRectify, dry, drive, 0.0),
-            InsertMode::FullRectify => shape_sample(DistortionMode::FullRectify, dry, drive, 0.0),
-            _ => dry,
+            _ => evaluate_insert_curve(mode, dry, drive),
         })
     }
 
@@ -297,7 +323,7 @@ impl InsertShaperState {
             self.set_sample_rate(sample_rate);
         }
 
-        if params.mode == InsertMode::Off || params.mix <= 1e-5 {
+        if !params.enabled || params.mode == InsertMode::Off || params.mix <= 1e-5 {
             self.prev_in_l = in_l;
             self.prev_in_r = in_r;
             return (in_l, in_r);

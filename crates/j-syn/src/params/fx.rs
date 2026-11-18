@@ -30,6 +30,14 @@ impl FxBusPluginParams {
             slots: std::array::from_fn(FxSlotPluginParams::new_slot),
         }
     }
+
+    pub fn new_bus_c() -> Self {
+        Self {
+            level: fx_level_param("Bus C Level"),
+            pan: bipolar_percentage_param("Bus C Pan", 0.0),
+            slots: std::array::from_fn(FxSlotPluginParams::new_slot),
+        }
+    }
 }
 
 #[derive(Params)]
@@ -50,7 +58,7 @@ pub struct SubBusPluginParams {
 impl Default for SubBusPluginParams {
     fn default() -> Self {
         Self {
-            enabled: BoolParam::new("Sub Bus", true),
+            enabled: BoolParam::new("Sub Bus", false),
             cutoff: FloatParam::new(
                 "Sub LP Cutoff",
                 2_000.0,
@@ -206,10 +214,18 @@ impl From<FxFilterSlope> for FxFilterSlopeParam {
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FxBusTopologyParam {
-    #[name = "Parallel (A | B)"]
+    #[name = "Parallel (A | B | C)"]
     Parallel,
-    #[name = "Serial (A -> B)"]
+    #[name = "Serial (A -> B | C)"]
     Serial,
+    #[name = "Serial All (A -> B -> C)"]
+    SerialAll,
+    #[name = "A+B -> C"]
+    ABToC,
+    #[name = "A -> C | B"]
+    AToC,
+    #[name = "A | B -> C"]
+    BToC,
 }
 
 impl From<FxBusTopologyParam> for FxBusTopology {
@@ -217,6 +233,10 @@ impl From<FxBusTopologyParam> for FxBusTopology {
         match v {
             FxBusTopologyParam::Parallel => Self::Parallel,
             FxBusTopologyParam::Serial => Self::Serial,
+            FxBusTopologyParam::SerialAll => Self::SerialAll,
+            FxBusTopologyParam::ABToC => Self::ABToC,
+            FxBusTopologyParam::AToC => Self::AToC,
+            FxBusTopologyParam::BToC => Self::BToC,
         }
     }
 }
@@ -226,6 +246,10 @@ impl From<FxBusTopology> for FxBusTopologyParam {
         match v {
             FxBusTopology::Parallel => Self::Parallel,
             FxBusTopology::Serial => Self::Serial,
+            FxBusTopology::SerialAll => Self::SerialAll,
+            FxBusTopology::ABToC => Self::ABToC,
+            FxBusTopology::AToC => Self::AToC,
+            FxBusTopology::BToC => Self::BToC,
         }
     }
 }

@@ -6,11 +6,12 @@ use std::time::Instant;
 
 use j_syn_dsp::mod_matrix::{FxScopeRing, ModDestination, ModUiTelemetry, FX_SCOPE_LEN};
 use j_syn_dsp::{
-    evaluate_diopser_ripple, evaluate_flanger_scope_response, evaluate_tube_res_scope_response,
-    filter_response_db_from_slot, flanger_rate_hz, limiter_ceil_db, limiter_gain_db,
-    mb_band_level_db, mb_band_magnitude_at_hz, mb_ordered_xover_hz, mb_xover_high_norm,
-    mb_xover_low_norm, tube_res_lfo_rate_hz, utility_gain_db_from_norm, utility_pan_bipolar,
-    utility_width_from_norm, FxRackState, MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
+    evaluate_diopser_ripple, evaluate_flanger_scope_response, evaluate_insert_curve,
+    evaluate_tube_res_scope_response, filter_response_db_from_slot, flanger_rate_hz,
+    limiter_ceil_db, limiter_gain_db, mb_band_level_db, mb_band_magnitude_at_hz,
+    mb_ordered_xover_hz, mb_xover_high_norm, mb_xover_low_norm, tube_res_lfo_rate_hz,
+    utility_gain_db_from_norm, utility_pan_bipolar, utility_width_from_norm, FxRackState,
+    MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
 };
 use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
@@ -1240,11 +1241,13 @@ fn read_ring_snapshot(ring: &FxScopeRing) -> ([f32; FX_SCOPE_LEN], [f32; FX_SCOP
 }
 
 /// Compact clipper scope for the `SUB FX` banner showing pre-clip vs post-clip waveform.
+#[allow(dead_code)]
 pub(super) struct SubClipperScope {
     params: Arc<JSynPluginParams>,
     telemetry: Arc<ModUiTelemetry>,
 }
 
+#[allow(dead_code)]
 impl SubClipperScope {
     pub(super) fn new<'a>(
         cx: &'a mut Context,
@@ -1278,6 +1281,108 @@ impl View for SubClipperScope {
         let enabled = self.params.sub_bus.enabled.value();
         let (pre, post, gr_act) = read_ring_snapshot(&self.telemetry.sub_scope);
         paint_clipper_waveform(canvas, bounds, dpx, &pre, &post, gr_act, 1.0, 1.25, enabled, &pal);
+    }
+}
+
+/// Compact transfer-curve visualizer for each per-voice Insert Shaper card (`INS 1` / `INS 2`).
+pub(super) struct InsertTransferScope {
+    slot_idx: usize,
+    params: Arc<JSynPluginParams>,
+    accent_rgb: (u8, u8, u8),
+}
+
+impl InsertTransferScope {
+    pub(super) fn new<'a>(
+        cx: &'a mut Context,
+        slot_idx: usize,
+        params: Arc<JSynPluginParams>,
+        accent_rgb: (u8, u8, u8),
+    ) -> Handle<'a, Self> {
+        Self {
+            slot_idx,
+            params,
+            accent_rgb,
+        }
+        .build(cx, |_| {})
+    }
+}
+
+impl View for InsertTransferScope {
+    fn element(&self) -> Option<&'static str> {
+        Some("insert-transfer-scope")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|raw_param_event, _| {
+            if let RawParamEvent::ParametersChanged = raw_param_event {
+                cx.needs_redraw();
+            }
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let bounds = cx.bounds();
+        if bounds.w <= 4.0 || bounds.h <= 4.0 {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let pal = theme::current_palette(cx);
+        let ins = &self.params.routing.inserts[self.slot_idx];
+        let enabled = ins.enabled.value();
+        let radius = 3.5 * dpx;
+        paint_scope_bg(canvas, bounds, radius, &pal, enabled);
+
+        let pad_x = 5.0 * dpx;
+        let pad_y = 4.0 * dpx;
+        let ix = bounds.x + pad_x;
+        let iy = bounds.y + pad_y;
+        let iw = (bounds.w - 2.0 * pad_x).max(2.0);
+        let ih = (bounds.h - 2.0 * pad_y).max(2.0);
+
+        // Subtle axes + linear dry reference diagonal
+        let mut ref_path = vg::Path::new();
+        ref_path.move_to(ix, iy + ih * 0.5);
+        ref_path.line_to(ix + iw, iy + ih * 0.5);
+        ref_path.move_to(ix + iw * 0.5, iy);
+        ref_path.line_to(ix + iw * 0.5, iy + ih);
+        ref_path.move_to(ix, iy + ih);
+        ref_path.line_to(ix + iw, iy);
+        let mut ref_paint = vg::Paint::color(theme::vg_color(
+            &pal.scope_grid,
+            if enabled { 130 } else { 55 },
+        ));
+        ref_paint.set_line_width(1.0 * dpx);
+        canvas.stroke_path(&ref_path, &ref_paint);
+
+        let mode: j_syn_dsp::InsertMode = ins.mode.value().into();
+        let drive = ins.drive.value().clamp(0.0, 1.0);
+        let mix = ins.mix.value().clamp(0.0, 1.0);
+        let mut xfer = vg::Path::new();
+        const PTS: usize = 64;
+        for i in 0..PTS {
+            let t = i as f32 / (PTS - 1) as f32;
+            let x_in = t * 2.0 - 1.0;
+            let wet = evaluate_insert_curve(mode, x_in, drive);
+            let y_out = (x_in + (wet - x_in) * mix).clamp(-1.0, 1.0);
+            let px = ix + t * iw;
+            let py = iy + (1.0 - (y_out * 0.5 + 0.5)) * ih;
+            if i == 0 {
+                xfer.move_to(px, py);
+            } else {
+                xfer.line_to(px, py);
+            }
+        }
+        let (cr, cg, cb) = scope_trace_rgb(self.accent_rgb, &pal, enabled);
+        let mut xfer_paint = vg::Paint::color(vg::Color::rgba(
+            cr,
+            cg,
+            cb,
+            if enabled { 235 } else { 100 },
+        ));
+        xfer_paint.set_line_width(1.6 * dpx);
+        canvas.stroke_path(&xfer, &xfer_paint);
+
+        paint_scope_border(canvas, bounds, dpx, radius, &pal, enabled);
     }
 }
 

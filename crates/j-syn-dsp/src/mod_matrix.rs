@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 pub const NUM_MOD_SLOTS: usize = 32;
 pub const NUM_ACTIVE_SOURCES: usize = 21;
-pub const NUM_MOD_DESTS: usize = 206;
+pub const NUM_MOD_DESTS: usize = 272;
 
 /// Modulation sources assignable in any matrix slot.
 #[repr(u8)]
@@ -201,7 +201,7 @@ impl ModMatrixSource {
 }
 
 /// All modulatable continuous & pitch destinations across `J-SYN`.
-#[repr(u8)]
+#[repr(u16)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ModDestination {
     #[default]
@@ -416,6 +416,74 @@ pub enum ModDestination {
     Osc2HzOffset = 203,
     Osc3HzOffset = 204,
     Osc4HzOffset = 205,
+    // Bus C main FX params P1..P4 (206..=237)
+    BusCFx1P1 = 206,
+    BusCFx1P2 = 207,
+    BusCFx1P3 = 208,
+    BusCFx1P4 = 209,
+    BusCFx2P1 = 210,
+    BusCFx2P2 = 211,
+    BusCFx2P3 = 212,
+    BusCFx2P4 = 213,
+    BusCFx3P1 = 214,
+    BusCFx3P2 = 215,
+    BusCFx3P3 = 216,
+    BusCFx3P4 = 217,
+    BusCFx4P1 = 218,
+    BusCFx4P2 = 219,
+    BusCFx4P3 = 220,
+    BusCFx4P4 = 221,
+    BusCFx5P1 = 222,
+    BusCFx5P2 = 223,
+    BusCFx5P3 = 224,
+    BusCFx5P4 = 225,
+    BusCFx6P1 = 226,
+    BusCFx6P2 = 227,
+    BusCFx6P3 = 228,
+    BusCFx6P4 = 229,
+    BusCFx7P1 = 230,
+    BusCFx7P2 = 231,
+    BusCFx7P3 = 232,
+    BusCFx7P4 = 233,
+    BusCFx8P1 = 234,
+    BusCFx8P2 = 235,
+    BusCFx8P3 = 236,
+    BusCFx8P4 = 237,
+    // Bus C extended/EQ FX params P5..P8 (238..=269)
+    BusCFx1P5 = 238,
+    BusCFx1P6 = 239,
+    BusCFx1P7 = 240,
+    BusCFx1P8 = 241,
+    BusCFx2P5 = 242,
+    BusCFx2P6 = 243,
+    BusCFx2P7 = 244,
+    BusCFx2P8 = 245,
+    BusCFx3P5 = 246,
+    BusCFx3P6 = 247,
+    BusCFx3P7 = 248,
+    BusCFx3P8 = 249,
+    BusCFx4P5 = 250,
+    BusCFx4P6 = 251,
+    BusCFx4P7 = 252,
+    BusCFx4P8 = 253,
+    BusCFx5P5 = 254,
+    BusCFx5P6 = 255,
+    BusCFx5P7 = 256,
+    BusCFx5P8 = 257,
+    BusCFx6P5 = 258,
+    BusCFx6P6 = 259,
+    BusCFx6P7 = 260,
+    BusCFx6P8 = 261,
+    BusCFx7P5 = 262,
+    BusCFx7P6 = 263,
+    BusCFx7P7 = 264,
+    BusCFx7P8 = 265,
+    BusCFx8P5 = 266,
+    BusCFx8P6 = 267,
+    BusCFx8P7 = 268,
+    BusCFx8P8 = 269,
+    BusCLevel = 270,
+    BusCPan = 271,
 }
 
 pub const ALL_MOD_DESTINATIONS: [ModDestination; NUM_MOD_DESTS] = [
@@ -625,6 +693,91 @@ pub const ALL_MOD_DESTINATIONS: [ModDestination; NUM_MOD_DESTS] = [
     ModDestination::Osc2HzOffset,
     ModDestination::Osc3HzOffset,
     ModDestination::Osc4HzOffset,
+    ModDestination::BusCFx1P1,
+    ModDestination::BusCFx1P2,
+    ModDestination::BusCFx1P3,
+    ModDestination::BusCFx1P4,
+    ModDestination::BusCFx2P1,
+    ModDestination::BusCFx2P2,
+    ModDestination::BusCFx2P3,
+    ModDestination::BusCFx2P4,
+    ModDestination::BusCFx3P1,
+    ModDestination::BusCFx3P2,
+    ModDestination::BusCFx3P3,
+    ModDestination::BusCFx3P4,
+    ModDestination::BusCFx4P1,
+    ModDestination::BusCFx4P2,
+    ModDestination::BusCFx4P3,
+    ModDestination::BusCFx4P4,
+    ModDestination::BusCFx5P1,
+    ModDestination::BusCFx5P2,
+    ModDestination::BusCFx5P3,
+    ModDestination::BusCFx5P4,
+    ModDestination::BusCFx6P1,
+    ModDestination::BusCFx6P2,
+    ModDestination::BusCFx6P3,
+    ModDestination::BusCFx6P4,
+    ModDestination::BusCFx7P1,
+    ModDestination::BusCFx7P2,
+    ModDestination::BusCFx7P3,
+    ModDestination::BusCFx7P4,
+    ModDestination::BusCFx8P1,
+    ModDestination::BusCFx8P2,
+    ModDestination::BusCFx8P3,
+    ModDestination::BusCFx8P4,
+    ModDestination::BusCFx1P5,
+    ModDestination::BusCFx1P6,
+    ModDestination::BusCFx1P7,
+    ModDestination::BusCFx1P8,
+    ModDestination::BusCFx2P5,
+    ModDestination::BusCFx2P6,
+    ModDestination::BusCFx2P7,
+    ModDestination::BusCFx2P8,
+    ModDestination::BusCFx3P5,
+    ModDestination::BusCFx3P6,
+    ModDestination::BusCFx3P7,
+    ModDestination::BusCFx3P8,
+    ModDestination::BusCFx4P5,
+    ModDestination::BusCFx4P6,
+    ModDestination::BusCFx4P7,
+    ModDestination::BusCFx4P8,
+    ModDestination::BusCFx5P5,
+    ModDestination::BusCFx5P6,
+    ModDestination::BusCFx5P7,
+    ModDestination::BusCFx5P8,
+    ModDestination::BusCFx6P5,
+    ModDestination::BusCFx6P6,
+    ModDestination::BusCFx6P7,
+    ModDestination::BusCFx6P8,
+    ModDestination::BusCFx7P5,
+    ModDestination::BusCFx7P6,
+    ModDestination::BusCFx7P7,
+    ModDestination::BusCFx7P8,
+    ModDestination::BusCFx8P5,
+    ModDestination::BusCFx8P6,
+    ModDestination::BusCFx8P7,
+    ModDestination::BusCFx8P8,
+    ModDestination::BusCLevel,
+    ModDestination::BusCPan,
+];
+
+const BUS_C_FX_MOD_DEST_NAMES: [&str; 64] = [
+    "C FX1 P1", "C FX1 P2", "C FX1 P3", "C FX1 P4",
+    "C FX2 P1", "C FX2 P2", "C FX2 P3", "C FX2 P4",
+    "C FX3 P1", "C FX3 P2", "C FX3 P3", "C FX3 P4",
+    "C FX4 P1", "C FX4 P2", "C FX4 P3", "C FX4 P4",
+    "C FX5 P1", "C FX5 P2", "C FX5 P3", "C FX5 P4",
+    "C FX6 P1", "C FX6 P2", "C FX6 P3", "C FX6 P4",
+    "C FX7 P1", "C FX7 P2", "C FX7 P3", "C FX7 P4",
+    "C FX8 P1", "C FX8 P2", "C FX8 P3", "C FX8 P4",
+    "C FX1 P5", "C FX1 P6", "C FX1 P7", "C FX1 P8",
+    "C FX2 P5", "C FX2 P6", "C FX2 P7", "C FX2 P8",
+    "C FX3 P5", "C FX3 P6", "C FX3 P7", "C FX3 P8",
+    "C FX4 P5", "C FX4 P6", "C FX4 P7", "C FX4 P8",
+    "C FX5 P5", "C FX5 P6", "C FX5 P7", "C FX5 P8",
+    "C FX6 P5", "C FX6 P6", "C FX6 P7", "C FX6 P8",
+    "C FX7 P5", "C FX7 P6", "C FX7 P7", "C FX7 P8",
+    "C FX8 P5", "C FX8 P6", "C FX8 P7", "C FX8 P8",
 ];
 
 const FX_MOD_DEST_NAMES: [&str; 128] = [
@@ -865,16 +1018,21 @@ impl ModDestination {
         }
     }
 
-    /// Returns destination for `bus` (`0` = Bus A, `1` = Bus B), `slot` (`0..8`), and `param` (`0..8`).
+    /// Returns destination for `bus` (`0` = Bus A, `1` = Bus B, `2` = Bus C), `slot` (`0..8`), and `param` (`0..8`).
     #[inline]
     pub const fn fx_bus_slot_param(bus: usize, slot: usize, param: usize) -> Self {
         let s = if slot < 8 { slot } else { 7 };
         let p = if param < 8 { param } else { 7 };
-        let b = if bus == 0 { 0 } else { 1 };
-        let idx = if p < 4 {
-            63 + b * 32 + s * 4 + p
+        let idx = if bus >= 2 {
+            if p < 4 {
+                206 + s * 4 + p
+            } else {
+                238 + s * 4 + (p - 4)
+            }
+        } else if p < 4 {
+            63 + bus * 32 + s * 4 + p
         } else {
-            127 + b * 32 + s * 4 + (p - 4)
+            127 + bus * 32 + s * 4 + (p - 4)
         };
         ALL_MOD_DESTINATIONS[idx]
     }
@@ -893,6 +1051,12 @@ impl ModDestination {
         } else if idx >= 127 && idx < 191 {
             let rel = idx - 127;
             Some((rel / 32, (rel % 32) / 4, 4 + (rel % 4)))
+        } else if idx >= 206 && idx < 238 {
+            let rel = idx - 206;
+            Some((2, rel / 4, rel % 4))
+        } else if idx >= 238 && idx < 270 {
+            let rel = idx - 238;
+            Some((2, rel / 4, 4 + (rel % 4)))
         } else {
             None
         }
@@ -915,6 +1079,9 @@ impl ModDestination {
         let idx = self as usize;
         if idx >= 63 && idx < 191 {
             return FX_MOD_DEST_NAMES[idx - 63];
+        }
+        if idx >= 206 && idx < 270 {
+            return BUS_C_FX_MOD_DEST_NAMES[idx - 206];
         }
         match self {
             Self::Osc1WtPos => "OSC1 WT",
@@ -987,6 +1154,8 @@ impl ModDestination {
             Self::BusAPan => "BUS A PAN",
             Self::BusBLevel => "BUS B LVL",
             Self::BusBPan => "BUS B PAN",
+            Self::BusCLevel => "BUS C LVL",
+            Self::BusCPan => "BUS C PAN",
             Self::Osc1Ratio => "OSC1 RATIO",
             Self::Osc2Ratio => "OSC2 RATIO",
             Self::Osc3Ratio => "OSC3 RATIO",
@@ -1252,8 +1421,8 @@ pub struct ModUiTelemetry {
     pub env_levels: [AtomicU32; 4],
     /// Post-modulation `[cutoff_hz, resonance, drive, aux]` for `FILTER 1` and `FILTER 2`.
     pub filter_live: [[AtomicU32; 4]; 2],
-    /// Lock-free FX scopes for `Bus A` (`0..8`) and `Bus B` (`8..16`).
-    pub fx_scopes: [FxScopeRing; 16],
+    /// Lock-free FX scopes for `Bus A` (`0..8`), `Bus B` (`8..16`), and `Bus C` (`16..24`).
+    pub fx_scopes: [FxScopeRing; 24],
     /// Lock-free Sub Bus clipper scope (`pre_driven`, `post_clipped`, `clip_activity`).
     pub sub_scope: FxScopeRing,
     /// Lock-free Master Output / Limiter scope (`pre_limit`, `post_out`, `limit_activity`).
@@ -1394,7 +1563,7 @@ impl ModUiTelemetry {
 
     #[inline]
     pub fn fx_scope(&self, bus: usize, slot: usize) -> &FxScopeRing {
-        let idx = (if bus == 0 { 0 } else { 8 }) + slot.min(7);
+        let idx = bus.min(2) * 8 + slot.min(7);
         &self.fx_scopes[idx]
     }
 

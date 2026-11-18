@@ -54,7 +54,7 @@ pub use self::utility::{
     UTILITY_WIDTH_DEFAULT_NORM,
 };
 
-pub const NUM_FX_BUSES: usize = 2;
+pub const NUM_FX_BUSES: usize = 3;
 pub const NUM_FX_SLOTS: usize = 8;
 pub const MAX_FX_STACK: usize = 4;
 
@@ -384,7 +384,7 @@ pub struct SubBusParams {
 impl Default for SubBusParams {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             lp_cutoff_hz: 2_000.0,
             clip_drive_db: 0.0,
             level: 1.0,
@@ -404,15 +404,56 @@ pub fn sub_cutoff_hz_to_norm(hz: f32) -> f32 {
     (hz.clamp(20.0, 2_000.0) / 20.0).log(100.0).clamp(0.0, 1.0)
 }
 
-/// How `Bus A` and `Bus B` connect inside the Master FX Rack.
+/// How `Bus A`, `Bus B`, and `Bus C` connect inside the Master FX Rack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum FxBusTopology {
-    /// Parallel: `Bus A` and `Bus B` process independently and sum into Master.
-    #[default]
+    /// Parallel: `Bus A`, `Bus B`, and `Bus C` process independently and sum into Master (`A | B | C`).
     Parallel = 0,
-    /// Serial: `Bus A` output feeds directly into `Bus B` input (`A -> B -> Master`).
+    /// Serial: `Bus A` output feeds directly into `Bus B`, while `Bus C` stays parallel (`A -> B | C`).
+    #[default]
     Serial = 1,
+    /// Cascade all 3 buses (`A -> B -> C -> Master`).
+    SerialAll = 2,
+    /// Bus A and Bus B both feed Bus C (`(A | B) -> C`).
+    ABToC = 3,
+    /// Bus A feeds Bus C while Bus B goes to Master (`A -> C | B`).
+    AToC = 4,
+    /// Bus B feeds Bus C while Bus A goes to Master (`A | B -> C`).
+    BToC = 5,
+}
+
+impl FxBusTopology {
+    /// Output target of Bus A: `0 = Master`, `1 = Bus B`, `2 = Bus C`.
+    #[inline]
+    pub const fn bus_a_target(self) -> u8 {
+        match self {
+            Self::Parallel | Self::BToC => 0,
+            Self::Serial | Self::SerialAll => 1,
+            Self::ABToC | Self::AToC => 2,
+        }
+    }
+
+    /// Output target of Bus B: `0 = Master`, `2 = Bus C`.
+    #[inline]
+    pub const fn bus_b_target(self) -> u8 {
+        match self {
+            Self::Parallel | Self::Serial | Self::AToC => 0,
+            Self::SerialAll | Self::ABToC | Self::BToC => 2,
+        }
+    }
+
+    #[inline]
+    pub const fn from_lane_targets(a_target: u8, b_target: u8) -> Self {
+        match (a_target, b_target) {
+            (0, 0) => Self::Parallel,
+            (1, 0) => Self::Serial,
+            (1, 2) => Self::SerialAll,
+            (2, 2) => Self::ABToC,
+            (2, 0) => Self::AToC,
+            _ => Self::BToC,
+        }
+    }
 }
 
 /// Full FX Rack (`Bus A` + `Bus B` + `Sub Bus` + `FxBusTopology` + `EngineMode`).
@@ -834,10 +875,10 @@ impl FxBusState {
             }
         }
 
-        let (lvl_dest, pan_dest) = if self.bus_idx == 0 {
-            (ModDestination::BusALevel, ModDestination::BusAPan)
-        } else {
-            (ModDestination::BusBLevel, ModDestination::BusBPan)
+        let (lvl_dest, pan_dest) = match self.bus_idx {
+            0 => (ModDestination::BusALevel, ModDestination::BusAPan),
+            1 => (ModDestination::BusBLevel, ModDestination::BusBPan),
+            _ => (ModDestination::BusCLevel, ModDestination::BusCPan),
         };
         let eff_level = (bus.level + mod_offsets[lvl_dest.index()] * 2.0).clamp(0.0, 2.0);
         let eff_pan = (bus.pan + mod_offsets[pan_dest.index()] * 2.0).clamp(-1.0, 1.0);
@@ -1007,7 +1048,7 @@ impl SubBusProcessor {
 
 /// Complete parallel dual-bus 8-slot FX Rack + dedicated Sub Bus.
 pub struct FxRackState {
-    buses: [FxBusState; NUM_FX_BUSES],
+    buses: Box<[FxBusState]>,
     sub_bus: SubBusProcessor,
 }
 
@@ -1015,7 +1056,10 @@ impl FxRackState {
     pub fn new(sample_rate: f32) -> Self {
         let sr = sample_rate.max(1_000.0);
         Self {
-            buses: [FxBusState::new(0, sr), FxBusState::new(1, sr)],
+            buses: (0..NUM_FX_BUSES)
+                .map(|idx| FxBusState::new(idx, sr))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
             sub_bus: SubBusProcessor::new(sr),
         }
     }
@@ -1024,12 +1068,14 @@ impl FxRackState {
         let sr = sample_rate.max(1_000.0);
         self.buses[0].set_sample_rate(sr);
         self.buses[1].set_sample_rate(sr);
+        self.buses[2].set_sample_rate(sr);
         self.sub_bus.set_sample_rate(sr);
     }
 
     pub fn reset(&mut self) {
         self.buses[0].reset();
         self.buses[1].reset();
+        self.buses[2].reset();
         self.sub_bus.reset();
     }
 
@@ -1064,6 +1110,10 @@ impl FxRackState {
         tempo_bpm: f32,
         telemetry: Option<&ModUiTelemetry>,
     ) -> (f32, f32) {
+        let (sub_l, sub_r) =
+            self.sub_bus
+                .process_sample(sub_in.0, sub_in.1, &rack.sub, mod_offsets, telemetry);
+
         let (al, ar) = self.buses[0].process_sample(
             bus_a_in.0,
             bus_a_in.1,
@@ -1073,10 +1123,29 @@ impl FxRackState {
             rack.engine_mode,
             telemetry,
         );
-        let (b_in_l, b_in_r, out_a_l, out_a_r) = match rack.topology {
-            FxBusTopology::Parallel => (bus_b_in.0, bus_b_in.1, al, ar),
-            FxBusTopology::Serial => (bus_b_in.0 + al, bus_b_in.1 + ar, 0.0, 0.0),
-        };
+
+        let mut master_l = 0.0_f32;
+        let mut master_r = 0.0_f32;
+        let mut b_in_l = bus_b_in.0;
+        let mut b_in_r = bus_b_in.1;
+        let mut c_in_l = sub_l;
+        let mut c_in_r = sub_r;
+
+        match rack.topology.bus_a_target() {
+            0 => {
+                master_l += al;
+                master_r += ar;
+            }
+            1 => {
+                b_in_l += al;
+                b_in_r += ar;
+            }
+            _ => {
+                c_in_l += al;
+                c_in_r += ar;
+            }
+        }
+
         let (bl, br) = self.buses[1].process_sample(
             b_in_l,
             b_in_r,
@@ -1086,13 +1155,27 @@ impl FxRackState {
             rack.engine_mode,
             telemetry,
         );
-        let (sl, sr) = self
-            .sub_bus
-            .process_sample(sub_in.0, sub_in.1, &rack.sub, mod_offsets, telemetry);
+        match rack.topology.bus_b_target() {
+            0 => {
+                master_l += bl;
+                master_r += br;
+            }
+            _ => {
+                c_in_l += bl;
+                c_in_r += br;
+            }
+        }
 
-        (
-            flush_denormal(out_a_l + bl + sl),
-            flush_denormal(out_a_r + br + sr),
-        )
+        let (cl, cr) = self.buses[2].process_sample(
+            c_in_l,
+            c_in_r,
+            &rack.buses[2],
+            mod_offsets,
+            tempo_bpm,
+            rack.engine_mode,
+            telemetry,
+        );
+
+        (flush_denormal(master_l + cl), flush_denormal(master_r + cr))
     }
 }

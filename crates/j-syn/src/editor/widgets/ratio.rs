@@ -82,19 +82,33 @@ impl RatioDragBox {
             }),
         }
         .build(cx, move |cx| {
-            ParamWidgetBase::build_view(params, params_to_param, move |cx, param_data| {
-                let text_lens = param_data.make_lens(|param| {
-                    param.normalized_value_to_string(param.modulated_normalized_value(), true)
-                });
-                bold_label(cx, text_lens, "compact-pill-text")
-                    .width(Stretch(1.0))
-                    .height(Stretch(1.0))
-                    .child_space(Stretch(1.0))
+            let text_lens = ParamWidgetBase::make_lens(params, params_to_param, |param| {
+                let raw = param.normalized_value_to_string(param.modulated_normalized_value(), true);
+                raw.replace(" ×", "×")
+            });
+            HStack::new(cx, move |cx| {
+                bold_label(cx, "RATIO", "inline-pill-label")
+                    .width(Auto)
+                    .height(Auto)
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0))
                     .hoverable(false);
-            })(cx);
+                bold_label(cx, text_lens, "inline-pill-value")
+                    .width(Stretch(1.0))
+                    .height(Auto)
+                    .top(Stretch(1.0))
+                    .bottom(Stretch(1.0))
+                    .hoverable(false);
+            })
+            .col_between(Pixels(3.0))
+            .width(Stretch(1.0))
+            .height(Stretch(1.0))
+            .child_left(Pixels(4.0))
+            .child_right(Pixels(4.0))
+            .hoverable(false);
         })
-        .class("compact-pill")
-        .class("ratio-pill")
+        .class("inline-pill")
+        .class("stk-pill")
     }
 
     #[inline]

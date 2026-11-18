@@ -193,6 +193,9 @@ pub struct JSynPluginParams {
     #[nested(id_prefix = "bus_b", group = "Bus B FX")]
     pub fx_bus_b: Box<FxBusPluginParams>,
 
+    #[nested(id_prefix = "bus_c", group = "Bus C FX")]
+    pub fx_bus_c: Box<FxBusPluginParams>,
+
     #[id = "fx_bus_topo"]
     pub fx_bus_topology: EnumParam<FxBusTopologyParam>,
 
@@ -209,28 +212,28 @@ pub struct JSynPluginParams {
 impl JSynPluginParams {
     #[inline]
     pub fn fx_bus_slots(&self, bus: usize) -> &[FxSlotPluginParams; 8] {
-        if bus == 0 {
-            &self.fx_slots
-        } else {
-            &self.fx_bus_b.slots
+        match bus {
+            0 => &self.fx_slots,
+            1 => &self.fx_bus_b.slots,
+            _ => &self.fx_bus_c.slots,
         }
     }
 
     #[inline]
     pub fn fx_bus_level_param(&self, bus: usize) -> &FloatParam {
-        if bus == 0 {
-            &self.bus_a_level
-        } else {
-            &self.fx_bus_b.level
+        match bus {
+            0 => &self.bus_a_level,
+            1 => &self.fx_bus_b.level,
+            _ => &self.fx_bus_c.level,
         }
     }
 
     #[inline]
     pub fn fx_bus_pan_param(&self, bus: usize) -> &FloatParam {
-        if bus == 0 {
-            &self.bus_a_pan
-        } else {
-            &self.fx_bus_b.pan
+        match bus {
+            0 => &self.bus_a_pan,
+            1 => &self.fx_bus_b.pan,
+            _ => &self.fx_bus_c.pan,
         }
     }
 }
@@ -337,7 +340,8 @@ impl Default for JSynPluginParams {
             bus_a_level: fx_level_param("Bus A Level"),
             bus_a_pan: bipolar_percentage_param("Bus A Pan", 0.0),
             fx_bus_b: Box::new(FxBusPluginParams::new_bus_b()),
-            fx_bus_topology: EnumParam::new("FX Bus Routing", FxBusTopologyParam::Parallel),
+            fx_bus_c: Box::new(FxBusPluginParams::new_bus_c()),
+            fx_bus_topology: EnumParam::new("FX Bus Routing", FxBusTopologyParam::Serial),
             sub_bus: SubBusPluginParams::default(),
             macros: std::array::from_fn(MacroPluginParams::new),
             macro_names: Arc::new(Mutex::new(std::array::from_fn(|i| {

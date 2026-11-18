@@ -253,17 +253,17 @@ pub enum InsertModeParam {
     Tube,
     #[name = "Mech"]
     Mech,
-    #[name = "Tube -> Mech"]
+    #[name = "T -> M"]
     TubeToMech,
-    #[name = "Mech -> Tube"]
+    #[name = "M -> T"]
     MechToTube,
-    #[name = "Sine Shaper"]
+    #[name = "Sine"]
     SineShaper,
     #[name = "Parabolic"]
     Parabolic,
     #[name = "Soft Clip"]
     SoftClip,
-    #[name = "Bitcrush"]
+    #[name = "Crush"]
     Bitcrush,
     #[name = "Classic A"]
     ClassicA,
@@ -275,9 +275,9 @@ pub enum InsertModeParam {
     DiodeA,
     #[name = "Diode B"]
     DiodeB,
-    #[name = "Linear Fold"]
+    #[name = "Lin Fold"]
     LinearFold,
-    #[name = "Sine Fold"]
+    #[name = "Sin Fold"]
     SineFold,
     #[name = "Hard Clip"]
     HardClip,
@@ -315,11 +315,11 @@ impl From<InsertModeParam> for InsertMode {
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InsertPosParam {
-    #[name = "Pre-F1"]
+    #[name = "| F1"]
     PreFilter,
-    #[name = "Between F1->F2"]
+    #[name = "F1 | F2"]
     BetweenFilters,
-    #[name = "Post-F2"]
+    #[name = "| F2"]
     PostFilter,
 }
 
@@ -443,6 +443,9 @@ impl FilterPluginParams {
 
 #[derive(Params)]
 pub struct InsertSlotPluginParams {
+    #[id = "ins_enabled"]
+    pub enabled: BoolParam,
+
     #[id = "ins_mode"]
     pub mode: EnumParam<InsertModeParam>,
 
@@ -464,6 +467,7 @@ impl InsertSlotPluginParams {
             InsertPosParam::PostFilter
         };
         Self {
+            enabled: BoolParam::new("Insert Enabled", true),
             mode: EnumParam::new("Insert Mode", InsertModeParam::Off),
             position: EnumParam::new("Insert Position", default_pos),
             drive: percentage_param("Insert Drive", 0.25),
@@ -473,6 +477,7 @@ impl InsertSlotPluginParams {
 
     pub fn to_dsp(&self) -> InsertParams {
         InsertParams {
+            enabled: self.enabled.value(),
             mode: self.mode.value().into(),
             position: self.position.value().into(),
             drive: self.drive.value(),
@@ -489,7 +494,7 @@ pub enum DirectRouteParam {
     BusA,
     #[name = "Bus B"]
     BusB,
-    #[name = "Sub"]
+    #[name = "Bus C"]
     Sub,
 }
 
@@ -512,8 +517,14 @@ pub enum FilterBusParam {
     BusB,
     #[name = "A+B"]
     Both,
-    #[name = "Sub"]
+    #[name = "Bus C"]
     Sub,
+    #[name = "A+C"]
+    AC,
+    #[name = "B+C"]
+    BC,
+    #[name = "A+B+C"]
+    All,
 }
 
 impl From<FilterBusParam> for FilterBusDest {
@@ -523,6 +534,9 @@ impl From<FilterBusParam> for FilterBusDest {
             FilterBusParam::BusB => Self::BusB,
             FilterBusParam::Both => Self::Both,
             FilterBusParam::Sub => Self::Sub,
+            FilterBusParam::AC => Self::AC,
+            FilterBusParam::BC => Self::BC,
+            FilterBusParam::All => Self::All,
         }
     }
 }
@@ -602,6 +616,26 @@ impl Default for RoutingPluginParams {
 }
 
 impl RoutingPluginParams {
+    #[inline]
+    pub fn osc_filter_send_param(&self, idx: usize) -> &FloatParam {
+        match idx {
+            0 => &self.osc1_flt_bal,
+            1 => &self.osc2_flt_bal,
+            2 => &self.osc3_flt_bal,
+            _ => &self.osc4_flt_bal,
+        }
+    }
+
+    #[inline]
+    pub fn osc_direct_param(&self, idx: usize) -> &EnumParam<DirectRouteParam> {
+        match idx {
+            0 => &self.osc1_direct,
+            1 => &self.osc2_direct,
+            2 => &self.osc3_direct,
+            _ => &self.osc4_direct,
+        }
+    }
+
     pub fn to_dsp(&self) -> RoutingParams {
         RoutingParams {
             osc_filter_balance: [

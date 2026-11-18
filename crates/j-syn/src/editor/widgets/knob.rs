@@ -13,8 +13,8 @@ use crate::editor::mod_bar::ModUiState;
 use crate::editor::UiEvent;
 use super::{
     emit_widget_tooltip, format_mod_range_tooltip, handle_mod_depth_move,
-    update_mod_collar_cursor, DragState, EnabledPredicate, ModDepthDrag, ModTargetBinding,
-    ValueFormatter, KNOB_DRAG_PIXELS, KNOB_FINE_MULTIPLIER,
+    update_mod_collar_cursor, DisabledTooltipFormatter, DragState, EnabledPredicate, ModDepthDrag,
+    ModTargetBinding, ValueFormatter, KNOB_DRAG_PIXELS, KNOB_FINE_MULTIPLIER,
 };
 
 
@@ -33,6 +33,7 @@ pub struct RotaryKnob {
     mod_binding: Option<ModTargetBinding>,
     value_formatter: Option<ValueFormatter>,
     enabled_state: Option<(Arc<crate::JSynPluginParams>, EnabledPredicate)>,
+    disabled_tooltip: Option<DisabledTooltipFormatter>,
     snap_steps: Option<u32>,
     default_override: Option<f32>,
 }
@@ -41,6 +42,10 @@ pub trait KnobDimExt {
     fn enabled_by<F>(self, params: Arc<crate::JSynPluginParams>, check: F) -> Self
     where
         F: Fn(&crate::JSynPluginParams) -> bool + Send + Sync + 'static;
+
+    fn disabled_tooltip<F>(self, fmt: F) -> Self
+    where
+        F: Fn(&crate::JSynPluginParams) -> String + Send + Sync + 'static;
 
     fn snap_steps(self, steps: u32) -> Self;
 
@@ -54,6 +59,14 @@ impl KnobDimExt for Handle<'_, RotaryKnob> {
     {
         let pred: EnabledPredicate = Arc::new(check);
         self.modify(move |knob| knob.enabled_state = Some((params, pred)))
+    }
+
+    fn disabled_tooltip<F>(self, fmt: F) -> Self
+    where
+        F: Fn(&crate::JSynPluginParams) -> String + Send + Sync + 'static,
+    {
+        let formatter: DisabledTooltipFormatter = Arc::new(fmt);
+        self.modify(move |knob| knob.disabled_tooltip = Some(formatter))
     }
 
     fn snap_steps(self, steps: u32) -> Self {
@@ -202,6 +215,7 @@ impl RotaryKnob {
             mod_binding,
             value_formatter,
             enabled_state: None,
+            disabled_tooltip: None,
             snap_steps: None,
             default_override: None,
         }
@@ -235,6 +249,15 @@ impl RotaryKnob {
             })
         } else if let Some(md) = self.mod_depth_drag {
             format!("Mod: {:+.0}%", md.start_depth * 100.0)
+        } else if !self.drag_active {
+            if let (Some((params, pred)), Some(disabled_fmt)) =
+                (&self.enabled_state, &self.disabled_tooltip)
+            {
+                if !pred(params) {
+                    return disabled_fmt(params);
+                }
+            }
+            self.format_norm_value(self.param_base.modulated_normalized_value(), None)
         } else {
             self.format_norm_value(self.param_base.modulated_normalized_value(), None)
         }

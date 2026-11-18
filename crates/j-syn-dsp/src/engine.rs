@@ -111,7 +111,7 @@ impl SafetyLimiter {
 /// and click-free 3 ms tail-voice stealing. Zero heap allocations during processing.
 pub struct SynthEngine {
     pub voices: Box<[Voice]>,
-    pub tail_voices: [TailVoice; MAX_TAIL_VOICES],
+    pub tail_voices: Box<[TailVoice]>,
     sample_rate: f32,
     voice_age_counter: u64,
     last_note: Option<f32>,
@@ -157,7 +157,10 @@ impl SynthEngine {
         let sr = sample_rate.max(1000.0);
         let mut engine = Self {
             voices: (0..MAX_VOICES).map(|_| Voice::new()).collect::<Vec<_>>().into_boxed_slice(),
-            tail_voices: std::array::from_fn(|_| TailVoice::new()),
+            tail_voices: (0..MAX_TAIL_VOICES)
+                .map(|_| TailVoice::new())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
             sample_rate: sr,
             voice_age_counter: 0,
             last_note: None,
@@ -797,7 +800,7 @@ impl SynthEngine {
         const HEADROOM: f32 = 0.35;
         let fx_mod = Self::current_global_fx_mod_offsets(&self.voices, &self.idle_mod_offsets);
         let rack = FxRackParams {
-            buses: [params.fx_bus_a, params.fx_bus_b],
+            buses: [params.fx_bus_a, params.fx_bus_b, params.fx_bus_c],
             sub: params.sub_bus,
             topology: params.fx_bus_topology,
             engine_mode: params.engine_mode,
@@ -1077,7 +1080,7 @@ impl SynthEngine {
     }
 
     fn push_tail_voice(
-        tail_voices: &mut [TailVoice; MAX_TAIL_VOICES],
+        tail_voices: &mut [TailVoice],
         voice: &Voice,
         fade_samples: u32,
         age: u64,

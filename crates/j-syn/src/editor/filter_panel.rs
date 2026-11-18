@@ -18,8 +18,9 @@ use super::scope::{
     filter_db_to_raw_y, filter_freq_to_norm, paint_filter_freq_grid, paint_filter_response_curve,
     paint_scope_bg, paint_scope_border, scope_trace_rgb,
 };
+use super::tokens;
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
-use super::{theme, UiData};
+use super::{theme, UiData, AMBER_RGB, CORAL_RGB};
 use crate::{FilterModeParam, FilterPluginParams, FilterSlopeParam, JSynPluginParams};
 
 #[inline]
@@ -369,8 +370,8 @@ pub(super) fn build_filter_panel(
                     label,
                     accent,
                 )
-                .width(Pixels(62.0))
-                .height(Pixels(20.0));
+                .width(Pixels(tokens::FILTER_LED_W))
+                .height(Pixels(tokens::HEADER_STRIP_H));
 
                 build_enum_dropdown(
                     cx,
@@ -380,7 +381,7 @@ pub(super) fn build_filter_panel(
                     FILTER_MODE_ITEMS,
                 )
                 .width(Stretch(1.0))
-                .height(Pixels(20.0));
+                .height(Pixels(tokens::HEADER_STRIP_H));
 
                 build_enum_dropdown_with_override(
                     cx,
@@ -393,17 +394,17 @@ pub(super) fn build_filter_panel(
                         mode.has_fixed_12db_slope().then_some("12 dB")
                     },
                 )
-                .width(Pixels(60.0))
-                .height(Pixels(20.0));
+                .width(Pixels(tokens::FILTER_SLOPE_W))
+                .height(Pixels(tokens::HEADER_STRIP_H));
             }
         })
-        .col_between(Pixels(6.0))
-        .height(Pixels(20.0))
+        .col_between(Pixels(tokens::SPACE_MD))
+        .height(Pixels(tokens::HEADER_STRIP_H))
         .width(Stretch(1.0));
 
         FilterResponseScope::new(cx, filter_idx, params.clone(), mod_ui.clone(), accent)
             .width(Stretch(1.0))
-            .height(Pixels(92.0));
+            .height(Pixels(tokens::FILTER_SCOPE_H));
 
         HStack::new(cx, {
             let params = params.clone();
@@ -416,7 +417,7 @@ pub(super) fn build_filter_panel(
                     "CUTOFF",
                     false,
                     accent,
-                    49.0,
+                    tokens::KNOB_FLT,
                     ModDestination::filter_cutoff(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -430,7 +431,7 @@ pub(super) fn build_filter_panel(
                     "RES",
                     false,
                     accent,
-                    49.0,
+                    tokens::KNOB_FLT,
                     ModDestination::filter_res(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -444,7 +445,7 @@ pub(super) fn build_filter_panel(
                     "DRIVE",
                     false,
                     accent,
-                    49.0,
+                    tokens::KNOB_FLT,
                     ModDestination::filter_drive(filter_idx),
                     mod_ui.clone(),
                     0,
@@ -457,11 +458,11 @@ pub(super) fn build_filter_panel(
                     params.clone(),
                     mod_ui.clone(),
                     accent,
-                    49.0,
+                    tokens::KNOB_FLT,
                 );
             }
         })
-        .col_between(Pixels(4.0))
+        .col_between(Pixels(tokens::SPACE_SM))
         .width(Stretch(1.0))
         .height(Auto);
     })
@@ -470,7 +471,30 @@ pub(super) fn build_filter_panel(
         "module-disabled",
         UiData::mod_ui_rev.map(move |_| !filter_check(&p_dim)),
     )
-    .row_between(Pixels(4.0))
+    .row_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))
-    .height(Pixels(188.0));
+    .height(Stretch(1.0));
+}
+
+pub(super) fn build_dual_filter_section(
+    cx: &mut Context,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
+) {
+    // Side-by-side Filter 1 & Filter 2 cards (routing lives in the ROUTE tab)
+    HStack::new(cx, move |cx| {
+        build_filter_panel(
+            cx,
+            0,
+            params.clone(),
+            gui_context.clone(),
+            mod_ui.clone(),
+            AMBER_RGB,
+        );
+        build_filter_panel(cx, 1, params, gui_context, mod_ui, CORAL_RGB);
+    })
+    .col_between(Pixels(tokens::SPACE_MD))
+    .width(Stretch(1.0))
+    .height(Pixels(tokens::FILTER_SECTION_H));
 }

@@ -40,8 +40,8 @@ pub use fx::{
     NUM_FX_BUSES, NUM_FX_SLOTS, UTILITY_WIDTH_DEFAULT_NORM,
 };
 pub use insert::{
-    DirectDest, FilterBusDest, FilterRouting, InsertMode, InsertParams, InsertPosition,
-    InsertShaperState, InsertState, RoutingParams, VoiceFeedbackState,
+    evaluate_insert_curve, DirectDest, FilterBusDest, FilterRouting, InsertMode, InsertParams,
+    InsertPosition, InsertShaperState, InsertState, RoutingParams, VoiceFeedbackState,
 };
 pub use mod_matrix::{
     FxScopeRing, ModDestination, ModMatrixSource, ModMatrixState, ModSlot, ModUiTelemetry,
