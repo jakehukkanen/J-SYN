@@ -1549,6 +1549,20 @@ impl View for MultibandXoverDragOverlay {
                     cx.capture();
                     set_resize_cursor(cx, ResizeCursorAxis::Horizontal);
                     meta.consume();
+                } else {
+                    let hz = self.x_to_hz(bounds, dpx, mx);
+                    let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
+                    let (low_hz, high_hz) = mb_ordered_xover_hz(slot.p1.value(), slot.p2.value());
+                    let target_tab = if hz < low_hz {
+                        1
+                    } else if hz <= high_hz {
+                        2
+                    } else {
+                        3
+                    };
+                    self.mod_ui.set_fx_mb_tab(self.bus_idx, self.slot_idx, target_tab);
+                    cx.emit(UiEvent::ModUiChanged);
+                    meta.consume();
                 }
             }
             WindowEvent::MouseDoubleClick(MouseButton::Left) => {
@@ -1604,7 +1618,6 @@ impl View for MultibandXoverDragOverlay {
                     cx.release();
                     self.hover_cursor_active = false;
                     set_resize_cursor(cx, ResizeCursorAxis::Default);
-                    let _ = &self.mod_ui;
                     meta.consume();
                 }
             }

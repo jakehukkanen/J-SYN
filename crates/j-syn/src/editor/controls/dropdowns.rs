@@ -37,6 +37,22 @@ pub(crate) struct ScrollDropdown {
     last_sign: f32,
     last_step: Instant,
     on_step: Box<dyn Fn(&mut EventContext, isize) + Send + Sync>,
+    on_activate: Option<Box<dyn Fn(&mut EventContext) + Send + Sync>>,
+}
+
+pub(crate) trait ScrollDropdownExt {
+    fn on_activate<F>(self, cb: F) -> Self
+    where
+        F: Fn(&mut EventContext) + Send + Sync + 'static;
+}
+
+impl ScrollDropdownExt for Handle<'_, ScrollDropdown> {
+    fn on_activate<F>(self, cb: F) -> Self
+    where
+        F: Fn(&mut EventContext) + Send + Sync + 'static,
+    {
+        self.modify(move |sd| sd.on_activate = Some(Box::new(cb)))
+    }
 }
 
 impl ScrollDropdown {
@@ -50,6 +66,7 @@ impl ScrollDropdown {
             last_sign: 0.0,
             last_step: Instant::now() - Duration::from_millis(100),
             on_step: Box::new(on_step),
+            on_activate: None,
         }
         .build(cx, |cx| {
             build_inner(cx).width(Stretch(1.0)).height(Stretch(1.0));
@@ -63,10 +80,18 @@ impl View for ScrollDropdown {
     }
 
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        event.map(|window_event, meta| {
-            if let WindowEvent::MouseScroll(_x, y) = window_event {
+        event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseDown(MouseButton::Left) => {
+                if let Some(ref cb) = self.on_activate {
+                    cb(cx);
+                }
+            }
+            WindowEvent::MouseScroll(_x, y) => {
                 if *y == 0.0 {
                     return;
+                }
+                if let Some(ref cb) = self.on_activate {
+                    cb(cx);
                 }
                 let sign = y.signum();
                 if self.last_sign != 0.0 && sign != self.last_sign {
@@ -86,6 +111,7 @@ impl View for ScrollDropdown {
                 }
                 meta.consume();
             }
+            _ => {}
         });
     }
 }
