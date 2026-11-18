@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use j_syn_dsp::{
-    DistortionMode, FxBusTopology, FxFilterSlope, MbDistBandParams, SubBusParams,
-    MB_BAND_LEVEL_DEFAULT_NORM,
+    FxBusTopology, FxFilterSlope, MbDistBandParams, SubBusParams, MB_BAND_LEVEL_DEFAULT_NORM,
 };
+pub use j_syn_ui::fx_units::DistortionModeParam;
 use nih_plug::prelude::*;
 
 use super::{bipolar_percentage_param, fx_level_param, FilterModeParam};
@@ -277,59 +277,6 @@ impl DiopserStagesParam {
             Self::S32 => 2,
             Self::S64 => 3,
             Self::S128 => 4,
-        }
-    }
-}
-
-#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DistortionModeParam {
-    #[name = "Tube"]
-    Tube,
-    #[name = "Mech"]
-    Mech,
-    #[name = "Sine"]
-    Sine,
-    #[name = "Crush"]
-    Crush,
-    #[name = "Classic A"]
-    ClassicA,
-    #[name = "Classic B"]
-    ClassicB,
-    #[name = "Classic C"]
-    ClassicC,
-    #[name = "Diode A"]
-    DiodeA,
-    #[name = "Diode B"]
-    DiodeB,
-    #[name = "Linear Fold"]
-    LinearFold,
-    #[name = "Sine Fold"]
-    SineFold,
-    #[name = "Hard Clip"]
-    HardClip,
-    #[name = "Half Rect"]
-    HalfRectify,
-    #[name = "Full Rect"]
-    FullRectify,
-}
-
-impl From<DistortionModeParam> for DistortionMode {
-    fn from(v: DistortionModeParam) -> Self {
-        match v {
-            DistortionModeParam::Tube => Self::Tube,
-            DistortionModeParam::Mech => Self::Mech,
-            DistortionModeParam::Sine => Self::Sine,
-            DistortionModeParam::Crush => Self::Crush,
-            DistortionModeParam::ClassicA => Self::ClassicA,
-            DistortionModeParam::ClassicB => Self::ClassicB,
-            DistortionModeParam::ClassicC => Self::ClassicC,
-            DistortionModeParam::DiodeA => Self::DiodeA,
-            DistortionModeParam::DiodeB => Self::DiodeB,
-            DistortionModeParam::LinearFold => Self::LinearFold,
-            DistortionModeParam::SineFold => Self::SineFold,
-            DistortionModeParam::HardClip => Self::HardClip,
-            DistortionModeParam::HalfRectify => Self::HalfRectify,
-            DistortionModeParam::FullRectify => Self::FullRectify,
         }
     }
 }
