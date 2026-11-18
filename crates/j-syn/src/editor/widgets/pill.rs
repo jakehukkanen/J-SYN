@@ -63,37 +63,6 @@ impl ParamStepPill {
         Self::build_inner(cx, params, params_to_param, num_steps, true, false, None, None)
     }
 
-    pub fn new_with_mod<'a, L, Params, P, FMap>(
-        cx: &'a mut Context,
-        params: L,
-        params_to_param: FMap,
-        num_steps: usize,
-        dest: ModDestination,
-        mod_ui: Arc<ModUiState>,
-        tab_tag: u8,
-    ) -> Handle<'a, Self>
-    where
-        L: Lens<Target = Params> + Clone,
-        Params: 'static,
-        P: Param + 'static,
-        FMap: Fn(&Params) -> &P + Copy + 'static,
-    {
-        Self::build_inner(
-            cx,
-            params,
-            params_to_param,
-            num_steps,
-            num_steps <= 16,
-            false,
-            Some(ModTargetBinding {
-                dest,
-                mod_ui,
-                tab_tag,
-            }),
-            None,
-        )
-    }
-
     pub fn new_with_mod_menu<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         params: L,

@@ -1,11 +1,11 @@
 //! Central visual and layout design tokens for `J-SYN`'s `1440 × 840` 3-Wing UI.
 #![allow(dead_code)]
 
-pub(crate) const WINDOW_W: u32 = 1440;
+pub(crate) const WINDOW_W: u32 = 920;
 pub(crate) const WINDOW_H: u32 = 840;
 pub(crate) const HEADER_H: f32 = 46.0;
 
-pub(crate) const LEFT_WING_W: f32 = 340.0;
+pub(crate) const LEFT_WING_W: f32 = 352.0;
 pub(crate) const RIGHT_WING_W: f32 = 544.0;
 
 pub(crate) const SPACE_XS: f32 = 2.0;

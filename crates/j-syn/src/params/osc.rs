@@ -319,7 +319,7 @@ pub enum InsertPosParam {
     PreFilter,
     #[name = "F1 | F2"]
     BetweenFilters,
-    #[name = "F2 |"]
+    #[name = "| F2"]
     PostFilter,
 }
 

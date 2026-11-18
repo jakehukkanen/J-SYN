@@ -1,12 +1,13 @@
 # J-SYN User Guide
 
-Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP plugin featuring a unified `1440 × 840` 3-Wing workspace (`Left Wing`: Oscillators & Noise, `Center Wing`: Dual Filters, Center Modulation Stage, Insert Shapers & Permanent `2×4` Macro/Source Dock, `Right Wing`: 3-Lane Master FX Rack).
+Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP plugin featuring a `920 × 840` 2-Wing `MAIN` workspace (`Left Wing`: Oscillators & Noise, `Center Wing`: Dual Filters, Center Modulation Stage, Insert Shapers & Permanent `2×4` Macro/Source Dock) plus a dedicated **`FX`** view hosting the 3-Lane Master FX Rack (`BUS A | BUS B | BUS C`).
 
 ---
 
 ## 1. Top Header Bar
-- **View Switcher (`MAIN | MATRIX | ⚙`):**
-  - `MAIN`: Full 3-Wing synth chassis (Oscillators & Noise, Dual Filters, Insert 1/2, Center Stage Tabs, Permanent Macro & Source Dock, and 3-Lane `BUS A | BUS B | BUS C` FX Rack on one screen).
+- **View Switcher (`MAIN | FX | MATRIX | ⚙`):**
+  - `MAIN`: 2-Wing synth chassis (Oscillators & Noise, Dual Filters, Insert 1/2, Center Stage Tabs, and Permanent Macro & Source Dock).
+  - `FX`: Full-width 3-Lane `BUS A | BUS B | BUS C` Snapin FX Rack with a permanent draggable modulation source pill strip (`E1–E4`, `MS1–MS4`, `VEL–SLD`, `M1–M8`) across the top.
   - `MATRIX`: Full 32-slot interactive Modulation Matrix.
   - `⚙` (Settings): UI Theme, Engine Quality (`Dirty` / `Clean`), `DC Blocker`, `Safety Limiter`, `MODSEQ SWING`, `GEAR SIZE` (`0.10–0.60`), and Presets/Wavetables directories.
     - > **Note on `0 dBFS` Headroom & `DC Blocker`:** The `~2.5 Hz` `DC Blocker` runs **after** the Master FX Rack and `MASTER` gain. Even with a `Limiter` or `Clipper` set to `0.0 dB` ceiling at the end of a bus, highpass phase-tilt on flat-topped or asymmetric waveforms can push output above `0.0 dBFS` unless `Safety Limiter` is enabled (or `DC Blocker` is disabled).
@@ -23,7 +24,7 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 - **Pitch / Ratio:** Right-click the **`PITCH`** / **`RATIO`** box to switch between **`Pitch (Semitones)`** and **`Ratio (FM Harmonic)`** modes, assign modulation, clear modulation, or reset:
   - **Pitch (`Semitones`) Mode (`±48 st`):** Normal drag = `1.00 st`, `Opt/Alt + Drag` = `±12.00 st`, `Shift + Drag` = `0.01 st`.
   - **Ratio (`FM Harmonic`) Mode (`0.000–32.000 ×`):** Dragging the **Left Half** steps through whole/sub-harmonic ratios (`0, 0.25, 0.5, 1..32`); dragging the **Right Half** adjusts fractions (`0.10`, or `0.01` with `Shift`). Includes a companion **`Hz Offset`** pill (`±1000 Hz` skewed toward `0.1–20 Hz`) beneath `RATIO` with its own right-click modulation menu.
-- **Main Osc Knobs & Bottom Dock:** `WT POS`, `WARP` (with `WARP` mode dropdown `None`, `B-`, `B+`, `SP` directly underneath), `>`/`<` routing order toggle (`Warp -> Mod` vs `Mod -> Warp`), `MOD` (with `MOD` dropdown `Off`, `PM 1..4`, `RM 1..4` directly underneath), and `LEVEL`. Both `WARP` and `MOD` dropdowns support mouse-wheel scrolling. Below the waveform scope and knobs, each card docks **`RETRG`**, **`PHS`** (`Phase`), **`UNI`** (`1`–`8`), and **`DET`** (`Detune`). Unison `SPREAD`, `PAN`, and `KT` remain in the **`VOICE`** Center Stage tab.
+- **Main Osc Knobs & Bottom Dock:** `WT POS`, `WARP` (with `WARP` mode dropdown `None`, `B-`, `B+`, `SP` directly underneath), `>`/`<` routing order toggle (`Warp -> Mod` vs `Mod -> Warp`) centered between the dropdowns, `MOD` (with `MOD` dropdown `Off`, `PM 1..4`, `RM 1..4` directly underneath), and `LEVEL`. Both `WARP` and `MOD` dropdowns support mouse-wheel scrolling. Below the waveform scope and knobs, each card docks 5 balanced controls: **`RETRIG`**, **`PHS`** (`Phase`), **`UNI`** (`1`–`8`), **`DET`** (`Detune`), and **`SPD`** (`Spread`). Per-oscillator `PAN` and `KT` remain in the **`VOICE`** Center Stage tab.
 - **Noise:** Stereo `White`, `Pink`, or `Brown` noise with `COLOR`, `STEREO`, and `LEVEL`. Per-source filter send balances and Direct Bus routing live in the **`ROUTE`** tab.
 
 ---
@@ -35,12 +36,12 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 - **Center Modulation Stage (`E1–4 | MS1–4 | VOICE | ROUTE`):**
   - The **`E1`–`E4`** and **`MS1`–`MS4`** tab pills are dual-purpose: **Click** to switch tabs, or **Drag** onto any knob/pill to assign modulation directly from the tab bar.
 - **Side-by-Side `INS 1` & `INS 2`:**
-  - Header controls: **`[INS 1]` / `[INS 2]`** LED bypass switch (greys out the card when toggled `OFF`), compact waveshaper algorithm dropdown (`Off`, `Tube`, `Mech`, `T -> M`, `M -> T`, `Sine`, `Parabolic`, `Soft Clip`, `Crush`, `Classic A/B/C`, `Diode A/B`, `Lin Fold`, `Sin Fold`, `Hard Clip`, `Half Rect`, `Full Rect`), and position selector (**`| F1`**, **`F1 | F2`**, **`F2 |`**).
+  - Header controls: **`[INS 1]` / `[INS 2]`** LED bypass switch (greys out the card when toggled `OFF`), compact waveshaper algorithm dropdown (`Off`, `Tube`, `Mech`, `T -> M`, `M -> T`, `Sine`, `Parabolic`, `Soft Clip`, `Crush`, `Classic A/B/C`, `Diode A/B`, `Lin Fold`, `Sin Fold`, `Hard Clip`, `Half Rect`, `Full Rect`), and position selector (**`| F1`**, **`F1 | F2`**, **`| F2`**).
   - Body: Real-time waveshaper transfer curve visualizer alongside `DRIVE` and dry/wet **`MIX`** knobs.
 
 ---
 
-## 4. Right Wing — 3-Lane Snapin FX Rack (`BUS A | BUS B | BUS C`)
+## 4. `FX` View — 3-Lane Snapin FX Rack (`BUS A | BUS B | BUS C`)
 - **Three Parallel / Routable 8-Slot FX Lanes (`BUS A`, `BUS B`, `BUS C`):**
   - Each lane features an 8-slot scrollable stack of Snapin cards (`ON/OFF`, effect selector, `↑`/`↓` slot reordering, `STK 1..4` stacking, and live `150 Hz` pre/post visualizer scope) plus lane header `L` (level) and `P` (pan) mini-knobs.
   - **Lane-to-Lane Routing:** Click the target badge in the `BUS A` or `BUS B` lane header (or use **`FX LANE MATRIX`** in the **`ROUTE`** tab) to configure 6 routing topologies (`Bus C` always outputs `-> MST`):
@@ -62,12 +63,12 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 
 ## 5. Permanent Macro & Source Dock, Center Stage Tabs & MPE
 - **Permanent `2×4` Macro & Performance Source Dock:** Always visible at bottom-center: houses a vertical column of performance source pills (`VEL`, `KEY`, `MW`, `AT`, `SLD`) on the left alongside all 8 renameable **`M1`–`M8`** macro cards (with draggable badge, editable name textbox, knob, and readout).
-  - **Drag** `E1`–`E4` / `MS1`–`MS4` directly from the Center Stage tab strip, or `VEL`–`SLD` / `M1`–`M8` from the dock onto any knob or value pill to assign modulation.
-  - **Click** `E1`–`E4` or `MS1`–`MS4` to open its editor directly in the Center Stage.
+  - **Drag** `E1`–`E4` / `MS1`–`MS4` directly from the Center Stage tab strip (or the top strip in **`FX`** view), or `VEL`–`SLD` / `M1`–`M8` from the dock onto any knob or value pill to assign modulation.
+  - **Click** `E1`–`E4` or `MS1`–`MS4` (including from the **`FX`** source strip) to jump directly to its editor in the Center Stage.
   - **Collar Handle:** Hover/drag the radial modulation arc around a knob to adjust depth.
   - **Right-Click** any modulated control to open a quick menu to **Bypass (`ON`/`BYP`)**, toggle **Polarity (`UNI`/`BIP`)**, or **Remove (`×`)** each routing.
 - **`VOICE` Center Tab & MPE:**
-  - `OSCILLATOR SPREAD, PAN & KEYTRACK` (`OSC 1`–`OSC 4` rows for `SPREAD`, `PAN`, `KT`) + `VOICING, MPE & FILTER KEYTRACKING` (`Poly`/`Mono`, `PB RANGE`, **`[• MPE]`**, **`MPE PB`** `1–96 st` [default `48 st`], `GLIDE`, `F1 KT`, `F2 KT`).
+  - `OSCILLATOR PAN & KEYTRACK` (4 side-by-side `OSC 1`–`OSC 4` columns for `PAN` and `KT`) + `VOICING, MPE & FILTER KEYTRACKING` (stacked **`MODE`** / **`PB RANGE`**, stacked **`[• MPE]`** / **`MPE PB`** `1–96 st` [default `48 st`], alongside `GLIDE`, `F1 KT`, `F2 KT`).
   - When **`MPE`** is enabled, Master `Ch 1` broadcasts global bend (`±PB RANGE`), `CC 1`, and pressure, while Member Channels `Ch 2–16` route per-note Pitch Bend (`±MPE PB`), Pressure (`AT`), and `CC 74` Slide (`SLD`) exclusively to each active voice with `1.5 ms` smoothing (alongside CLAP/VST3 `PolyPressure`, `PolyTuning`, and `PolyBrightness`).
 - **`E1`–`E4` / `MS1`–`MS4` Center Stage Tabs (`MODSEQ` & `LFO`):**
   - **`MODSEQ` (Performer) Mode:**

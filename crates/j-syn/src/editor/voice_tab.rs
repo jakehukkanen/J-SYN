@@ -1,5 +1,5 @@
-//! `VOICE` Center Stage tab: per-oscillator Spread / Pan / Keytrack rows,
-//! global Voicing (`Poly`/`Mono`, `PB Range`, `[• MPE]`, `MPE PB`, `GLIDE`), and Filter Keytracking.
+//! `VOICE` Center Stage tab: side-by-side per-oscillator Pan / Keytrack columns,
+//! stacked global Voicing (`MODE`/`PB RANGE`, `MPE`/`MPE PB`), `GLIDE`, and Filter Keytracking.
 
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
     bold_label, build_bool_dropdown, build_flex_knob_cell_mod, build_flex_knob_cell_mod_dim,
-    build_knob_cell, build_mini_pill_cell, build_module_header, build_stacked_pill_cell_mod,
+    build_knob_cell, build_mini_pill_cell, build_module_header,
 };
 use super::mod_bar::{bottom_tab_tag, ModUiState};
 use super::osc_panel::osc_enabled_fn;
@@ -27,74 +27,65 @@ pub(super) fn build_voice_tab(
     let tab_tag = bottom_tab_tag(BottomTab::VoiceEnv);
 
     VStack::new(cx, move |cx| {
-        // Top Card: Per-oscillator Unison Spread, Pan & Keytrack
+        // Top Card: Per-oscillator Pan & Keytrack arranged side-by-side
         let p_osc = params.clone();
         let m_osc = mod_ui.clone();
         VStack::new(cx, move |cx| {
-            build_module_header(cx, "OSCILLATOR SPREAD, PAN & KEYTRACK", 18.0);
+            build_module_header(cx, "OSCILLATOR PAN & KEYTRACK", 18.0);
 
             const OSC_LABELS: [&str; 4] = ["OSC 1", "OSC 2", "OSC 3", "OSC 4"];
             const OSC_ACCENTS: [(u8, u8, u8); 4] = [AMBER_RGB, GOLD_RGB, CORAL_RGB, AMBER_RGB];
 
-            for idx in 0..4 {
-                let p_row = p_osc.clone();
-                let m_row = m_osc.clone();
-                let p_spr = p_osc.clone();
-                let accent = OSC_ACCENTS[idx];
-                HStack::new(cx, move |cx| {
-                    bold_label(cx, OSC_LABELS[idx], "module-title")
-                        .width(Pixels(44.0))
-                        .height(Stretch(1.0))
-                        .child_top(Stretch(1.0))
-                        .child_bottom(Stretch(1.0));
+            HStack::new(cx, move |cx| {
+                for idx in 0..4 {
+                    let p_col = p_osc.clone();
+                    let m_col = m_osc.clone();
+                    let accent = OSC_ACCENTS[idx];
+                    VStack::new(cx, move |cx| {
+                        bold_label(cx, OSC_LABELS[idx], "module-title")
+                            .width(Stretch(1.0))
+                            .height(Pixels(16.0))
+                            .child_space(Stretch(1.0));
 
-                    build_stacked_pill_cell_mod(
-                        cx,
-                        UiData::params,
-                        move |p| &p.oscs[idx].spread,
-                        "SPREAD",
-                        100,
-                        ModDestination::osc_spread(idx),
-                        m_row.clone(),
-                        tab_tag,
-                    )
-                    .toggle_class(
-                        "pill-dimmed",
-                        UiData::mod_ui_rev.map(move |_| p_spr.oscs[idx].unison.value() <= 1),
-                    );
+                        build_flex_knob_cell_mod_dim(
+                            cx,
+                            UiData::params,
+                            move |p| &p.oscs[idx].pan,
+                            "PAN",
+                            true,
+                            accent,
+                            tokens::KNOB_STD,
+                            ModDestination::osc_pan(idx),
+                            m_col,
+                            tab_tag,
+                            p_col,
+                            osc_enabled_fn(idx),
+                        );
 
-                    build_flex_knob_cell_mod_dim(
-                        cx,
-                        UiData::params,
-                        move |p| &p.oscs[idx].pan,
-                        "PAN",
-                        true,
-                        accent,
-                        tokens::KNOB_COMPACT,
-                        ModDestination::osc_pan(idx),
-                        m_row,
-                        tab_tag,
-                        p_row,
-                        osc_enabled_fn(idx),
-                    );
-
-                    LedToggleSwitch::new(
-                        cx,
-                        UiData::params,
-                        move |p| &p.oscs[idx].keytrack,
-                        "KT",
-                        "KT",
-                        accent,
-                    )
-                    .width(Pixels(42.0))
-                    .height(Pixels(20.0))
-                    .top(Stretch(1.0))
-                    .bottom(Stretch(1.0));
-                })
-                .col_between(Pixels(tokens::SPACE_MD))
-                .height(Stretch(1.0))
-                .width(Stretch(1.0));
-            }
+                        LedToggleSwitch::new(
+                            cx,
+                            UiData::params,
+                            move |p| &p.oscs[idx].keytrack,
+                            "KT",
+                            "KT",
+                            accent,
+                        )
+                        .width(Pixels(52.0))
+                        .height(Pixels(20.0))
+                        .left(Stretch(1.0))
+                        .right(Stretch(1.0));
+                    })
+                    .class("knob-cell")
+                    .row_between(Pixels(tokens::SPACE_SM))
+                    .child_top(Stretch(1.0))
+                    .child_bottom(Stretch(1.0))
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0));
+                }
+            })
+            .col_between(Pixels(tokens::SPACE_MD))
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
         })
         .class("hardware-module")
         .class("drawer-module")
@@ -102,62 +93,74 @@ pub(super) fn build_voice_tab(
         .width(Stretch(1.0))
         .height(Stretch(1.0));
 
-        // Bottom Card: Global Voicing, MPE & Filter Keytracking
+        // Bottom Card: Global Voicing (stacked vertically), MPE, Glide & Filter Keytracking
         VStack::new(cx, move |cx| {
             build_module_header(cx, "VOICING, MPE & FILTER KEYTRACKING", 18.0);
             HStack::new(cx, move |cx| {
+                // Stacked Voicing column: MODE over PB RANGE
                 VStack::new(cx, move |cx| {
-                    bold_label(cx, "MODE", "mini-label")
+                    VStack::new(cx, move |cx| {
+                        bold_label(cx, "MODE", "mini-label")
+                            .width(Stretch(1.0))
+                            .height(Pixels(12.0))
+                            .child_space(Stretch(1.0));
+                        build_bool_dropdown(
+                            cx,
+                            params.clone(),
+                            gui_context.clone(),
+                            |p| &p.mono_legato,
+                            "Poly",
+                            "Mono",
+                        )
                         .width(Stretch(1.0))
-                        .height(Pixels(12.0))
-                        .child_space(Stretch(1.0));
-                    build_bool_dropdown(
+                        .height(Pixels(20.0));
+                    })
+                    .row_between(Pixels(2.0))
+                    .width(Stretch(1.0))
+                    .height(Auto);
+
+                    build_mini_pill_cell(
                         cx,
-                        params.clone(),
-                        gui_context.clone(),
-                        |p| &p.mono_legato,
-                        "Poly",
-                        "Mono",
+                        UiData::params,
+                        |p| &p.pitch_bend_range,
+                        "PB RANGE",
+                        24,
+                        72.0,
+                    );
+                })
+                .row_between(Pixels(tokens::SPACE_SM))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0))
+                .width(Pixels(72.0))
+                .height(Stretch(1.0));
+
+                // Stacked MPE column: MPE toggle over MPE PB
+                VStack::new(cx, move |cx| {
+                    LedToggleSwitch::new(
+                        cx,
+                        UiData::params,
+                        |p| &p.mpe_enabled,
+                        "MPE",
+                        "MPE",
+                        AMBER_RGB,
                     )
                     .width(Stretch(1.0))
                     .height(Pixels(20.0));
+
+                    build_mini_pill_cell(
+                        cx,
+                        UiData::params,
+                        |p| &p.mpe_pitch_bend_range,
+                        "MPE PB",
+                        48,
+                        68.0,
+                    );
                 })
-                .row_between(Pixels(tokens::SPACE_XS))
-                .width(Pixels(58.0))
-                .height(Auto)
-                .top(Stretch(1.0))
-                .bottom(Stretch(1.0));
-
-                build_mini_pill_cell(
-                    cx,
-                    UiData::params,
-                    |p| &p.pitch_bend_range,
-                    "PB RANGE",
-                    24,
-                    48.0,
-                );
-
-                LedToggleSwitch::new(
-                    cx,
-                    UiData::params,
-                    |p| &p.mpe_enabled,
-                    "MPE",
-                    "MPE",
-                    AMBER_RGB,
-                )
-                .width(Pixels(48.0))
-                .height(Pixels(20.0))
-                .top(Stretch(1.0))
-                .bottom(Stretch(1.0));
-
-                build_mini_pill_cell(
-                    cx,
-                    UiData::params,
-                    |p| &p.mpe_pitch_bend_range,
-                    "MPE PB",
-                    48,
-                    46.0,
-                );
+                .row_between(Pixels(tokens::SPACE_SM))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0))
+                .width(Pixels(68.0))
+                .height(Stretch(1.0));
 
                 build_flex_knob_cell_mod(
                     cx,
@@ -166,7 +169,7 @@ pub(super) fn build_voice_tab(
                     "GLIDE",
                     false,
                     GOLD_RGB,
-                    tokens::KNOB_COMPACT,
+                    tokens::KNOB_STD,
                     ModDestination::GlideMs,
                     mod_ui,
                     tab_tag,
@@ -179,8 +182,8 @@ pub(super) fn build_voice_tab(
                     "F1 KT",
                     false,
                     AMBER_RGB,
-                    tokens::KNOB_COMPACT,
-                    48.0,
+                    tokens::KNOB_STD,
+                    58.0,
                 );
 
                 build_knob_cell(
@@ -190,11 +193,13 @@ pub(super) fn build_voice_tab(
                     "F2 KT",
                     false,
                     CORAL_RGB,
-                    tokens::KNOB_COMPACT,
-                    48.0,
+                    tokens::KNOB_STD,
+                    58.0,
                 );
             })
-            .col_between(Pixels(tokens::SPACE_MD))
+            .col_between(Pixels(tokens::SPACE_LG))
+            .child_left(Pixels(tokens::SPACE_SM))
+            .child_right(Pixels(tokens::SPACE_SM))
             .child_top(Stretch(1.0))
             .child_bottom(Stretch(1.0))
             .width(Stretch(1.0))
@@ -204,7 +209,7 @@ pub(super) fn build_voice_tab(
         .class("drawer-module")
         .row_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
-        .height(Pixels(78.0));
+        .height(Pixels(118.0));
     })
     .row_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))

@@ -400,7 +400,7 @@ fn enum_name_alias<'a>(id: &str, name: &'a str) -> &'a str {
         match name {
             "Pre-F1" => "| F1",
             "Between F1->F2" => "F1 | F2",
-            "Post-F2" => "F2 |",
+            "Post-F2" | "F2 |" | "   | F2" => "| F2",
             _ => name,
         }
     } else {
@@ -1139,7 +1139,7 @@ mod tests {
             ("ins_mode_1", "T -> M"),
             ("ins_mode_2", "Lin Fold"),
             ("ins_pos_1", "| F1"),
-            ("ins_pos_2", "F2 |"),
+            ("ins_pos_2", "| F2"),
         ] {
             let ptr = ptr_for(id);
             let norm = resolve_patch_param_norm(&legacy, id, ptr);

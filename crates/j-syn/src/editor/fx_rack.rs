@@ -1443,7 +1443,7 @@ fn build_compact_bar_knob<P, FMap>(
             accent,
             dest,
             mod_ui,
-            0,
+            super::mod_bar::FX_VIEW_TAG,
         );
         if let Some(check) = dim_check {
             knob = knob.enabled_by(params, check);
@@ -1659,7 +1659,7 @@ fn build_snapin_card(
             gui_context,
             mod_ui,
             tokens::KNOB_SNAPIN,
-            0,
+            super::mod_bar::FX_VIEW_TAG,
         );
     })
     .class("hardware-module")

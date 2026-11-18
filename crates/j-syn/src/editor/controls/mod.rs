@@ -634,30 +634,6 @@ where
     .row_between(Pixels(2.0))
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn build_stacked_pill_cell_mod<'a, L, Params, P, FMap>(
-    cx: &'a mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    num_steps: usize,
-    dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
-    tab_tag: u8,
-) -> Handle<'a, VStack>
-where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    build_stacked_pill_shell(cx, title, move |cx| {
-        ParamStepPill::new_with_mod(cx, params, params_to_param, num_steps, dest, mod_ui, tab_tag)
-            .width(Stretch(1.0))
-            .height(Pixels(19.0));
-    })
-}
-
 pub(super) fn build_module_header(cx: &mut Context, title: &'static str, height_px: f32) {
     HStack::new(cx, move |cx| {
         bold_label(cx, title, "module-title");

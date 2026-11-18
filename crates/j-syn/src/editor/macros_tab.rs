@@ -6,13 +6,11 @@ use j_syn_dsp::mod_matrix::ModMatrixSource;
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{build_param_readout_box, build_rotary_knob_with_opt_mod};
-use super::mod_bar::{start_ui_redraw_timer, ModSourcePill, ModUiState};
+use super::mod_bar::{ModSourcePill, ModUiState};
 use super::tokens;
 use super::{UiData, UiEvent, AMBER_RGB};
 
 pub(super) fn build_macros_tab(cx: &mut Context, mod_ui: Arc<ModUiState>) {
-    start_ui_redraw_timer(cx, mod_ui.clone());
-
     HStack::new(cx, move |cx| {
         // Left vertical Performance Source column: VEL, KEY, MW, AT, SLD
         let perf_ui = mod_ui.clone();

@@ -51,7 +51,7 @@ impl LedToggleSwitch {
             );
             HStack::new(cx, move |cx| {
                 Element::new(cx)
-                    .width(Pixels(11.0))
+                    .width(Pixels(9.0))
                     .height(Stretch(1.0))
                     .hoverable(false);
                 bold_label(cx, text_lens, "switch-label")
@@ -65,9 +65,9 @@ impl LedToggleSwitch {
             .height(Stretch(1.0))
             .child_top(Stretch(1.0))
             .child_bottom(Stretch(1.0))
-            .child_left(Pixels(4.0))
-            .child_right(Pixels(4.0))
-            .col_between(Pixels(3.0))
+            .child_left(Pixels(3.0))
+            .child_right(Pixels(3.0))
+            .col_between(Pixels(2.0))
             .hoverable(false);
         })
         .checked(ParamWidgetBase::make_lens(
@@ -193,7 +193,7 @@ impl View for LedToggleSwitch {
         border.set_line_width(1.0 * dpx);
         canvas.stroke_path(&bg, &border);
 
-        let led_x = bounds.x + 10.0 * dpx;
+        let led_x = bounds.x + 8.0 * dpx;
         let led_y = bounds.y + bounds.h * 0.5;
         let led_r = 3.2 * dpx;
 

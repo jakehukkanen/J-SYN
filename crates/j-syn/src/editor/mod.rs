@@ -71,6 +71,7 @@ pub(super) const CORAL_RGB: (u8, u8, u8) = (235, 140, 85);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MainViewMode {
     Main,
+    Fx,
     Matrix,
     Settings,
 }
@@ -224,6 +225,7 @@ impl Model for UiData {
                 self.view_mode = *mode;
                 self.mod_ui.set_view_mode(match mode {
                     MainViewMode::Main => 0,
+                    MainViewMode::Fx => 1,
                     MainViewMode::Matrix => 2,
                     MainViewMode::Settings => 3,
                 });
@@ -751,6 +753,16 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
 
             Button::new(
                 cx,
+                |cx| cx.emit(UiEvent::SelectViewMode(MainViewMode::Fx)),
+                |cx| bold_label(cx, "FX", "view-switch-label").hoverable(false),
+            )
+            .class("view-switch-btn")
+            .checked(UiData::view_mode.map(|m| *m == MainViewMode::Fx))
+            .width(Pixels(38.0))
+            .height(Pixels(24.0));
+
+            Button::new(
+                cx,
                 |cx| cx.emit(UiEvent::SelectViewMode(MainViewMode::Matrix)),
                 |cx| bold_label(cx, "MATRIX", "view-switch-label").hoverable(false),
             )
@@ -1047,17 +1059,22 @@ fn build_center_wing(
     .height(Stretch(1.0));
 }
 
-fn build_right_wing(
-    cx: &mut Context,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-    mod_ui: Arc<ModUiState>,
-) {
-    VStack::new(cx, move |cx| {
-        build_three_lane_fx_rack(cx, params, gui_context, mod_ui);
+fn build_fx_source_strip(cx: &mut Context, mod_ui: Arc<ModUiState>) {
+    HStack::new(cx, move |cx| {
+        for &src in ModMatrixSource::ALL_ACTIVE.iter() {
+            mod_bar::ModSourcePill::new(cx, src, mod_ui.clone())
+                .width(Stretch(1.0))
+                .height(Pixels(18.0));
+        }
     })
-    .width(Pixels(tokens::RIGHT_WING_W))
-    .height(Stretch(1.0));
+    .class("tab-bar")
+    .col_between(Pixels(3.0))
+    .child_left(Pixels(tokens::SPACE_SM))
+    .child_right(Pixels(tokens::SPACE_SM))
+    .child_top(Stretch(1.0))
+    .child_bottom(Stretch(1.0))
+    .width(Stretch(1.0))
+    .height(Pixels(28.0));
 }
 
 pub(crate) fn create(
@@ -1134,10 +1151,12 @@ pub(crate) fn create(
                 });
             });
 
+            mod_bar::start_ui_redraw_timer(cx, mod_ui_for_ui.clone());
+
             build_header_bar(cx, mod_ui_for_ui.clone());
 
-            // Main chassis: 3-Wing Widescreen Layout (Left Oscs, Center Synth Core, Right 3-Lane FX),
-            // MATRIX Overview, or Settings.
+            // Main chassis: 2-Wing Main Layout (Left Oscs + Noise, Center Filters/Mod/Inserts/Macros),
+            // 3-Lane FX Rack with top draggable source strip, MATRIX Overview, or Settings.
             VStack::new(cx, move |cx| {
                 VStack::new(cx, move |cx| {
                     let bank_m = bank_for_ui.clone();
@@ -1162,13 +1181,24 @@ pub(crate) fn create(
                                     );
                                     build_center_wing(
                                         cx,
-                                        params_c.clone(),
-                                        gui_c.clone(),
-                                        mod_ui_c.clone(),
+                                        params_c,
+                                        gui_c,
+                                        mod_ui_c,
                                     );
-                                    build_right_wing(cx, params_c, gui_c, mod_ui_c);
                                 })
                                 .col_between(Pixels(tokens::SPACE_MD))
+                                .width(Stretch(1.0))
+                                .height(Stretch(1.0));
+                            }
+                            MainViewMode::Fx => {
+                                let params_c = params_m.clone();
+                                let gui_c = gui_m.clone();
+                                let mod_ui_c = mod_ui_m.clone();
+                                VStack::new(cx, move |cx| {
+                                    build_fx_source_strip(cx, mod_ui_c.clone());
+                                    build_three_lane_fx_rack(cx, params_c, gui_c, mod_ui_c);
+                                })
+                                .row_between(Pixels(tokens::SPACE_SM))
                                 .width(Stretch(1.0))
                                 .height(Stretch(1.0));
                             }

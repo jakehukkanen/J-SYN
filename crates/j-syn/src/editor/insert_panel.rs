@@ -58,7 +58,7 @@ pub(super) const INSERT_MODE_ITEMS: &[(&str, InsertModeParam)] = &[
 pub(super) const INSERT_POS_ITEMS: &[(&str, InsertPosParam)] = &[
     ("| F1", InsertPosParam::PreFilter),
     ("F1 | F2", InsertPosParam::BetweenFilters),
-    ("F2 |", InsertPosParam::PostFilter),
+    ("   | F2", InsertPosParam::PostFilter),
 ];
 
 fn build_insert_card(
