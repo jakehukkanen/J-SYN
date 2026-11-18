@@ -1,0 +1,355 @@
+//! `j-mbdist`: Standalone zero-allocation 3-band phase-aligned `LR4` Multiband Distortion FX plugin
+//! (VST3 + CLAP), powered by `j-syn-dsp` (`MultiBandDistStereo`) and `j-syn-ui` (shared `MB Dist` FX Unit view).
+
+use std::num::NonZeroU32;
+use std::sync::Arc;
+
+use j_syn_dsp::fx::multiband_dist::MultiBandDistStereo;
+use j_syn_dsp::mod_matrix::FxScopeRing;
+use j_syn_dsp::{
+    mb_band_level_db, mb_out_gain_db, mb_xover_high_hz, mb_xover_low_hz, MbDistBandParams,
+    MB_BAND_LEVEL_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
+};
+use j_syn_ui::fx_units::{format_hz, DistortionModeParam};
+use nih_plug::prelude::*;
+use nih_plug_vizia::ViziaState;
+
+pub mod editor;
+
+#[derive(Params)]
+pub struct JMbDistBandParams {
+    #[id = "en"]
+    pub enabled: BoolParam,
+
+    #[id = "solo"]
+    pub solo: BoolParam,
+
+    #[id = "mode"]
+    pub mode: EnumParam<DistortionModeParam>,
+
+    #[id = "drv"]
+    pub drive: FloatParam,
+
+    #[id = "bias"]
+    pub bias: FloatParam,
+
+    #[id = "lvl"]
+    pub level: FloatParam,
+
+    #[id = "mix"]
+    pub mix: FloatParam,
+}
+
+impl JMbDistBandParams {
+    pub fn new(band_label: &str) -> Self {
+        Self {
+            enabled: BoolParam::new(format!("{band_label} On"), true),
+            solo: BoolParam::new(format!("{band_label} Solo"), false),
+            mode: EnumParam::new(format!("{band_label} Mode"), DistortionModeParam::Tube),
+            drive: FloatParam::new(
+                format!("{band_label} Drive"),
+                0.30,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit(" %")
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage()),
+            bias: FloatParam::new(
+                format!("{band_label} Bias"),
+                0.50,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| format!("{:+.0}%", (v - 0.5) * 200.0))),
+            level: FloatParam::new(
+                format!("{band_label} Level"),
+                MB_BAND_LEVEL_DEFAULT_NORM,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| format!("{:+.1} dB", mb_band_level_db(v)))),
+            mix: FloatParam::new(
+                format!("{band_label} Mix"),
+                1.00,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_unit(" %")
+            .with_value_to_string(formatters::v2s_f32_percentage(0))
+            .with_string_to_value(formatters::s2v_f32_percentage()),
+        }
+    }
+
+    #[inline]
+    pub fn to_dsp(&self) -> MbDistBandParams {
+        MbDistBandParams {
+            mode: self.mode.value().into(),
+            enabled: self.enabled.value(),
+            solo: self.solo.value(),
+            drive: self.drive.value(),
+            bias: self.bias.value(),
+            level: self.level.value(),
+            mix: self.mix.value(),
+        }
+    }
+}
+
+#[derive(Params)]
+pub struct JMbDistParams {
+    #[persist = "editor-state"]
+    pub editor_state: Arc<ViziaState>,
+
+    #[id = "en"]
+    pub enabled: BoolParam,
+
+    #[id = "lo_xov"]
+    pub low_xover: FloatParam,
+
+    #[id = "hi_xov"]
+    pub high_xover: FloatParam,
+
+    #[id = "out_gn"]
+    pub out_gain: FloatParam,
+
+    #[id = "mix"]
+    pub mix: FloatParam,
+
+    #[nested(id_prefix = "lo", group = "Low Band")]
+    pub low_band: JMbDistBandParams,
+
+    #[nested(id_prefix = "mid", group = "Mid Band")]
+    pub mid_band: JMbDistBandParams,
+
+    #[nested(id_prefix = "hi", group = "High Band")]
+    pub high_band: JMbDistBandParams,
+}
+
+impl JMbDistParams {
+    #[inline]
+    pub fn band(&self, idx: usize) -> &JMbDistBandParams {
+        match idx {
+            0 => &self.low_band,
+            1 => &self.mid_band,
+            _ => &self.high_band,
+        }
+    }
+}
+
+impl Default for JMbDistParams {
+    fn default() -> Self {
+        Self {
+            editor_state: editor::default_state(),
+            enabled: BoolParam::new("Bypass / On", true),
+            low_xover: FloatParam::new(
+                "Low Crossover",
+                MB_XOVER_LOW_DEFAULT_NORM,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| format_hz(mb_xover_low_hz(v)))),
+            high_xover: FloatParam::new(
+                "High Crossover",
+                MB_XOVER_HIGH_DEFAULT_NORM,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            )
+            .with_value_to_string(Arc::new(|v| format_hz(mb_xover_high_hz(v)))),
+            out_gain: FloatParam::new("Output Gain", 0.50, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_value_to_string(Arc::new(|v| format!("{:+.1} dB", mb_out_gain_db(v)))),
+            mix: FloatParam::new("Mix", 1.00, FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_unit(" %")
+                .with_value_to_string(formatters::v2s_f32_percentage(0))
+                .with_string_to_value(formatters::s2v_f32_percentage()),
+            low_band: JMbDistBandParams::new("Low"),
+            mid_band: JMbDistBandParams::new("Mid"),
+            high_band: JMbDistBandParams::new("High"),
+        }
+    }
+}
+
+pub struct JMbDistPlugin {
+    pub params: Arc<JMbDistParams>,
+    dsp: MultiBandDistStereo,
+    pub scope_ring: Arc<FxScopeRing>,
+    scope_decim: u32,
+}
+
+impl Default for JMbDistPlugin {
+    fn default() -> Self {
+        Self {
+            params: Arc::new(JMbDistParams::default()),
+            dsp: MultiBandDistStereo::new(44_100.0),
+            scope_ring: Arc::new(FxScopeRing::default()),
+            scope_decim: 0,
+        }
+    }
+}
+
+impl Plugin for JMbDistPlugin {
+    const NAME: &'static str = "J-MBDist";
+    const VENDOR: &'static str = "Jake Hukkanen";
+    const URL: &'static str = "";
+    const EMAIL: &'static str = "";
+    const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
+    const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
+        main_input_channels: NonZeroU32::new(2),
+        main_output_channels: NonZeroU32::new(2),
+        ..AudioIOLayout::const_default()
+    }];
+
+    const MIDI_INPUT: MidiConfig = MidiConfig::None;
+    const SAMPLE_ACCURATE_AUTOMATION: bool = false;
+
+    type SysExMessage = ();
+    type BackgroundTask = ();
+
+    fn params(&self) -> Arc<dyn Params> {
+        self.params.clone()
+    }
+
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        editor::create(
+            self.params.clone(),
+            self.params.editor_state.clone(),
+            self.scope_ring.clone(),
+        )
+    }
+
+    fn initialize(
+        &mut self,
+        _audio_io_layout: &AudioIOLayout,
+        buffer_config: &BufferConfig,
+        _context: &mut impl InitContext<Self>,
+    ) -> bool {
+        self.dsp.set_sample_rate(buffer_config.sample_rate);
+        self.dsp.reset();
+        self.scope_decim = 0;
+        true
+    }
+
+    fn reset(&mut self) {
+        self.dsp.reset();
+        self.scope_decim = 0;
+    }
+
+    fn process(
+        &mut self,
+        buffer: &mut Buffer,
+        _aux: &mut AuxiliaryBuffers,
+        _context: &mut impl ProcessContext<Self>,
+    ) -> ProcessStatus {
+        let num_samples = buffer.samples();
+        if num_samples == 0 {
+            return ProcessStatus::Normal;
+        }
+
+        let enabled = self.params.enabled.value();
+        let p = [
+            self.params.low_xover.value(),
+            self.params.high_xover.value(),
+            self.params.out_gain.value(),
+            self.params.mix.value(),
+        ];
+        let bands = [
+            self.params.low_band.to_dsp(),
+            self.params.mid_band.to_dsp(),
+            self.params.high_band.to_dsp(),
+        ];
+
+        for mut channel_samples in buffer.iter_samples() {
+            let in_l = *channel_samples.get_mut(0).unwrap();
+            let in_r = *channel_samples.get_mut(1).unwrap();
+            let (out_l, out_r, act) = if enabled {
+                self.dsp.process(in_l, in_r, &bands, p)
+            } else {
+                (in_l, in_r, 0.0)
+            };
+            *channel_samples.get_mut(0).unwrap() = out_l;
+            *channel_samples.get_mut(1).unwrap() = out_r;
+
+            self.scope_decim = self.scope_decim.wrapping_add(1);
+            if self.scope_decim & 127 == 0 {
+                let pre_mono = 0.5 * (in_l.abs() + in_r.abs());
+                let post_mono = 0.5 * (out_l.abs() + out_r.abs());
+                self.scope_ring.push(pre_mono, post_mono, act);
+            }
+        }
+
+        ProcessStatus::Normal
+    }
+}
+
+impl ClapPlugin for JMbDistPlugin {
+    const CLAP_ID: &'static str = "com.jakehukkanen.j-mbdist";
+    const CLAP_DESCRIPTION: Option<&'static str> =
+        Some("Zero-allocation 3-band phase-aligned LR4 Multiband Distortion processor");
+    const CLAP_MANUAL_URL: Option<&'static str> = None;
+    const CLAP_SUPPORT_URL: Option<&'static str> = None;
+    const CLAP_FEATURES: &'static [ClapFeature] = &[
+        ClapFeature::AudioEffect,
+        ClapFeature::Distortion,
+        ClapFeature::Stereo,
+    ];
+}
+
+impl Vst3Plugin for JMbDistPlugin {
+    const VST3_CLASS_ID: [u8; 16] = *b"JMbDstFxPlug0001";
+    const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] =
+        &[Vst3SubCategory::Fx, Vst3SubCategory::Distortion];
+}
+
+nih_export_clap!(JMbDistPlugin);
+nih_export_vst3!(JMbDistPlugin);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn all_plugin_parameter_ids_are_unique() {
+        let params = JMbDistParams::default();
+        let param_map = params.param_map();
+        let mut seen = HashSet::new();
+        for (id, _, _) in param_map {
+            assert!(
+                seen.insert(id.clone()),
+                "Duplicate nih-plug parameter ID detected: '{id}'"
+            );
+        }
+        // 5 top-level + 3 * 7 per-band = 26 parameters
+        assert_eq!(seen.len(), 26);
+    }
+
+    #[test]
+    fn state_roundtrip_and_idle_processing() {
+        let mut plugin = JMbDistPlugin::default();
+        let serialized = plugin.params.serialize_fields();
+        let restored = JMbDistParams::default();
+        restored.deserialize_fields(&serialized);
+        assert_eq!(restored.serialize_fields().len(), serialized.len());
+
+        let bands = [
+            MbDistBandParams::default(),
+            MbDistBandParams::default(),
+            MbDistBandParams::default(),
+        ];
+        let p = [
+            MB_XOVER_LOW_DEFAULT_NORM,
+            MB_XOVER_HIGH_DEFAULT_NORM,
+            0.5,
+            1.0,
+        ];
+
+        // Idle silence stays exact zero with zero allocations
+        for _ in 0..512 {
+            let (l, r, act) = plugin.dsp.process(0.0, 0.0, &bands, p);
+            assert_eq!(l, 0.0);
+            assert_eq!(r, 0.0);
+            assert_eq!(act, 0.0);
+        }
+
+        // Verify window sizing stays aligned with FxType::MultibandDist design token
+        let (w, h) = editor::mbdist_window_size();
+        assert!(w >= j_syn_ui::tokens::FX_UNIT_W as u32);
+        assert!(
+            h > j_syn_ui::tokens::fx_unit_scope_height(j_syn_dsp::FxType::MultibandDist) as u32
+        );
+    }
+}

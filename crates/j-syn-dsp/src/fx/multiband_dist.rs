@@ -97,7 +97,7 @@ impl Default for MbDistBandParams {
 }
 
 /// 3-band phase-aligned `LR4` Multiband Distortion processor (`LOW` / `MID` / `HIGH`).
-pub(crate) struct MultiBandDistStereo {
+pub struct MultiBandDistStereo {
     low_split: [Lr4BandFilter; 2],
     high_split: [Lr4BandFilter; 2],
     low_ap: [Biquad; 2],
@@ -109,7 +109,7 @@ pub(crate) struct MultiBandDistStereo {
 }
 
 impl MultiBandDistStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         let mut s = Self {
             low_split: [Lr4BandFilter::default(); 2],
             high_split: [Lr4BandFilter::default(); 2],
@@ -128,7 +128,7 @@ impl MultiBandDistStereo {
         s
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1_000.0);
         for core in &mut self.cores {
             core.set_sample_rate(self.sample_rate);
@@ -137,7 +137,7 @@ impl MultiBandDistStereo {
         self.last_high_hz = -1.0;
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         for ch in 0..2 {
             self.low_split[ch].reset();
             self.high_split[ch].reset();
@@ -166,7 +166,7 @@ impl MultiBandDistStereo {
     }
 
     #[inline]
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,
