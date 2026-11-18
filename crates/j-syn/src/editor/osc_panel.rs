@@ -9,18 +9,18 @@ use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown, build_flex_knob_cell_mod_dim,
-    build_pitch_pill_cell, build_ratio_pill_cell, build_wavetable_dropdown, step_wavetable,
-    ArrowButton, ArrowDir, ScrollDropdown,
+    build_inline_pill_cell, build_inline_pill_cell_mod, build_pitch_pill_cell,
+    build_ratio_pill_cell, build_wavetable_dropdown, step_wavetable, ArrowButton, ArrowDir,
+    ScrollDropdown,
 };
 use super::mod_bar::ModUiState;
-use super::routing_tab::DIRECT_ROUTE_ITEMS;
 use super::scope::WavetableScope;
 use super::tokens;
 use super::widgets::LedToggleSwitch;
 use super::UiData;
 use crate::{
-    DirectRouteParam, JSynPluginParams, ModOrderParam, ModSourceParam, ModTypeParam,
-    OscPluginParams, PitchModeParam, WarpModeParam,
+    JSynPluginParams, ModOrderParam, ModSourceParam, ModTypeParam, OscPluginParams, PitchModeParam,
+    WarpModeParam,
 };
 
 fn osc0_enabled(p: &JSynPluginParams) -> bool {
@@ -87,13 +87,14 @@ pub(super) fn build_osc_panel(
 
     let osc_check = osc_enabled_fn(osc_idx);
     let p_dim = params.clone();
+    let p_dock = params.clone();
+    let m_dock = mod_ui.clone();
 
     VStack::new(cx, move |cx| {
-        // Header row: Power + [< Wavetable >] + inline F1/F2 filter send + Direct bus selector
+        // Header row: Power + [< Wavetable >] filling the full header bar
         let p_hdr = params.clone();
         let g_hdr = gui_context.clone();
         let b_hdr = bank.clone();
-        let m_hdr = mod_ui.clone();
         HStack::new(cx, move |cx| {
             LedToggleSwitch::new(
                 cx,
@@ -123,8 +124,8 @@ pub(super) fn build_osc_panel(
                 .width(Stretch(1.0))
                 .height(Pixels(tokens::HEADER_STRIP_H));
 
-            let p_next = p_hdr.clone();
-            let g_next = g_hdr.clone();
+            let p_next = p_hdr;
+            let g_next = g_hdr;
             let b_next = b_hdr;
             ArrowButton::new(
                 cx,
@@ -135,41 +136,12 @@ pub(super) fn build_osc_panel(
             .class("wt-step-label")
             .width(Pixels(16.0))
             .height(Pixels(tokens::HEADER_STRIP_H));
-
-            super::controls::build_rotary_knob_with_opt_mod(
-                cx,
-                UiData::params,
-                move |p| p.routing.osc_filter_send_param(osc_idx),
-                true,
-                accent,
-                Some((ModDestination::osc_filter_send(osc_idx), m_hdr, 0)),
-            )
-            .width(Pixels(tokens::KNOB_MINI))
-            .height(Pixels(tokens::KNOB_MINI))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
-
-            build_enum_dropdown(
-                cx,
-                p_hdr,
-                g_hdr,
-                move |p| p.routing.osc_direct_param(osc_idx),
-                DIRECT_ROUTE_ITEMS,
-            )
-            .toggle_class(
-                "routing-pill-active",
-                UiData::params.map(move |p| p.routing.osc_direct_param(osc_idx).value() != DirectRouteParam::Off),
-            )
-            .width(Pixels(52.0))
-            .height(Pixels(18.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
         })
         .col_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
         .height(Pixels(tokens::HEADER_STRIP_H));
 
-        // Body: [PITCH + Scope] | [4 knobs (WT POS, WARP, MOD, LEVEL) + WARP/order/MOD row]
+        // Middle body: [PITCH + Scope] | [WT POS | WARP+dd | < > | MOD+dd | LEVEL]
         HStack::new(cx, move |cx| {
             let p_col1_mode = params.clone();
             let ui_left = mod_ui.clone();
@@ -196,7 +168,7 @@ pub(super) fn build_osc_panel(
                                 0,
                             )
                             .width(Stretch(1.0))
-                            .height(Pixels(32.0));
+                            .height(Pixels(31.0));
                         } else {
                             build_ratio_pill_cell(
                                 cx,
@@ -210,7 +182,7 @@ pub(super) fn build_osc_panel(
                                 0,
                             )
                             .width(Stretch(1.0))
-                            .height(Pixels(32.0));
+                            .height(Pixels(31.0));
                         }
                     },
                 );
@@ -219,65 +191,91 @@ pub(super) fn build_osc_panel(
                     .width(Stretch(1.0))
                     .height(Stretch(1.0));
             })
-            .width(Pixels(98.0))
+            .width(Pixels(92.0))
             .height(Stretch(1.0))
-            .row_between(Pixels(tokens::SPACE_SM));
+            .row_between(Pixels(tokens::SPACE_XS));
 
             let p_right = params.clone();
             let ui_right = mod_ui;
             let gui_right = gui_context;
-            VStack::new(cx, move |cx| {
-                let p_knobs = p_right.clone();
-                HStack::new(cx, move |cx| {
-                    let add_knob = |cx: &mut Context,
-                                    field: fn(&OscPluginParams) -> &FloatParam,
-                                    title: &'static str,
-                                    dest: ModDestination| {
-                        build_flex_knob_cell_mod_dim(
-                            cx,
-                            UiData::params,
-                            move |p| field(&p.oscs[osc_idx]),
-                            title,
-                            false,
-                            accent,
-                            tokens::KNOB_OSC,
-                            dest,
-                            ui_right.clone(),
-                            0,
-                            p_knobs.clone(),
-                            osc_check,
-                        );
-                    };
+            HStack::new(cx, move |cx| {
+                let add_knob = |cx: &mut Context,
+                                field: fn(&OscPluginParams) -> &FloatParam,
+                                title: &'static str,
+                                dest: ModDestination,
+                                p_k: Arc<JSynPluginParams>,
+                                ui_k: Arc<ModUiState>| {
+                    build_flex_knob_cell_mod_dim(
+                        cx,
+                        UiData::params,
+                        move |p| field(&p.oscs[osc_idx]),
+                        title,
+                        false,
+                        accent,
+                        tokens::KNOB_OSC,
+                        dest,
+                        ui_k,
+                        0,
+                        p_k,
+                        osc_check,
+                    );
+                };
 
-                    add_knob(cx, |o| &o.wt_pos, "WT POS", ModDestination::osc_wt_pos(osc_idx));
-                    add_knob(cx, |o| &o.warp_amount, "WARP", ModDestination::osc_warp(osc_idx));
-                    add_knob(cx, |o| &o.mod_depth, "MOD", ModDestination::osc_mod_depth(osc_idx));
-                    add_knob(cx, |o| &o.level, "LEVEL", ModDestination::osc_level(osc_idx));
+                // Col 1: WT POS
+                let p_c1 = p_right.clone();
+                let u_c1 = ui_right.clone();
+                VStack::new(cx, move |cx| {
+                    add_knob(
+                        cx,
+                        |o| &o.wt_pos,
+                        "WT POS",
+                        ModDestination::osc_wt_pos(osc_idx),
+                        p_c1,
+                        u_c1,
+                    );
+                    Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
                 })
-                .col_between(Pixels(tokens::SPACE_SM))
+                .row_between(Pixels(tokens::SPACE_XS))
                 .child_top(Stretch(1.0))
                 .child_bottom(Stretch(1.0))
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
 
-                let p_bot = p_right;
-                let g_bot = gui_right;
-                HStack::new(cx, move |cx| {
-                    Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
-
+                // Col 2: WARP + aligned Warp dropdown
+                let p_c2 = p_right.clone();
+                let g_c2 = gui_right.clone();
+                let u_c2 = ui_right.clone();
+                VStack::new(cx, move |cx| {
+                    add_knob(
+                        cx,
+                        |o| &o.warp_amount,
+                        "WARP",
+                        ModDestination::osc_warp(osc_idx),
+                        p_c2.clone(),
+                        u_c2,
+                    );
                     build_enum_dropdown(
                         cx,
-                        p_bot.clone(),
-                        g_bot.clone(),
+                        p_c2,
+                        g_c2,
                         move |p| &get_osc(p, osc_idx).warp_mode,
                         WARP_ITEMS,
                     )
-                    .width(Pixels(44.0))
+                    .width(Stretch(1.0))
                     .height(Pixels(18.0));
+                })
+                .row_between(Pixels(tokens::SPACE_XS))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0))
+                .width(Stretch(1.0))
+                .height(Stretch(1.0));
 
-                    let p_ord = p_bot.clone();
-                    let g_ord = g_bot.clone();
-                    let p_ord_lbl = p_bot.clone();
+                // Between WARP & MOD: routing order button anchored to dropdown row
+                let p_ord = p_right.clone();
+                let g_ord = gui_right.clone();
+                let p_ord_lbl = p_right.clone();
+                VStack::new(cx, move |cx| {
+                    Element::new(cx).width(Stretch(1.0)).height(Stretch(1.0));
                     ArrowButton::reactive(
                         cx,
                         move |_| {
@@ -302,12 +300,28 @@ pub(super) fn build_osc_panel(
                     .class("wt-step-label")
                     .width(Pixels(16.0))
                     .height(Pixels(18.0));
+                })
+                .width(Pixels(16.0))
+                .height(Stretch(1.0));
 
-                    let p_mod_scroll = p_bot.clone();
-                    let g_mod_scroll = g_bot.clone();
-                    let p_mod_trig = p_bot.clone();
-                    let p_mod_pop = p_bot;
-                    let g_mod_pop = g_bot;
+                // Col 3: MOD + aligned Mod source dropdown
+                let p_c3 = p_right.clone();
+                let g_c3 = gui_right.clone();
+                let u_c3 = ui_right.clone();
+                VStack::new(cx, move |cx| {
+                    add_knob(
+                        cx,
+                        |o| &o.mod_depth,
+                        "MOD",
+                        ModDestination::osc_mod_depth(osc_idx),
+                        p_c3.clone(),
+                        u_c3,
+                    );
+                    let p_mod_scroll = p_c3.clone();
+                    let g_mod_scroll = g_c3.clone();
+                    let p_mod_trig = p_c3.clone();
+                    let p_mod_pop = p_c3;
+                    let g_mod_pop = g_c3;
                     ScrollDropdown::new(
                         cx,
                         move |_cx, delta| {
@@ -389,29 +403,109 @@ pub(super) fn build_osc_panel(
                             )
                         },
                     )
-                    .width(Pixels(48.0))
+                    .width(Stretch(1.0))
                     .height(Pixels(18.0));
+                })
+                .row_between(Pixels(tokens::SPACE_XS))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0))
+                .width(Stretch(1.0))
+                .height(Stretch(1.0));
 
+                // Col 4: LEVEL
+                VStack::new(cx, move |cx| {
+                    add_knob(
+                        cx,
+                        |o| &o.level,
+                        "LEVEL",
+                        ModDestination::osc_level(osc_idx),
+                        p_right,
+                        ui_right,
+                    );
                     Element::new(cx).width(Stretch(1.0)).height(Pixels(18.0));
                 })
-                .col_between(Pixels(tokens::SPACE_XS))
+                .row_between(Pixels(tokens::SPACE_XS))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0))
                 .width(Stretch(1.0))
-                .height(Pixels(18.0));
+                .height(Stretch(1.0));
             })
+            .col_between(Pixels(tokens::SPACE_XS))
             .width(Stretch(1.0))
-            .height(Stretch(1.0))
-            .row_between(Pixels(tokens::SPACE_XS));
+            .height(Stretch(1.0));
         })
         .col_between(Pixels(tokens::SPACE_MD))
         .width(Stretch(1.0))
         .height(Stretch(1.0));
+
+        // Bottom dock: RETRG + PHASE + UNI + DETUNE
+        HStack::new(cx, move |cx| {
+            LedToggleSwitch::new(
+                cx,
+                UiData::params,
+                move |p| &get_osc(p, osc_idx).retrig,
+                "RETRG",
+                "RETRG",
+                accent,
+            )
+            .width(Pixels(46.0))
+            .height(Pixels(18.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+
+            build_inline_pill_cell_mod(
+                cx,
+                UiData::params,
+                move |p| &get_osc(p, osc_idx).phase,
+                "PHS",
+                360,
+                1.0,
+                ModDestination::osc_phase(osc_idx),
+                m_dock.clone(),
+                0,
+            )
+            .class("stk-pill")
+            .height(Pixels(18.0));
+
+            build_inline_pill_cell(
+                cx,
+                UiData::params,
+                move |p| &get_osc(p, osc_idx).unison,
+                "UNI",
+                8,
+                0.7,
+            )
+            .class("stk-pill")
+            .height(Pixels(18.0));
+
+            build_inline_pill_cell_mod(
+                cx,
+                UiData::params,
+                move |p| &get_osc(p, osc_idx).detune,
+                "DET",
+                100,
+                1.0,
+                ModDestination::osc_detune(osc_idx),
+                m_dock,
+                0,
+            )
+            .class("stk-pill")
+            .height(Pixels(18.0))
+            .toggle_class(
+                "pill-dimmed",
+                UiData::mod_ui_rev.map(move |_| p_dock.oscs[osc_idx].unison.value() <= 1),
+            );
+        })
+        .col_between(Pixels(tokens::SPACE_SM))
+        .width(Stretch(1.0))
+        .height(Pixels(19.0));
     })
     .class("hardware-module")
     .toggle_class(
         "module-disabled",
         UiData::mod_ui_rev.map(move |_| !osc_check(&p_dim)),
     )
-    .row_between(Pixels(tokens::SPACE_SM))
+    .row_between(Pixels(tokens::SPACE_XS))
     .width(Stretch(1.0))
     .height(Stretch(1.0));
 }

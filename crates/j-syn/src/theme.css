@@ -1349,6 +1349,16 @@ led-toggle:checked .switch-label {
   border-color: #f5b349;
 }
 
+.inline-pill.stk-pill.pill-dimmed {
+  background-color: #1c1814;
+  border-color: #362f28;
+}
+
+.inline-pill.stk-pill.pill-dimmed .inline-pill-label,
+.inline-pill.stk-pill.pill-dimmed .inline-pill-value {
+  color: #5f554c;
+}
+
 .macro-card {
   background-color: #211c18;
   border-width: 1px;

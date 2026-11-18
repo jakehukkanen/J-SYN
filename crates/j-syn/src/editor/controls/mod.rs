@@ -289,6 +289,7 @@ fn build_flex_knob_cell_mod_inner<L, Params, P, FMap>(
     mod_ui: Arc<ModUiState>,
     tab_tag: u8,
     enabled_state: Option<(Arc<JSynPluginParams>, fn(&JSynPluginParams) -> bool)>,
+    disabled_tooltip: Option<Arc<dyn Fn(&JSynPluginParams) -> String + Send + Sync>>,
 ) where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
@@ -311,6 +312,9 @@ fn build_flex_knob_cell_mod_inner<L, Params, P, FMap>(
         );
         if let Some((dim_params, dim_check)) = enabled_state {
             knob = knob.enabled_by(dim_params, dim_check);
+        }
+        if let Some(fmt) = disabled_tooltip {
+            knob = knob.disabled_tooltip(move |p| fmt(p));
         }
         knob.width(Pixels(knob_sz))
             .height(Pixels(knob_sz))
@@ -352,6 +356,7 @@ pub(super) fn build_flex_knob_cell_mod<L, Params, P, FMap>(
         mod_ui,
         tab_tag,
         None,
+        None,
     );
 }
 
@@ -386,7 +391,58 @@ pub(super) fn build_flex_knob_cell_mod_dim<L, Params, P, FMap>(
         mod_ui,
         tab_tag,
         Some((dim_params, dim_check)),
+        None,
     );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_flex_knob_cell_mod_dim_tooltip<L, Params, P, FMap, FDim, FTt>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    accent_rgb: (u8, u8, u8),
+    knob_sz: f32,
+    dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+    tab_tag: u8,
+    dim_params: Arc<JSynPluginParams>,
+    dim_check: FDim,
+    tooltip_fmt: FTt,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+    FDim: Fn(&JSynPluginParams) -> bool + Send + Sync + 'static,
+    FTt: Fn(&JSynPluginParams) -> String + Send + Sync + 'static,
+{
+    VStack::new(cx, move |cx| {
+        bold_label(cx, title, "knob-title")
+            .width(Stretch(1.0))
+            .height(Pixels(14.0))
+            .child_space(Stretch(1.0));
+
+        build_rotary_knob_with_opt_mod(
+            cx,
+            params,
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            Some((dest, mod_ui, tab_tag)),
+        )
+        .enabled_by(dim_params, dim_check)
+        .disabled_tooltip(tooltip_fmt)
+        .width(Pixels(knob_sz))
+        .height(Pixels(knob_sz))
+        .left(Stretch(1.0))
+        .right(Stretch(1.0));
+    })
+    .class("knob-cell")
+    .width(Stretch(1.0))
+    .height(Auto)
+    .row_between(Pixels(2.0));
 }
 
 pub(super) fn build_inline_pill_cell<'a, L, Params, P, FMap>(
@@ -404,6 +460,29 @@ where
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
     ParamStepPill::new_inline(cx, params, params_to_param, num_steps, title)
+        .width(Stretch(weight))
+        .height(Pixels(20.0))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_inline_pill_cell_mod<'a, L, Params, P, FMap>(
+    cx: &'a mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    num_steps: usize,
+    weight: f32,
+    dest: ModDestination,
+    mod_ui: Arc<ModUiState>,
+    tab_tag: u8,
+) -> Handle<'a, ParamStepPill>
+where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    ParamStepPill::new_inline_with_mod(cx, params, params_to_param, num_steps, title, dest, mod_ui, tab_tag)
         .width(Stretch(weight))
         .height(Pixels(20.0))
 }
@@ -553,26 +632,6 @@ where
     .width(Stretch(1.0))
     .height(Auto)
     .row_between(Pixels(2.0))
-}
-
-pub(super) fn build_stacked_pill_cell<'a, L, Params, P, FMap>(
-    cx: &'a mut Context,
-    params: L,
-    params_to_param: FMap,
-    title: &'static str,
-    num_steps: usize,
-) -> Handle<'a, VStack>
-where
-    L: Lens<Target = Params> + Clone,
-    Params: 'static,
-    P: Param + 'static,
-    FMap: Fn(&Params) -> &P + Copy + 'static,
-{
-    build_stacked_pill_shell(cx, title, move |cx| {
-        ParamStepPill::new(cx, params, params_to_param, num_steps)
-            .width(Stretch(1.0))
-            .height(Pixels(19.0));
-    })
 }
 
 #[allow(clippy::too_many_arguments)]

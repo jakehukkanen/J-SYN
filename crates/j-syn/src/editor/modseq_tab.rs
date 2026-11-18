@@ -143,140 +143,6 @@ pub(super) fn build_modseq_tab(
     mod_ui: Arc<ModUiState>,
 ) {
     VStack::new(cx, move |cx| {
-        let params_top = params.clone();
-        let mod_ui_top = mod_ui.clone();
-        Binding::new(cx, UiData::modseq_subtab, move |cx, sub| {
-            let p_inner = params_top.clone();
-            let u_inner = mod_ui_top.clone();
-            if let ModSeqSubTab::MSeq(seq_idx) = sub.get(cx) {
-                HStack::new(cx, move |cx| {
-                    let seq_num = seq_idx + 1;
-                    bold_label(cx, &format!("MS {seq_num}"), "module-title")
-                        .width(Auto)
-                        .height(Auto)
-                        .top(Stretch(1.0))
-                        .bottom(Stretch(1.0));
-
-                    Element::new(cx).width(Stretch(1.0));
-
-                    let p_hdr = p_inner.clone();
-                    let u_hdr = u_inner.clone();
-                    HStack::new(
-                        cx,
-                        ParamWidgetBase::build_view(
-                            UiData::params,
-                            move |pr| &pr.modseqs[seq_idx].mode,
-                            move |cx, param_data| {
-                                let is_mseg = param_data.make_lens(|p| {
-                                    p.unmodulated_plain_value() == ModSeqModeParam::Mseg
-                                });
-                                let p_m = p_hdr.clone();
-                                let u_m = u_hdr.clone();
-                                Binding::new(cx, is_mseg, move |cx, m| {
-                                    let p_mode = p_m.clone();
-                                    let u_mode = u_m.clone();
-                                    if m.get(cx) {
-                                        HStack::new(cx, move |cx| {
-                                            LfoPresetBar::new(cx, seq_idx, p_mode.clone())
-                                                .width(Stretch(1.0))
-                                                .height(Pixels(18.0));
-
-                                            let p_rst = p_mode;
-                                            Button::new(
-                                                cx,
-                                                move |cx| {
-                                                    let mut bank = p_rst.modseq_steps.snapshot();
-                                                    bank.msegs[seq_idx] =
-                                                        j_syn_dsp::MsegCurve::default();
-                                                    p_rst.modseq_steps.store_value(bank);
-                                                    cx.emit(UiEvent::ModUiChanged);
-                                                    cx.needs_redraw();
-                                                },
-                                                |cx| {
-                                                    bold_label(cx, "RESET", "preset-btn-label")
-                                                        .child_space(Stretch(1.0))
-                                                        .hoverable(false)
-                                                },
-                                            )
-                                            .class("preset-btn")
-                                            .width(Pixels(44.0))
-                                            .height(Pixels(18.0));
-                                        })
-                                        .col_between(Pixels(tokens::SPACE_SM))
-                                        .width(Stretch(1.0))
-                                        .height(Pixels(18.0));
-                                    } else {
-                                        HStack::new(cx, move |cx| {
-                                            Element::new(cx).width(Stretch(1.0));
-
-                                            let p_fill = p_mode.clone();
-                                            let u_fill = u_mode;
-                                            Button::new(
-                                                cx,
-                                                move |cx| {
-                                                    let shape = u_fill.active_stamp();
-                                                    let n = p_fill.modseqs[seq_idx]
-                                                        .num_steps
-                                                        .value()
-                                                        .clamp(2, MAX_MODSEQ_STEPS as i32)
-                                                        as usize;
-                                                    let mut bank = p_fill.modseq_steps.snapshot();
-                                                    for i in 0..n {
-                                                        bank.seqs[seq_idx][i] =
-                                                            ModSeqStep::stamped(shape, 1.0, 0.0);
-                                                    }
-                                                    p_fill.modseq_steps.store_value(bank);
-                                                    cx.needs_redraw();
-                                                },
-                                                |cx| {
-                                                    bold_label(cx, "FILL", "preset-btn-label")
-                                                        .child_space(Stretch(1.0))
-                                                        .hoverable(false)
-                                                },
-                                            )
-                                            .class("preset-btn")
-                                            .width(Pixels(38.0))
-                                            .height(Pixels(18.0));
-
-                                            let p_clr = p_mode;
-                                            Button::new(
-                                                cx,
-                                                move |cx| {
-                                                    let mut bank = p_clr.modseq_steps.snapshot();
-                                                    for step in bank.seqs[seq_idx].iter_mut() {
-                                                        *step = ModSeqStep::default();
-                                                    }
-                                                    p_clr.modseq_steps.store_value(bank);
-                                                    cx.needs_redraw();
-                                                },
-                                                |cx| {
-                                                    bold_label(cx, "CLEAR", "preset-btn-label")
-                                                        .child_space(Stretch(1.0))
-                                                        .hoverable(false)
-                                                },
-                                            )
-                                            .class("preset-btn")
-                                            .width(Pixels(44.0))
-                                            .height(Pixels(18.0));
-                                        })
-                                        .col_between(Pixels(tokens::SPACE_SM))
-                                        .width(Stretch(1.0))
-                                        .height(Pixels(18.0));
-                                    }
-                                });
-                            },
-                        ),
-                    )
-                    .width(Auto)
-                    .height(Pixels(18.0));
-                })
-                .col_between(Pixels(4.0))
-                .width(Stretch(1.0))
-                .height(Pixels(20.0));
-            }
-        });
-
-        // Main subtab body
         let params_body = params.clone();
         let gui_ctx_body = gui_context.clone();
         let mod_ui_body = mod_ui.clone();
@@ -287,12 +153,12 @@ pub(super) fn build_modseq_tab(
             match sub.get(cx) {
                 ModSeqSubTab::MSeq(seq_idx) => {
                     VStack::new(cx, move |cx| {
-                        // Top: full-width tall interactive curve canvas
+                        // Top: full-width tall interactive curve canvas (no top label strip)
                         ModSeqCurveCanvas::new(cx, seq_idx, p_sub.clone(), m_sub.clone())
                             .width(Stretch(1.0))
                             .height(Stretch(1.0));
 
-                        // Bottom bar: 2x9 shape stamp palette (when MODSEQ) + compact dropdowns & knobs
+                        // Bottom bar: left utility/palette (2x9 stamp grid + FILL/CLEAR or LFO presets + RESET) + controls
                         HStack::new(cx, {
                             let p_bot = p_sub.clone();
                             let g_bot = g_sub.clone();
@@ -313,15 +179,132 @@ pub(super) fn build_modseq_tab(
                                             let p_c = p_pal.clone();
                                             let u_c = u_pal.clone();
                                             Binding::new(cx, is_mseg, move |cx, m| {
+                                                let p_mode = p_c.clone();
+                                                let u_mode = u_c.clone();
                                                 if !m.get(cx) {
-                                                    ModSeqPaletteGrid::new(
-                                                        cx,
-                                                        seq_idx,
-                                                        p_c.clone(),
-                                                        u_c.clone(),
-                                                    )
+                                                    VStack::new(cx, move |cx| {
+                                                        ModSeqPaletteGrid::new(
+                                                            cx,
+                                                            seq_idx,
+                                                            p_mode.clone(),
+                                                            u_mode.clone(),
+                                                        )
+                                                        .width(Stretch(1.0))
+                                                        .height(Stretch(1.0));
+
+                                                        HStack::new(cx, move |cx| {
+                                                            let p_fill = p_mode.clone();
+                                                            let u_fill = u_mode;
+                                                            Button::new(
+                                                                cx,
+                                                                move |cx| {
+                                                                    let shape = u_fill.active_stamp();
+                                                                    let n = p_fill.modseqs[seq_idx]
+                                                                        .num_steps
+                                                                        .value()
+                                                                        .clamp(2, MAX_MODSEQ_STEPS as i32)
+                                                                        as usize;
+                                                                    let mut bank =
+                                                                        p_fill.modseq_steps.snapshot();
+                                                                    for i in 0..n {
+                                                                        bank.seqs[seq_idx][i] =
+                                                                            ModSeqStep::stamped(
+                                                                                shape, 1.0, 0.0,
+                                                                            );
+                                                                    }
+                                                                    p_fill.modseq_steps.store_value(bank);
+                                                                    cx.needs_redraw();
+                                                                },
+                                                                |cx| {
+                                                                    bold_label(
+                                                                        cx,
+                                                                        "FILL",
+                                                                        "preset-btn-label",
+                                                                    )
+                                                                    .child_space(Stretch(1.0))
+                                                                    .hoverable(false)
+                                                                },
+                                                            )
+                                                            .class("preset-btn")
+                                                            .width(Stretch(1.0))
+                                                            .height(Pixels(16.0));
+
+                                                            let p_clr = p_mode;
+                                                            Button::new(
+                                                                cx,
+                                                                move |cx| {
+                                                                    let mut bank =
+                                                                        p_clr.modseq_steps.snapshot();
+                                                                    for step in
+                                                                        bank.seqs[seq_idx].iter_mut()
+                                                                    {
+                                                                        *step = ModSeqStep::default();
+                                                                    }
+                                                                    p_clr.modseq_steps.store_value(bank);
+                                                                    cx.needs_redraw();
+                                                                },
+                                                                |cx| {
+                                                                    bold_label(
+                                                                        cx,
+                                                                        "CLEAR",
+                                                                        "preset-btn-label",
+                                                                    )
+                                                                    .child_space(Stretch(1.0))
+                                                                    .hoverable(false)
+                                                                },
+                                                            )
+                                                            .class("preset-btn")
+                                                            .width(Stretch(1.0))
+                                                            .height(Pixels(16.0));
+                                                        })
+                                                        .col_between(Pixels(tokens::SPACE_SM))
+                                                        .width(Stretch(1.0))
+                                                        .height(Pixels(16.0));
+                                                    })
+                                                    .row_between(Pixels(tokens::SPACE_XS))
                                                     .width(Pixels(224.0))
                                                     .height(Stretch(1.0));
+                                                } else {
+                                                    VStack::new(cx, move |cx| {
+                                                        LfoPresetBar::new(
+                                                            cx,
+                                                            seq_idx,
+                                                            p_mode.clone(),
+                                                        )
+                                                        .width(Stretch(1.0))
+                                                        .height(Pixels(28.0));
+
+                                                        let p_rst = p_mode;
+                                                        Button::new(
+                                                            cx,
+                                                            move |cx| {
+                                                                let mut bank =
+                                                                    p_rst.modseq_steps.snapshot();
+                                                                bank.msegs[seq_idx] =
+                                                                    j_syn_dsp::MsegCurve::default();
+                                                                p_rst.modseq_steps.store_value(bank);
+                                                                cx.emit(UiEvent::ModUiChanged);
+                                                                cx.needs_redraw();
+                                                            },
+                                                            |cx| {
+                                                                bold_label(
+                                                                    cx,
+                                                                    "RESET CURVE",
+                                                                    "preset-btn-label",
+                                                                )
+                                                                .child_space(Stretch(1.0))
+                                                                .hoverable(false)
+                                                            },
+                                                        )
+                                                        .class("preset-btn")
+                                                        .width(Stretch(1.0))
+                                                        .height(Pixels(20.0));
+                                                    })
+                                                    .row_between(Pixels(tokens::SPACE_SM))
+                                                    .top(Stretch(1.0))
+                                                    .bottom(Stretch(1.0))
+                                                    .width(Pixels(224.0))
+                                                    .height(Auto);
                                                 }
                                             });
                                         },

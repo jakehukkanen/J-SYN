@@ -3563,3 +3563,30 @@ fn fx_bus_c_8_slots_lane_routing_topologies_and_filter_bus_guards() {
     let pk_c_mod_down = render_peak(FilterBusDest::Sub, FxBusTopology::Parallel, -1.0);
     assert!(pk_c_full > 0.05 && pk_c_mod_down < 1e-5);
 }
+
+#[test]
+fn insert_enabled_bypass_and_transfer_curve_evaluation() {
+    use j_syn_dsp::{
+        evaluate_insert_curve, EngineMode, InsertMode, InsertParams, InsertShaperState,
+    };
+
+    let mut shaper = InsertShaperState::new();
+    let mut p = InsertParams::default();
+    assert!(p.enabled);
+    p.mode = InsertMode::Tube;
+    p.drive = 0.85;
+    p.mix = 1.0;
+
+    let (wet_l, wet_r) = shaper.process_stereo(0.4, -0.4, &p, EngineMode::Hq, 48_000.0);
+    assert!((wet_l - 0.4).abs() > 0.1 && wet_l.is_finite() && wet_r.is_finite());
+
+    p.enabled = false;
+    let (byp_l, byp_r) = shaper.process_stereo(0.4, -0.4, &p, EngineMode::Hq, 48_000.0);
+    assert!((byp_l - 0.4).abs() < 1e-6 && (byp_r + 0.4).abs() < 1e-6);
+
+    for idx in 0..=18 {
+        let mode = InsertMode::from_index(idx);
+        let y = evaluate_insert_curve(mode, 0.5, 0.7);
+        assert!(y.is_finite());
+    }
+}

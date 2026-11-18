@@ -6,15 +6,12 @@ use j_syn_dsp::mod_matrix::ModDestination;
 use nih_plug::prelude::GuiContext;
 use nih_plug_vizia::vizia::prelude::*;
 
-use super::controls::{
-    build_enum_dropdown, build_flex_knob_cell_mod_dim, build_rotary_knob_with_opt_mod,
-};
+use super::controls::{build_enum_dropdown, build_flex_knob_cell_mod_dim};
 use super::mod_bar::ModUiState;
-use super::routing_tab::DIRECT_ROUTE_ITEMS;
 use super::tokens;
 use super::widgets::LedToggleSwitch;
 use super::{AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData};
-use crate::{DirectRouteParam, JSynPluginParams, NoiseTypeParam};
+use crate::{JSynPluginParams, NoiseTypeParam};
 
 const NOISE_TYPE_ITEMS: &[(&str, NoiseTypeParam)] = &[
     ("White", NoiseTypeParam::White),
@@ -37,7 +34,6 @@ pub(super) fn build_noise_panel(
     VStack::new(cx, move |cx| {
         let p_hdr = params.clone();
         let g_hdr = gui_context.clone();
-        let m_hdr = mod_ui.clone();
         HStack::new(cx, move |cx| {
             LedToggleSwitch::new(
                 cx,
@@ -52,44 +48,13 @@ pub(super) fn build_noise_panel(
 
             build_enum_dropdown(
                 cx,
-                p_hdr.clone(),
-                g_hdr.clone(),
+                p_hdr,
+                g_hdr,
                 |p| &p.noise.noise_type,
                 NOISE_TYPE_ITEMS,
             )
-            .width(Pixels(66.0))
+            .width(Stretch(1.0))
             .height(Pixels(tokens::HEADER_STRIP_H));
-
-            Element::new(cx).width(Stretch(1.0));
-
-            build_rotary_knob_with_opt_mod(
-                cx,
-                UiData::params,
-                |p| &p.routing.noise_flt_bal,
-                true,
-                CORAL_RGB,
-                Some((ModDestination::NoiseFilterSend, m_hdr, 0)),
-            )
-            .width(Pixels(tokens::KNOB_MINI))
-            .height(Pixels(tokens::KNOB_MINI))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
-
-            build_enum_dropdown(
-                cx,
-                p_hdr,
-                g_hdr,
-                |p| &p.routing.noise_direct,
-                DIRECT_ROUTE_ITEMS,
-            )
-            .toggle_class(
-                "routing-pill-active",
-                UiData::params.map(|p| p.routing.noise_direct.value() != DirectRouteParam::Off),
-            )
-            .width(Pixels(54.0))
-            .height(Pixels(18.0))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
         })
         .col_between(Pixels(tokens::SPACE_SM))
         .height(Pixels(tokens::HEADER_STRIP_H))

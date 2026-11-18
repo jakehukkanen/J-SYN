@@ -1,5 +1,4 @@
-//! Drag-and-drop Modulation Source Pill bar, live telemetry 60 Hz redraw ticker,
-//! and inline modulation slot inspector (`UNI/BIP`, depth readout, slot cycle, remove).
+//! Draggable Modulation Source Pills and 60 Hz live telemetry / structural UI redraw ticker.
 
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
@@ -12,9 +11,9 @@ use j_syn_dsp::modseq::ModSeqStepShape;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 
-use super::controls::{bold_label, CrossButton};
+use super::controls::bold_label;
 use super::modseq_tab::ModSeqSubTab;
-use super::{BottomTab, UiData, UiEvent};
+use super::{BottomTab, UiEvent};
 use crate::JSynPluginParams;
 
 const UNSET_U8: u8 = 255;
@@ -123,6 +122,8 @@ impl ModUiState {
         Self::fnv1a_mix(&mut h, params.noise.enabled.value() as u64);
         Self::fnv1a_mix(&mut h, params.filters[0].enabled.value() as u64);
         Self::fnv1a_mix(&mut h, params.filters[1].enabled.value() as u64);
+        Self::fnv1a_mix(&mut h, params.routing.inserts[0].enabled.value() as u64);
+        Self::fnv1a_mix(&mut h, params.routing.inserts[1].enabled.value() as u64);
         Self::fnv1a_mix(&mut h, params.routing.inserts[0].mode.value() as u64);
         Self::fnv1a_mix(&mut h, params.routing.inserts[1].mode.value() as u64);
         Self::fnv1a_mix(&mut h, params.sub_bus.enabled.value() as u64);
@@ -218,16 +219,6 @@ impl ModUiState {
     pub fn clear_drag(&self) {
         self.dragging_source.store(0, Ordering::Relaxed);
         self.hover_dest.store(UNSET_DEST, Ordering::Relaxed);
-    }
-
-    #[inline]
-    pub fn hover_destination(&self) -> Option<ModDestination> {
-        let idx = self.hover_dest.load(Ordering::Relaxed);
-        if idx == UNSET_DEST {
-            None
-        } else {
-            ModDestination::from_index(idx as usize)
-        }
     }
 
     #[inline]
@@ -389,57 +380,6 @@ impl ModUiState {
         self.inspected_slot.store(slot_idx as u8, Ordering::Relaxed);
     }
 
-    pub fn cycle_inspected_slot_for_dest(&self, dest: ModDestination) {
-        let mat = self.params.mod_matrix.snapshot();
-        let mut matches = [0usize; NUM_MOD_SLOTS];
-        let mut count = 0usize;
-        for (idx, slot) in mat.slots.iter().enumerate() {
-            if slot.enabled && slot.source != ModMatrixSource::None && slot.destination == dest {
-                matches[count] = idx;
-                count += 1;
-            }
-        }
-        if count == 0 {
-            return;
-        }
-        let cur_slot = self.inspected_slot.load(Ordering::Relaxed) as usize;
-        let cur_dest = self.inspected_dest.load(Ordering::Relaxed) as usize;
-        let next_idx = if cur_dest == dest.index() {
-            matches[..count]
-                .iter()
-                .position(|&idx| idx == cur_slot)
-                .map(|pos| matches[(pos + 1) % count])
-                .unwrap_or(matches[0])
-        } else {
-            matches[0]
-        };
-        self.focus_slot(dest, next_idx);
-    }
-
-    pub fn cycle_any_active_slot(&self) {
-        let mat = self.params.mod_matrix.snapshot();
-        let mut active = [0usize; NUM_MOD_SLOTS];
-        let mut count = 0usize;
-        for (idx, slot) in mat.slots.iter().enumerate() {
-            if slot.enabled && slot.source != ModMatrixSource::None {
-                active[count] = idx;
-                count += 1;
-            }
-        }
-        if count == 0 {
-            self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
-            self.inspected_dest.store(UNSET_DEST, Ordering::Relaxed);
-            return;
-        }
-        let cur = self.inspected_slot.load(Ordering::Relaxed) as usize;
-        let next_idx = active[..count]
-            .iter()
-            .position(|&idx| idx == cur)
-            .map(|pos| active[(pos + 1) % count])
-            .unwrap_or(active[0]);
-        self.focus_slot(mat.slots[next_idx].destination, next_idx);
-    }
-
     pub fn adjust_slot_depth(&self, slot_idx: usize, new_depth: f32) {
         if slot_idx >= NUM_MOD_SLOTS {
             return;
@@ -494,57 +434,12 @@ impl ModUiState {
         cleared
     }
 
-    pub fn inspected_entry(&self) -> Option<(usize, ModSlot)> {
-        let slot_idx = self.inspected_slot.load(Ordering::Relaxed) as usize;
-        if slot_idx >= NUM_MOD_SLOTS {
-            return None;
-        }
-        let mat = self.params.mod_matrix.snapshot();
-        let slot = mat.slots[slot_idx];
-        if slot.enabled && slot.source != ModMatrixSource::None {
-            Some((slot_idx, slot))
-        } else {
-            None
-        }
-    }
-
     pub fn active_slot_count(&self) -> usize {
         let mat = self.params.mod_matrix.snapshot();
         mat.slots
             .iter()
             .filter(|s| s.enabled && s.source != ModMatrixSource::None)
             .count()
-    }
-
-    pub fn toggle_inspected_bipolar(&self) {
-        let slot_idx = self.inspected_slot.load(Ordering::Relaxed) as usize;
-        if slot_idx >= NUM_MOD_SLOTS {
-            return;
-        }
-        let mut mat = self.params.mod_matrix.snapshot();
-        if mat.slots[slot_idx].enabled {
-            mat.slots[slot_idx].bipolar = !mat.slots[slot_idx].bipolar;
-            self.params.mod_matrix.store_value(mat);
-        }
-    }
-
-    pub fn remove_inspected_slot(&self) {
-        let slot_idx = self.inspected_slot.load(Ordering::Relaxed) as usize;
-        if slot_idx >= NUM_MOD_SLOTS {
-            return;
-        }
-        let mut mat = self.params.mod_matrix.snapshot();
-        let old_dest = mat.slots[slot_idx].destination;
-        mat.clear_slot(slot_idx);
-        self.params.mod_matrix.store_value(mat);
-        if let Some((next_idx, _)) = mat.slots.iter().enumerate().find(|(_, s)| {
-            s.enabled && s.source != ModMatrixSource::None && s.destination == old_dest
-        }) {
-            self.focus_slot(old_dest, next_idx);
-        } else {
-            self.inspected_slot.store(UNSET_U8, Ordering::Relaxed);
-            self.inspected_dest.store(UNSET_DEST, Ordering::Relaxed);
-        }
     }
 
     pub fn active_entries(&self) -> Vec<(usize, ModSlot)> {
@@ -931,166 +826,20 @@ impl View for ModSourcePill {
     }
 }
 
-/// Builds the 12 modulation source pills + inline slot inspector inside the bottom `.tab-bar`
-/// and starts a 60 Hz redraw timer (`16 ms`) for live mod-ring and playhead animations.
-pub(crate) fn build_mod_source_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
-    let timer_ui = mod_ui.clone();
+/// Starts the single 60 Hz UI redraw & structural-state polling timer (`16 ms`)
+/// for live mod-ring, scope, and playhead animations.
+pub(crate) fn start_ui_redraw_timer(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     let timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
         if matches!(action, TimerAction::Tick(_)) {
-            if timer_ui.poll_enabled_mask_changed() {
+            if mod_ui.poll_enabled_mask_changed() {
                 cx.emit(UiEvent::ModUiChanged);
             }
-            if timer_ui.poll_external_sync_changed() {
+            if mod_ui.poll_external_sync_changed() {
                 cx.emit(UiEvent::SyncExternalState);
             }
             cx.needs_redraw();
         }
     });
     cx.start_timer(timer);
-
-    let ui_for_pills = mod_ui.clone();
-    HStack::new(cx, move |cx| {
-        for &src in &ModMatrixSource::ALL_ACTIVE[..13] {
-            ModSourcePill::new(cx, src, ui_for_pills.clone())
-                .width(Pixels(27.0))
-                .height(Pixels(18.0))
-                .top(Stretch(1.0))
-                .bottom(Stretch(1.0));
-        }
-    })
-    .col_between(Pixels(2.0))
-    .width(Auto)
-    .height(Stretch(1.0));
-
-    // Inline modulation inspector (drag status or selected slot UNI/BIP + remove)
-    HStack::new(cx, move |cx| {
-        let ui_insp = mod_ui.clone();
-        Binding::new(cx, UiData::mod_ui_rev, move |cx, _| {
-            let drag_src = ui_insp.dragging_source();
-            if drag_src != ModMatrixSource::None {
-                let src_lbl = ui_insp.aux_short_label(drag_src);
-                let text = match ui_insp.hover_destination() {
-                    Some(dest) => format!("DROP {src_lbl} > {}", dest.name()),
-                    None => format!("DRAG {src_lbl} -> KNOB"),
-                };
-                HStack::new(cx, move |cx| {
-                    bold_label(cx, &text, "mod-insp-drag")
-                        .width(Stretch(1.0))
-                        .height(Auto)
-                        .top(Stretch(1.0))
-                        .bottom(Stretch(1.0))
-                        .child_left(Stretch(1.0))
-                        .child_right(Stretch(1.0));
-                })
-                .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .child_left(Pixels(4.0))
-                .child_right(Pixels(4.0));
-            } else if let Some((_idx, slot)) = ui_insp.inspected_entry() {
-                let ui_cycle = ui_insp.clone();
-                let ui_bip = ui_insp.clone();
-                let ui_rem = ui_insp.clone();
-                let dest = slot.destination;
-                let summary = format!(
-                    "{}>{} {:+.0}%",
-                    ui_insp.aux_short_label(slot.source),
-                    dest.name(),
-                    slot.depth * 100.0
-                );
-                let bip_txt = if slot.bipolar { "BIP" } else { "UNI" };
-
-                HStack::new(cx, move |cx| {
-                    Button::new(
-                        cx,
-                        move |cx| {
-                            ui_cycle.cycle_inspected_slot_for_dest(dest);
-                            cx.emit(UiEvent::ModUiChanged);
-                        },
-                        move |cx| {
-                            bold_label(cx, &summary, "mod-insp-text")
-                                .width(Stretch(1.0))
-                                .height(Auto)
-                                .top(Stretch(1.0))
-                                .bottom(Stretch(1.0))
-                                .hoverable(false)
-                        },
-                    )
-                    .class("mod-insp-slot")
-                    .width(Stretch(1.0))
-                    .height(Pixels(18.0));
-
-                    Button::new(
-                        cx,
-                        move |cx| {
-                            ui_bip.toggle_inspected_bipolar();
-                            cx.emit(UiEvent::ModUiChanged);
-                        },
-                        move |cx| {
-                            bold_label(cx, bip_txt, "mod-insp-btn-text")
-                                .child_space(Stretch(1.0))
-                                .hoverable(false)
-                        },
-                    )
-                    .class("mod-insp-btn")
-                    .checked(slot.bipolar)
-                    .width(Pixels(30.0))
-                    .height(Pixels(18.0));
-
-                    CrossButton::new(cx, move |cx| {
-                        ui_rem.remove_inspected_slot();
-                        cx.emit(UiEvent::ModUiChanged);
-                    })
-                    .class("mod-insp-del")
-                    .class("mod-insp-btn-text")
-                    .width(Pixels(18.0))
-                    .height(Pixels(18.0));
-                })
-                .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .col_between(Pixels(3.0))
-                .child_left(Pixels(4.0))
-                .child_right(Pixels(4.0));
-            } else {
-                let ui_all = ui_insp.clone();
-                let active_n = ui_insp.active_slot_count();
-                let hint = if active_n > 0 {
-                    format!("MODS: {active_n}/32  [CYCLE]")
-                } else {
-                    String::from("DRAG SRC -> KNOB  |  R-CLICK MOD")
-                };
-                HStack::new(cx, move |cx| {
-                    Button::new(
-                        cx,
-                        move |cx| {
-                            ui_all.cycle_any_active_slot();
-                            cx.emit(UiEvent::ModUiChanged);
-                        },
-                        move |cx| {
-                            bold_label(cx, &hint, "mod-insp-hint")
-                                .width(Stretch(1.0))
-                                .height(Auto)
-                                .top(Stretch(1.0))
-                                .bottom(Stretch(1.0))
-                                .child_left(Stretch(1.0))
-                                .child_right(Stretch(1.0))
-                                .hoverable(false)
-                        },
-                    )
-                    .class("mod-insp-slot")
-                    .width(Stretch(1.0))
-                    .height(Pixels(18.0));
-                })
-                .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .child_left(Pixels(4.0))
-                .child_right(Pixels(4.0));
-            }
-        });
-    })
-    .class("mod-insp-bar")
-    .width(Stretch(1.0))
-    .height(Pixels(19.0))
-    .top(Stretch(1.0))
-    .bottom(Stretch(1.0));
 }
 

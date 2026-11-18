@@ -55,7 +55,7 @@ use filter_panel::build_dual_filter_section;
 use fx_rack::build_three_lane_fx_rack;
 use insert_panel::build_insert_panel;
 use macros_tab::build_macros_tab;
-use mod_bar::ModUiState;
+use mod_bar::{ModSourcePill, ModUiState};
 use modseq_tab::{build_modseq_tab, ModSeqSubTab};
 use noise_panel::build_noise_panel;
 use osc_panel::build_osc_panel;
@@ -979,28 +979,21 @@ fn build_center_wing(
         let p_stage = params.clone();
         let g_stage = gui_context.clone();
         let u_stage = mod_ui.clone();
+        let u_tabs = mod_ui.clone();
         VStack::new(cx, move |cx| {
             HStack::new(cx, move |cx| {
-                for i in 0..4 {
-                    let lbl = ["E1", "E2", "E3", "E4"][i];
-                    build_center_tab_button(
-                        cx,
-                        CenterStageTab::Mod(ModSeqSubTab::Env(i)),
-                        lbl,
-                        0.85,
-                    );
+                for &src in &ModMatrixSource::ALL_ACTIVE[0..4] {
+                    ModSourcePill::new(cx, src, u_tabs.clone())
+                        .width(Stretch(0.9))
+                        .height(Stretch(1.0));
                 }
-                for i in 0..4 {
-                    let lbl = ["MS1", "MS2", "MS3", "MS4"][i];
-                    build_center_tab_button(
-                        cx,
-                        CenterStageTab::Mod(ModSeqSubTab::MSeq(i)),
-                        lbl,
-                        1.0,
-                    );
+                for &src in &ModMatrixSource::ALL_ACTIVE[4..8] {
+                    ModSourcePill::new(cx, src, u_tabs.clone())
+                        .width(Stretch(1.0))
+                        .height(Stretch(1.0));
                 }
-                build_center_tab_button(cx, CenterStageTab::Voice, "VOICE", 1.25);
-                build_center_tab_button(cx, CenterStageTab::Routing, "ROUTE", 1.25);
+                build_center_tab_button(cx, CenterStageTab::Voice, "VOICE", 1.2);
+                build_center_tab_button(cx, CenterStageTab::Routing, "ROUTE", 1.2);
             })
             .class("tab-bar")
             .col_between(Pixels(tokens::SPACE_XS))

@@ -141,6 +141,39 @@ impl ParamStepPill {
         Self::build_inner(cx, params, params_to_param, num_steps, true, false, None, Some(label))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_inline_with_mod<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        num_steps: usize,
+        label: &'static str,
+        dest: ModDestination,
+        mod_ui: Arc<ModUiState>,
+        tab_tag: u8,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self::build_inner(
+            cx,
+            params,
+            params_to_param,
+            num_steps,
+            num_steps <= 16,
+            true,
+            Some(ModTargetBinding {
+                dest,
+                mod_ui,
+                tab_tag,
+            }),
+            Some(label),
+        )
+    }
+
     fn format_tooltip_text(&self) -> Option<String> {
         if let (Some(md), Some(ref mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
             let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);

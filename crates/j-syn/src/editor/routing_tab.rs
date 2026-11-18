@@ -8,7 +8,8 @@ use nih_plug::prelude::{EnumParam, FloatParam, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
-    bold_label, build_enum_dropdown, build_flex_knob_cell_mod, build_module_header,
+    bold_label, build_enum_dropdown, build_flex_knob_cell_mod, build_flex_knob_cell_mod_dim_tooltip,
+    build_module_header,
 };
 use super::mod_bar::{bottom_tab_tag, ModUiState};
 use super::tokens;
@@ -61,10 +62,11 @@ fn build_source_send_column<FB, FD>(
     direct_map: FD,
 ) where
     FB: Fn(&Arc<JSynPluginParams>) -> &FloatParam + Copy + Send + Sync + 'static,
-    FD: Fn(&Arc<JSynPluginParams>) -> &EnumParam<DirectRouteParam> + Copy + Send + Sync + 'static,
+    FD: Fn(&JSynPluginParams) -> &EnumParam<DirectRouteParam> + Copy + Send + Sync + 'static,
 {
+    let p_dim = params.clone();
     VStack::new(cx, move |cx| {
-        build_flex_knob_cell_mod(
+        build_flex_knob_cell_mod_dim_tooltip(
             cx,
             UiData::params,
             bal_map,
@@ -75,15 +77,32 @@ fn build_source_send_column<FB, FD>(
             dest,
             mod_ui.clone(),
             tab_tag,
-        );
+            p_dim,
+            move |p| direct_map(p).value() == DirectRouteParam::Off,
+            move |p| {
+                let target = match direct_map(p).value() {
+                    DirectRouteParam::BusA => "Bus A",
+                    DirectRouteParam::BusB => "Bus B",
+                    DirectRouteParam::Sub => "Bus C",
+                    DirectRouteParam::Off => "Filters",
+                };
+                format!("Direct -> {target} (skips Filters & Inserts)")
+            },
+        ) ;
 
-        build_enum_dropdown(cx, params, gui_context, direct_map, DIRECT_ROUTE_ITEMS)
-            .width(Stretch(1.0))
-            .height(Pixels(18.0))
-            .toggle_class(
-                "routing-pill-active",
-                UiData::params.map(move |p| direct_map(p).value() != DirectRouteParam::Off),
-            );
+        build_enum_dropdown(
+            cx,
+            params,
+            gui_context,
+            move |p| direct_map(p),
+            DIRECT_ROUTE_ITEMS,
+        )
+        .width(Stretch(1.0))
+        .height(Pixels(18.0))
+        .toggle_class(
+            "routing-pill-active",
+            UiData::params.map(move |p| direct_map(p).value() != DirectRouteParam::Off),
+        );
     })
     .width(Stretch(1.0))
     .height(Auto)

@@ -19,23 +19,24 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 ---
 
 ## 2. Left Wing — Oscillators (`OSC 1` – `OSC 4`) & `NOISE`
-- **Enable, Direct Bus & Filter Balance:** Toggle each oscillator with its header LED switch, sweep the `F1/2` balance mini-knob (`Filter 1 <-> Filter 2`), or set `Direct` (`Off | Bus A | Bus B | Bus C`) to send raw oscillator output straight to an FX bus (skipping filters and inserts).
+- **Wavetables & Enable:** Toggle each oscillator with its header LED switch, and use `<` / `>` or the wavetable dropdown (spanning the header bar) to choose factory tables, `"Load .WAV..."`, or `.wav` files in your configured `Wavetables Directory` (sliced automatically into up to `256` × `2048`-sample frames). Subfolders appear as collapsible categories.
 - **Pitch / Ratio:** Right-click the **`PITCH`** / **`RATIO`** box to switch between **`Pitch (Semitones)`** and **`Ratio (FM Harmonic)`** modes, assign modulation, clear modulation, or reset:
   - **Pitch (`Semitones`) Mode (`±48 st`):** Normal drag = `1.00 st`, `Opt/Alt + Drag` = `±12.00 st`, `Shift + Drag` = `0.01 st`.
   - **Ratio (`FM Harmonic`) Mode (`0.000–32.000 ×`):** Dragging the **Left Half** steps through whole/sub-harmonic ratios (`0, 0.25, 0.5, 1..32`); dragging the **Right Half** adjusts fractions (`0.10`, or `0.01` with `Shift`). Includes a companion **`Hz Offset`** pill (`±1000 Hz` skewed toward `0.1–20 Hz`) beneath `RATIO` with its own right-click modulation menu.
-- **Wavetables:** Use `<` / `>` or the wavetable dropdown to choose factory tables, `"Load .WAV..."`, or `.wav` files in your configured `Wavetables Directory` (sliced automatically into up to `256` × `2048`-sample frames). Subfolders appear as collapsible categories.
-- **Main Osc Knobs:** `WT POS`, `WARP` (`None`, `B-`, `B+`, `SP`), `>`/`<` routing order toggle (`Warp -> Mod` vs `Mod -> Warp`), `MOD` (`Off`, `PM 1..4`, `RM 1..4`), and `LEVEL`. Both `WARP` and `MOD` dropdowns support mouse-wheel scrolling. Per-oscillator `RETRG`, `PHASE`, `UNI` (`1`–`8`), `DETUNE`, `SPREAD`, `PAN`, and `KT` controls live in the Center Stage **`VOICE`** tab.
-- **Noise:** Stereo `White`, `Pink`, or `Brown` noise with `F1/2` filter balance, `Direct` bus selector, `COLOR`, `STEREO`, and `LEVEL`.
+- **Main Osc Knobs & Bottom Dock:** `WT POS`, `WARP` (with `WARP` mode dropdown `None`, `B-`, `B+`, `SP` directly underneath), `>`/`<` routing order toggle (`Warp -> Mod` vs `Mod -> Warp`), `MOD` (with `MOD` dropdown `Off`, `PM 1..4`, `RM 1..4` directly underneath), and `LEVEL`. Both `WARP` and `MOD` dropdowns support mouse-wheel scrolling. Below the waveform scope and knobs, each card docks **`RETRG`**, **`PHS`** (`Phase`), **`UNI`** (`1`–`8`), and **`DET`** (`Detune`). Unison `SPREAD`, `PAN`, and `KT` remain in the **`VOICE`** Center Stage tab.
+- **Noise:** Stereo `White`, `Pink`, or `Brown` noise with `COLOR`, `STEREO`, and `LEVEL`. Per-source filter send balances and Direct Bus routing live in the **`ROUTE`** tab.
 
 ---
 
 ## 3. Center Wing — Dual Filters, Insert Shapers & Center Stage
 - **Dual Multimode Filters (`FILTER 1` & `FILTER 2`):**
-  - Top routing strip: `Serial (F1->F2)` / `Parallel (F1+F2)`, `F1 OUT` & `F2 OUT` destination selectors (`Bus A | Bus B | A+B | Bus C | A+C | B+C | A+B+C`), `F1/2` mix knob, and `FB` voice feedback knob.
   - Modes: `LP`, `BP`, `HP`, `Notch`, `Peak`, `HP + Peak`, `HP + Notch`, `LP + Notch`, `LP + Peak`, `Peak + Peak`, and `Notch + Notch` (`6/12/24/36/48 dB` slopes), plus fixed `12 dB` `Bandreject`, `Scream`, `Daft`, and `Comb` modes (slope selector automatically locks/dims to `12 dB`), with a live post-modulation frequency response scope.
-- **Center Modulation Stage (`E1–4 | MS1–4 | VOICE | ROUTE`):** Switches cleanly between Envelopes 1–4, Hybrid ModSeq/MSEG LFOs 1–4, per-oscillator Unison/Phase/Retrig + MPE Voicing, and Routing overview without hiding macros or FX lanes.
-- **Side-by-Side `INSERT 1` & `INSERT 2`:**
-  - 4x-oversampled per-voice waveshapers (`Tube`, `Mech`, `Tube -> Mech`, `Mech -> Tube`, `Sine Shaper`, `Parabolic`, `Soft Clip`, `Bitcrush`, `Classic A`, `Classic B`, `Classic C`, `Diode A`, `Diode B`, `Linear Fold`, `Sine Fold`, `Hard Clip`, `Half Rect`, `Full Rect`) selectable **`Pre-F1`**, **`Between F1->F2`**, or **`Post-F2`**, with full `DRIVE` and dry/wet **`MIX`** knobs.
+  - Filter topology (`Serial (F1->F2)` / `Parallel (F1+F2)`), `F1 OUT BUS` / `F2 OUT BUS`, `F1/F2 MIX`, and `FEEDBACK` live in the **`ROUTE`** Center Stage tab.
+- **Center Modulation Stage (`E1–4 | MS1–4 | VOICE | ROUTE`):**
+  - The **`E1`–`E4`** and **`MS1`–`MS4`** tab pills are dual-purpose: **Click** to switch tabs, or **Drag** onto any knob/pill to assign modulation directly from the tab bar.
+- **Side-by-Side `INS 1` & `INS 2`:**
+  - Header controls: **`[INS 1]` / `[INS 2]`** LED bypass switch (greys out the card when toggled `OFF`), compact waveshaper algorithm dropdown (`Off`, `Tube`, `Mech`, `T -> M`, `M -> T`, `Sine`, `Parabolic`, `Soft Clip`, `Crush`, `Classic A/B/C`, `Diode A/B`, `Lin Fold`, `Sin Fold`, `Hard Clip`, `Half Rect`, `Full Rect`), and position selector (**`| F1`**, **`F1 | F2`**, **`F2 |`**).
+  - Body: Real-time waveshaper transfer curve visualizer alongside `DRIVE` and dry/wet **`MIX`** knobs.
 
 ---
 
@@ -60,26 +61,26 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 ---
 
 ## 5. Permanent Macro & Source Dock, Center Stage Tabs & MPE
-- **Permanent `2×4` Macro & Performance Source Dock:** Always visible at bottom-center without switching tabs. Houses draggable modulation source pills (`E1`–`E4`, `MS1`–`MS4`, `VEL`, `KEY`, `MW`, `AT`, `SLD`), the inline modulation slot inspector, and all 8 renameable **`M1`–`M8`** macro cards (with draggable badge, editable name textbox, knob, and readout):
-  - **Drag** any source or macro pill onto a knob or value pill to assign modulation.
+- **Permanent `2×4` Macro & Performance Source Dock:** Always visible at bottom-center: houses a vertical column of performance source pills (`VEL`, `KEY`, `MW`, `AT`, `SLD`) on the left alongside all 8 renameable **`M1`–`M8`** macro cards (with draggable badge, editable name textbox, knob, and readout).
+  - **Drag** `E1`–`E4` / `MS1`–`MS4` directly from the Center Stage tab strip, or `VEL`–`SLD` / `M1`–`M8` from the dock onto any knob or value pill to assign modulation.
   - **Click** `E1`–`E4` or `MS1`–`MS4` to open its editor directly in the Center Stage.
   - **Collar Handle:** Hover/drag the radial modulation arc around a knob to adjust depth.
   - **Right-Click** any modulated control to open a quick menu to **Bypass (`ON`/`BYP`)**, toggle **Polarity (`UNI`/`BIP`)**, or **Remove (`×`)** each routing.
 - **`VOICE` Center Tab & MPE:**
-  - `OSCILLATOR UNISON, PHASE & KEYTRACK` (`OSC 1`–`OSC 4` rows for `RETRG`, `PHASE`, `UNI`, `DETUNE`, `SPREAD`, `PAN`, `KT`) + `VOICING` (`Poly`/`Mono`, `PB RANGE`, **`[• MPE]`**, **`MPE PB`** `1–96 st` [default `48 st`], `GLIDE`, `F1 KEYTRK`, `F2 KEYTRK`).
+  - `OSCILLATOR SPREAD, PAN & KEYTRACK` (`OSC 1`–`OSC 4` rows for `SPREAD`, `PAN`, `KT`) + `VOICING, MPE & FILTER KEYTRACKING` (`Poly`/`Mono`, `PB RANGE`, **`[• MPE]`**, **`MPE PB`** `1–96 st` [default `48 st`], `GLIDE`, `F1 KT`, `F2 KT`).
   - When **`MPE`** is enabled, Master `Ch 1` broadcasts global bend (`±PB RANGE`), `CC 1`, and pressure, while Member Channels `Ch 2–16` route per-note Pitch Bend (`±MPE PB`), Pressure (`AT`), and `CC 74` Slide (`SLD`) exclusively to each active voice with `1.5 ms` smoothing (alongside CLAP/VST3 `PolyPressure`, `PolyTuning`, and `PolyBrightness`).
 - **`E1`–`E4` / `MS1`–`MS4` Center Stage Tabs (`MODSEQ` & `LFO`):**
   - **`MODSEQ` (Performer) Mode:**
     - **Left-Drag on Grid:** Stamps the selected `2×9` palette shape at the cursor's vertical depth.
-    - **Right-Click a Palette Tile:** Fills the entire sequence with that shape (`FILL` fills with the currently highlighted tile).
+    - **Right-Click a Palette Tile:** Fills the entire sequence with that shape (`FILL` fills with the currently highlighted tile; `FILL` and `CLEAR` sit beneath the palette).
     - **`Opt/Alt + Left-Drag` or `Right-Drag` (Vertical on a Step):** Adjusts that step's curve **tension** (`-1.0..=1.0`, warping its timing/concavity).
     - **`Shift + Left-Drag` (Vertical on a Step):** Adjusts the step's **end level** (linear ramp from start level to end level).
   - **`LFO` (MSEG) Mode:**
-    - **Drag Breakpoint Nodes:** Move nodes (`Shift` or `SNAP 1/16` snaps `X` to `1/16` and `Y` to `1/8`).
+    - **Drag Breakpoint Nodes:** Move nodes (`Shift` or `SNAP` snaps `X` to `1/16` and `Y` to `1/8`). Preset bar and `RESET CURVE` sit in the lower-left control strip.
     - **Double-Click:** Add a new breakpoint node on empty canvas, or delete an interior node.
     - **Drag Midpoint Handle / `Opt/Alt + Left-Drag` / `Right-Drag`:** Bend the enclosing segment's curve **tension**.
   - **`E1`–`E4`:** Edit ADSR envelopes with live curve preview and numeric readouts.
-- **`ROUTE` Center Tab:** Per-source Filter Send balance (`F1 <-> F2`), 4-way per-source `DIRECT` sends (`Off | Bus A | Bus B | Bus C`), `FX LANE MATRIX`, `FILTER MODE`, `F1 OUT` / `F2 OUT`, `F1/F2 MIX`, and `FEEDBACK`.
+- **`ROUTE` Center Tab:** Per-source Filter Send balance (`F1 <-> F2`, automatically dimmed with an explanatory hover tooltip when Direct Bus routing is active) and 4-way per-source `DIRECT` sends (`Off | Bus A | Bus B | Bus C`), `FX LANE MATRIX`, `FILTER MODE`, `F1 OUT BUS` / `F2 OUT BUS`, `F1/F2 MIX`, and `FEEDBACK`.
 
 ---
 

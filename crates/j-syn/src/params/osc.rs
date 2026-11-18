@@ -253,17 +253,17 @@ pub enum InsertModeParam {
     Tube,
     #[name = "Mech"]
     Mech,
-    #[name = "Tube -> Mech"]
+    #[name = "T -> M"]
     TubeToMech,
-    #[name = "Mech -> Tube"]
+    #[name = "M -> T"]
     MechToTube,
-    #[name = "Sine Shaper"]
+    #[name = "Sine"]
     SineShaper,
     #[name = "Parabolic"]
     Parabolic,
     #[name = "Soft Clip"]
     SoftClip,
-    #[name = "Bitcrush"]
+    #[name = "Crush"]
     Bitcrush,
     #[name = "Classic A"]
     ClassicA,
@@ -275,9 +275,9 @@ pub enum InsertModeParam {
     DiodeA,
     #[name = "Diode B"]
     DiodeB,
-    #[name = "Linear Fold"]
+    #[name = "Lin Fold"]
     LinearFold,
-    #[name = "Sine Fold"]
+    #[name = "Sin Fold"]
     SineFold,
     #[name = "Hard Clip"]
     HardClip,
@@ -315,11 +315,11 @@ impl From<InsertModeParam> for InsertMode {
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InsertPosParam {
-    #[name = "Pre-F1"]
+    #[name = "| F1"]
     PreFilter,
-    #[name = "Between F1->F2"]
+    #[name = "F1 | F2"]
     BetweenFilters,
-    #[name = "Post-F2"]
+    #[name = "F2 |"]
     PostFilter,
 }
 
@@ -443,6 +443,9 @@ impl FilterPluginParams {
 
 #[derive(Params)]
 pub struct InsertSlotPluginParams {
+    #[id = "ins_enabled"]
+    pub enabled: BoolParam,
+
     #[id = "ins_mode"]
     pub mode: EnumParam<InsertModeParam>,
 
@@ -464,6 +467,7 @@ impl InsertSlotPluginParams {
             InsertPosParam::PostFilter
         };
         Self {
+            enabled: BoolParam::new("Insert Enabled", true),
             mode: EnumParam::new("Insert Mode", InsertModeParam::Off),
             position: EnumParam::new("Insert Position", default_pos),
             drive: percentage_param("Insert Drive", 0.25),
@@ -473,6 +477,7 @@ impl InsertSlotPluginParams {
 
     pub fn to_dsp(&self) -> InsertParams {
         InsertParams {
+            enabled: self.enabled.value(),
             mode: self.mode.value().into(),
             position: self.position.value().into(),
             drive: self.drive.value(),

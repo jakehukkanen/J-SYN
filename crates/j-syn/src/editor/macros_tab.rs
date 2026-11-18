@@ -1,4 +1,4 @@
-//! Permanent bottom-center Macro (`2×4` `M1`–`M8`) & Performance Source dock.
+//! Permanent bottom-center Macro (`2×4` `M1`–`M8`) & Performance Source (`VEL..SLD`) dock.
 
 use std::sync::Arc;
 
@@ -6,24 +6,28 @@ use j_syn_dsp::mod_matrix::ModMatrixSource;
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{build_param_readout_box, build_rotary_knob_with_opt_mod};
-use super::mod_bar::{build_mod_source_bar, ModSourcePill, ModUiState};
+use super::mod_bar::{start_ui_redraw_timer, ModSourcePill, ModUiState};
 use super::tokens;
 use super::{UiData, UiEvent, AMBER_RGB};
 
 pub(super) fn build_macros_tab(cx: &mut Context, mod_ui: Arc<ModUiState>) {
-    VStack::new(cx, move |cx| {
-        HStack::new(cx, {
-            let mod_bar = mod_ui.clone();
-            move |cx| {
-                build_mod_source_bar(cx, mod_bar);
+    start_ui_redraw_timer(cx, mod_ui.clone());
+
+    HStack::new(cx, move |cx| {
+        // Left vertical Performance Source column: VEL, KEY, MW, AT, SLD
+        let perf_ui = mod_ui.clone();
+        VStack::new(cx, move |cx| {
+            for &src in &ModMatrixSource::ALL_ACTIVE[8..13] {
+                ModSourcePill::new(cx, src, perf_ui.clone())
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0));
             }
         })
-        .class("tab-bar")
-        .col_between(Pixels(tokens::SPACE_SM))
-        .height(Pixels(24.0))
-        .width(Stretch(1.0));
+        .row_between(Pixels(tokens::SPACE_XS))
+        .width(Pixels(44.0))
+        .height(Stretch(1.0));
 
-        // 2 × 4 Macro Grid: M1–M4 top row, M5–M8 bottom row
+        // Right: Shrunk 2 × 4 Macro Grid (M1–M4 top row, M5–M8 bottom row)
         VStack::new(cx, move |cx| {
             for row in 0..2 {
                 let row_ui = mod_ui.clone();
@@ -37,15 +41,15 @@ pub(super) fn build_macros_tab(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 .height(Stretch(1.0));
             }
         })
-        .row_between(Pixels(tokens::SPACE_SM))
+        .row_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
         .height(Stretch(1.0));
     })
     .class("hardware-module")
     .class("drawer-module")
-    .row_between(Pixels(tokens::SPACE_SM))
+    .col_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))
-    .height(Pixels(166.0));
+    .height(Pixels(134.0));
 }
 
 fn build_macro_card(cx: &mut Context, idx: usize, mod_ui: Arc<ModUiState>) {
@@ -53,8 +57,8 @@ fn build_macro_card(cx: &mut Context, idx: usize, mod_ui: Arc<ModUiState>) {
     VStack::new(cx, move |cx| {
         HStack::new(cx, move |cx| {
             ModSourcePill::new(cx, source, mod_ui.clone())
-                .width(Pixels(30.0))
-                .height(Pixels(16.0));
+                .width(Pixels(28.0))
+                .height(Pixels(15.0));
 
             Textbox::new(
                 cx,
@@ -68,11 +72,11 @@ fn build_macro_card(cx: &mut Context, idx: usize, mod_ui: Arc<ModUiState>) {
             })
             .class("macro-name-input")
             .width(Stretch(1.0))
-            .height(Pixels(16.0));
+            .height(Pixels(15.0));
         })
         .col_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
-        .height(Pixels(16.0));
+        .height(Pixels(15.0));
 
         HStack::new(cx, move |cx| {
             build_rotary_knob_with_opt_mod(
@@ -83,18 +87,18 @@ fn build_macro_card(cx: &mut Context, idx: usize, mod_ui: Arc<ModUiState>) {
                 AMBER_RGB,
                 None,
             )
-            .width(Pixels(tokens::KNOB_STD))
-            .height(Pixels(tokens::KNOB_STD))
+            .width(Pixels(tokens::KNOB_COMPACT))
+            .height(Pixels(tokens::KNOB_COMPACT))
             .top(Stretch(1.0))
             .bottom(Stretch(1.0));
 
             build_param_readout_box(cx, UiData::params, move |p| &p.macros[idx].value)
                 .width(Stretch(1.0))
-                .height(Pixels(18.0))
+                .height(Pixels(17.0))
                 .top(Stretch(1.0))
                 .bottom(Stretch(1.0));
         })
-        .col_between(Pixels(tokens::SPACE_SM))
+        .col_between(Pixels(tokens::SPACE_XS))
         .width(Stretch(1.0))
         .height(Stretch(1.0));
     })

@@ -11,6 +11,7 @@ use crate::editor::{TooltipState, UiEvent};
 
 pub(super) type ValueFormatter = Arc<dyn Fn(f32, Option<f32>) -> String + Send + Sync>;
 pub(super) type EnabledPredicate = Arc<dyn Fn(&crate::JSynPluginParams) -> bool + Send + Sync>;
+pub(super) type DisabledTooltipFormatter = Arc<dyn Fn(&crate::JSynPluginParams) -> String + Send + Sync>;
 
 pub(super) const KNOB_DRAG_PIXELS: f32 = 150.0;
 pub(super) const KNOB_FINE_MULTIPLIER: f32 = 0.12;
