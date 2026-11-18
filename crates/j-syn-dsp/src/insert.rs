@@ -1,6 +1,10 @@
 use std::f32::consts::TAU;
 
 use crate::filter::fast_tanh;
+use crate::fx::dynamics::Lr4BandFilter;
+use crate::fx::freq_shifter::{
+    freq_shift_coarse_hz, freq_shift_split_hz, FreqShiftMode, FreqSplitBand, HilbertIqPair,
+};
 use crate::oscillator::EngineMode;
 use crate::oversample::{Biquad, BiquadCoeffs, Oversampler4x};
 use crate::waveshaper::{
@@ -29,6 +33,7 @@ pub enum InsertMode {
     HardClip = 16,
     HalfRectify = 17,
     FullRectify = 18,
+    FreqShifter = 19,
 }
 
 impl InsertMode {
@@ -52,6 +57,7 @@ impl InsertMode {
             16 => Self::HardClip,
             17 => Self::HalfRectify,
             18 => Self::FullRectify,
+            19 => Self::FreqShifter,
             _ => Self::Off,
         }
     }
@@ -93,8 +99,12 @@ impl FilterRouting {
 pub struct InsertParams {
     pub mode: InsertMode,
     pub position: InsertPosition,
-    pub drive: f32, // 0.0 to 1.0
+    pub drive: f32, // 0.0 to 1.0 (maps to ±2000 Hz shift when mode == FreqShifter)
     pub mix: f32,   // 0.0 to 1.0
+    pub shift_mode: FreqShiftMode,
+    pub shift_split: FreqSplitBand,
+    pub split_norm: f32, // 0.0 to 1.0 (20..20000 Hz)
+    pub keytrack: bool,
 }
 
 impl Default for InsertParams {
@@ -104,6 +114,10 @@ impl Default for InsertParams {
             position: InsertPosition::BetweenFilters,
             drive: 0.25,
             mix: 1.0,
+            shift_mode: FreqShiftMode::Up,
+            shift_split: FreqSplitBand::Full,
+            split_norm: 0.45,
+            keytrack: false,
         }
     }
 }
@@ -183,6 +197,10 @@ pub struct InsertShaperState {
     pub oversamplers: [Oversampler4x; 2],
     pub mech_low_shelf: [Biquad; 2],
     pub mech_high_shelf: [Biquad; 2],
+    pub hilbert: HilbertIqPair,
+    pub(crate) xover: [Lr4BandFilter; 2],
+    pub last_split_hz: f32,
+    pub last_xover_sr: f32,
     pub sample_rate: f32,
     pub prev_in_l: f32,
     pub prev_in_r: f32,
@@ -205,6 +223,10 @@ impl InsertShaperState {
             oversamplers: [Oversampler4x::new(); 2],
             mech_low_shelf: [Biquad::default(); 2],
             mech_high_shelf: [Biquad::default(); 2],
+            hilbert: HilbertIqPair::new(44_100.0),
+            xover: [Lr4BandFilter::default(); 2],
+            last_split_hz: -1.0,
+            last_xover_sr: 0.0,
             sample_rate: 44_100.0,
             prev_in_l: 0.0,
             prev_in_r: 0.0,
@@ -218,6 +240,8 @@ impl InsertShaperState {
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1_000.0);
+        self.hilbert.set_sample_rate(self.sample_rate);
+        self.last_xover_sr = 0.0;
         self.update_mech_eq();
     }
 
@@ -236,7 +260,9 @@ impl InsertShaperState {
             self.oversamplers[ch].reset();
             self.mech_low_shelf[ch].reset();
             self.mech_high_shelf[ch].reset();
+            self.xover[ch].reset();
         }
+        self.hilbert.reset();
         self.prev_in_l = 0.0;
         self.prev_in_r = 0.0;
         self.crush_phase = 1.0;
@@ -292,6 +318,7 @@ impl InsertShaperState {
         params: &InsertParams,
         engine_mode: EngineMode,
         sample_rate: f32,
+        note_hz: f32,
     ) -> (f32, f32) {
         if (self.sample_rate - sample_rate).abs() > 0.5 {
             self.set_sample_rate(sample_rate);
@@ -363,6 +390,49 @@ impl InsertShaperState {
                     self.hold_r = (in_r.clamp(-1.5, 1.5) * levels).round() / levels;
                 }
                 (self.hold_l, self.hold_r)
+            }
+            InsertMode::FreqShifter => {
+                const C3_HZ: f32 = 261.625_58;
+                self.prev_in_l = in_l;
+                self.prev_in_r = in_r;
+                let kt_ratio = if params.keytrack {
+                    (note_hz / C3_HZ).clamp(0.05, 32.0)
+                } else {
+                    1.0
+                };
+                let shift_hz = freq_shift_coarse_hz(drive) * kt_ratio;
+                let (band_l, pass_l, band_r, pass_r) =
+                    if params.shift_split == FreqSplitBand::Full {
+                        (in_l, 0.0, in_r, 0.0)
+                    } else {
+                        let nyq_safe = self.sample_rate * 0.44;
+                        let split_hz =
+                            (freq_shift_split_hz(params.split_norm) * kt_ratio).clamp(20.0, nyq_safe);
+                        if (split_hz - self.last_split_hz).abs() > 0.25
+                            || (self.sample_rate - self.last_xover_sr).abs() > 0.5
+                        {
+                            let sr64 = self.sample_rate as f64;
+                            self.xover[0].set_freq(sr64, split_hz as f64);
+                            self.xover[1].set_freq(sr64, split_hz as f64);
+                            self.last_split_hz = split_hz;
+                            self.last_xover_sr = self.sample_rate;
+                        }
+                        let (lo_l, hi_l) = self.xover[0].split(in_l);
+                        let (lo_r, hi_r) = self.xover[1].split(in_r);
+                        match params.shift_split {
+                            FreqSplitBand::Hi => (hi_l, lo_l, hi_r, lo_r),
+                            FreqSplitBand::Lo => (lo_l, hi_l, lo_r, hi_r),
+                            FreqSplitBand::Full => (in_l, 0.0, in_r, 0.0),
+                        }
+                    };
+                let (sh_l, sh_r) = self.hilbert.process_stereo(
+                    band_l,
+                    band_r,
+                    shift_hz,
+                    shift_hz,
+                    params.shift_mode,
+                );
+                (sh_l + pass_l, sh_r + pass_r)
             }
         };
 

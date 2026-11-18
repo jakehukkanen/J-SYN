@@ -3,6 +3,7 @@
 
 pub mod diopser;
 pub mod dynamics;
+pub mod freq_shifter;
 pub mod limiter;
 pub mod modulation;
 pub mod multiband_dist;
@@ -23,6 +24,7 @@ use crate::waveshaper::DistortionMode;
 
 use self::diopser::DiopserStereo;
 use self::dynamics::{DistortionStereo, JSatClipperStereo, OttStereo};
+use self::freq_shifter::FreqShifterStereo;
 use self::limiter::LimiterStereo;
 use self::modulation::{ChorusStereo, DelayStereo, FlangerStereo, PhaserStereo, ReverbStereo};
 use self::multiband_dist::MultiBandDistStereo;
@@ -31,6 +33,10 @@ use self::utility::UtilityStereo;
 
 pub use self::diopser::{
     diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, DIOPSER_STAGE_COUNTS,
+};
+pub use self::freq_shifter::{
+    format_freq_shift_hz, freq_shift_coarse_hz, freq_shift_feedback, freq_shift_fine_hz,
+    freq_shift_split_hz, FreqShiftMode, FreqSplitBand,
 };
 pub use self::limiter::{
     limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms,
@@ -78,10 +84,11 @@ pub enum FxType {
     Limiter = 12,
     MultibandDist = 13,
     Flanger = 14,
+    FreqShifter = 15,
 }
 
 impl FxType {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Off,
         Self::Ott,
         Self::Distortion,
@@ -97,6 +104,7 @@ impl FxType {
         Self::Limiter,
         Self::MultibandDist,
         Self::Flanger,
+        Self::FreqShifter,
     ];
 
     #[inline]
@@ -116,6 +124,7 @@ impl FxType {
             12 => Self::Limiter,
             13 => Self::MultibandDist,
             14 => Self::Flanger,
+            15 => Self::FreqShifter,
             _ => Self::Off,
         }
     }
@@ -137,6 +146,7 @@ impl FxType {
             Self::Limiter => "Limiter",
             Self::MultibandDist => "MB Dist",
             Self::Flanger => "Flanger",
+            Self::FreqShifter => "Freq Shift",
         }
     }
 
@@ -157,13 +167,14 @@ impl FxType {
             Self::Limiter => "LIM",
             Self::MultibandDist => "MBDST",
             Self::Flanger => "FLANG",
+            Self::FreqShifter => "FRQSHF",
         }
     }
 
     #[inline]
     pub const fn subtab_label(self) -> Option<&'static str> {
         match self {
-            Self::Chorus | Self::Delay | Self::Reverb => Some("EQ"),
+            Self::Chorus | Self::Delay | Self::Reverb | Self::FreqShifter => Some("EQ"),
             Self::Flanger => Some("MOD"),
             Self::TubeResonator => Some("LFO"),
             Self::Limiter => Some("ADV"),
@@ -238,6 +249,10 @@ pub struct FxSlotParams {
     pub distortion_mode: DistortionMode,
     /// Per-band parameters (`[Low, Mid, High]`) for `FxType::MultibandDist`.
     pub mb_bands: [MbDistBandParams; 3],
+    /// Sideband mode (`UP`, `DOWN`, `DUAL`) for `FxType::FreqShifter`.
+    pub freq_shift_mode: FreqShiftMode,
+    /// Split crossover band (`HI`, `LO`, `FULL`) for `FxType::FreqShifter`.
+    pub freq_shift_split: FreqSplitBand,
 }
 
 impl Default for FxSlotParams {
@@ -265,6 +280,8 @@ impl Default for FxSlotParams {
                 level: MB_BAND_LEVEL_DEFAULT_NORM,
                 mix: 1.00,
             }; 3],
+            freq_shift_mode: FreqShiftMode::Up,
+            freq_shift_split: FreqSplitBand::Full,
         }
     }
 }
@@ -302,6 +319,8 @@ impl FxSlotParams {
             FxType::MultibandDist => [MB_XOVER_LOW_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, 0.50, 1.00],
             // Flanger: Rate ~0.20 Hz (0.35), Depth 65%, Manual Delay ~0.95 ms (0.45), Mix 100%
             FxType::Flanger => [0.35, 0.65, 0.45, 1.00],
+            // Freq Shifter: Shift +3.46 Hz (0.56), Split ~449 Hz (0.45), Feedbk 0%, Mix 100%
+            FxType::FreqShifter => [0.56, 0.45, 0.00, 1.00],
         }
     }
 
@@ -316,6 +335,8 @@ impl FxSlotParams {
             FxType::Reverb => [0.24, 1.0, 0.0, 0.50],
             // Flanger MOD: Feedbk +50% (0.75), Stereo Phase 90° (0.50), Low Cut 20 Hz (0.0), Tone ~11.5 kHz (0.85)
             FxType::Flanger => [0.75, 0.50, 0.0, 0.85],
+            // Freq Shift EQ: Fine 0.0 Hz (0.50), Stereo 0% (0.0), Low Cut 20 Hz (0.0), High Cut 20 kHz (1.0)
+            FxType::FreqShifter => [0.50, 0.00, 0.00, 1.00],
             // Tube Res. LFO: LFO Amt 50%, LFO Spd 1.00 Hz (0.42625), Feedbk/Decay 50 ms (0.29922), Mix shared on P4
             FxType::TubeResonator => [0.50, 0.426_25, 0.299_22, 1.00],
             // Limiter ADV: Release ~80 ms (0.53), Knee 0% (0.0), Link 100% (1.0), Punch 100% (1.0)
@@ -350,6 +371,8 @@ impl FxSlotParams {
                 level: MB_BAND_LEVEL_DEFAULT_NORM,
                 mix: 1.00,
             }; 3],
+            freq_shift_mode: FreqShiftMode::Up,
+            freq_shift_split: FreqSplitBand::Full,
         }
     }
 }
@@ -595,6 +618,7 @@ struct StereoFxStage {
     limiter: LimiterStereo,
     mb_dist: Box<MultiBandDistStereo>,
     flanger: FlangerStereo,
+    freq_shifter: Box<FreqShifterStereo>,
 }
 
 impl StereoFxStage {
@@ -614,6 +638,7 @@ impl StereoFxStage {
             limiter: LimiterStereo::new(sample_rate),
             mb_dist: Box::new(MultiBandDistStereo::new(sample_rate)),
             flanger: FlangerStereo::new(sample_rate),
+            freq_shifter: Box::new(FreqShifterStereo::new(sample_rate)),
         }
     }
 
@@ -631,6 +656,7 @@ impl StereoFxStage {
         self.limiter.set_sample_rate(sample_rate);
         self.mb_dist.set_sample_rate(sample_rate);
         self.flanger.set_sample_rate(sample_rate);
+        self.freq_shifter.set_sample_rate(sample_rate);
     }
 
     fn reset(&mut self) {
@@ -648,6 +674,7 @@ impl StereoFxStage {
         self.limiter.reset();
         self.mb_dist.reset();
         self.flanger.reset();
+        self.freq_shifter.reset();
     }
 
     #[inline]
@@ -702,6 +729,14 @@ impl StereoFxStage {
                 p,
             ),
             FxType::Flanger => self.flanger.process(in_l, in_r, p, eq),
+            FxType::FreqShifter => self.freq_shifter.process(
+                in_l,
+                in_r,
+                p,
+                eq,
+                slot.freq_shift_mode,
+                slot.freq_shift_split,
+            ),
         }
     }
 }

@@ -127,8 +127,20 @@ impl ModUiState {
         Self::fnv1a_mix(&mut h, params.noise.enabled.value() as u64);
         Self::fnv1a_mix(&mut h, params.filters[0].enabled.value() as u64);
         Self::fnv1a_mix(&mut h, params.filters[1].enabled.value() as u64);
-        Self::fnv1a_mix(&mut h, params.routing.inserts[0].mode.value() as u64);
-        Self::fnv1a_mix(&mut h, params.routing.inserts[1].mode.value() as u64);
+        Self::fnv1a_mix(
+            &mut h,
+            (params.routing.inserts[0].mode.value() as u64)
+                | ((params.routing.inserts[0].shift_mode.value() as u64) << 8)
+                | ((params.routing.inserts[0].shift_split.value() as u64) << 11)
+                | ((params.routing.inserts[0].keytrack.value() as u64) << 14),
+        );
+        Self::fnv1a_mix(
+            &mut h,
+            (params.routing.inserts[1].mode.value() as u64)
+                | ((params.routing.inserts[1].shift_mode.value() as u64) << 8)
+                | ((params.routing.inserts[1].shift_split.value() as u64) << 11)
+                | ((params.routing.inserts[1].keytrack.value() as u64) << 14),
+        );
         Self::fnv1a_mix(&mut h, params.sub_bus.enabled.value() as u64);
         Self::fnv1a_mix(&mut h, params.fx_bus_topology.value() as u64);
         for bus in 0..2 {
@@ -143,7 +155,9 @@ impl ModUiState {
                     | ((fx.utility_inv_l.value() as u64) << 20)
                     | ((fx.utility_inv_r.value() as u64) << 21)
                     | ((fx.limiter_true_peak.value() as u64) << 22)
-                    | ((fx.distortion_mode.value() as u64) << 23);
+                    | ((fx.distortion_mode.value() as u64) << 23)
+                    | ((fx.freq_shift_mode.value() as u64) << 28)
+                    | ((fx.freq_shift_split.value() as u64) << 31);
                 Self::fnv1a_mix(&mut h, packed);
                 for mb in &fx.mb_bands {
                     let mb_packed = (mb.enabled.value() as u64)

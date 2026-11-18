@@ -7,10 +7,12 @@ use std::time::Instant;
 use j_syn_dsp::mod_matrix::{FxScopeRing, ModDestination, ModUiTelemetry, FX_SCOPE_LEN};
 use j_syn_dsp::{
     evaluate_diopser_ripple, evaluate_flanger_scope_response, evaluate_tube_res_scope_response,
-    filter_response_db_from_slot, flanger_rate_hz, limiter_ceil_db, limiter_gain_db,
-    mb_band_level_db, mb_band_magnitude_at_hz, mb_ordered_xover_hz, mb_xover_high_norm,
-    mb_xover_low_norm, tube_res_lfo_rate_hz, utility_gain_db_from_norm, utility_pan_bipolar,
-    utility_width_from_norm, FxRackState, MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
+    filter_response_db_from_slot, flanger_rate_hz, freq_shift_coarse_hz, freq_shift_feedback,
+    freq_shift_fine_hz, freq_shift_split_hz, limiter_ceil_db, limiter_gain_db, mb_band_level_db,
+    mb_band_magnitude_at_hz, mb_ordered_xover_hz, mb_xover_high_norm, mb_xover_low_norm,
+    tube_res_lfo_rate_hz, utility_gain_db_from_norm, utility_pan_bipolar,
+    utility_width_from_norm, FreqShiftMode, FreqSplitBand, FxRackState,
+    MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
 };
 use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
@@ -45,6 +47,7 @@ pub(super) fn fx_accent_rgb(fx_ty: FxTypeParam) -> (u8, u8, u8) {
         FxTypeParam::Limiter => (255, 122, 89),
         FxTypeParam::MultibandDist => (255, 108, 72),
         FxTypeParam::Flanger => (156, 168, 255),
+        FxTypeParam::FreqShifter => (136, 224, 245),
     }
 }
 
@@ -1152,6 +1155,16 @@ impl View for FxSlotVisualizer {
                 &self.mod_ui,
                 &pal,
             ),
+            FxTypeParam::FreqShifter => paint_freq_shifter_scope(
+                canvas,
+                bounds,
+                dpx,
+                self.bus_idx,
+                self.slot_idx,
+                &self.params,
+                &self.mod_ui,
+                &pal,
+            ),
             FxTypeParam::Filter => paint_filter_scope(
                 canvas,
                 bounds,
@@ -1615,6 +1628,168 @@ fn paint_flanger_scope(
         dot.circle(cx_o + ang.cos() * rad * 0.72, cy_o + ang.sin() * rad * 0.72, 1.8 * dpx);
         let dp = vg::Paint::color(vg::Color::rgba(col.0, col.1, col.2, if enabled { 235 } else { 100 }));
         canvas.fill_path(&dot, &dp);
+    }
+
+    f.end(canvas, pal);
+}
+
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn paint_freq_shifter_scope(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    dpx: f32,
+    bus_idx: usize,
+    slot_idx: usize,
+    params: &JSynPluginParams,
+    mod_ui: &ModUiState,
+    pal: &ThemePalette,
+) {
+    let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
+    let enabled = slot.enabled.value();
+    let f = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 3.0, enabled, pal);
+    let accent = scope_trace_rgb(fx_accent_rgb(FxTypeParam::FreqShifter), pal, enabled);
+
+    let top_inset = 20.0 * dpx;
+    paint_filter_freq_grid(
+        canvas,
+        f.ix,
+        f.iy + top_inset,
+        f.iw,
+        (f.ih - top_inset).max(8.0),
+        dpx,
+        pal,
+        enabled,
+        &[(0.0, 22, 10)],
+        -12.0,
+        12.0,
+    );
+
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
+    let tel = &mod_ui.telemetry;
+    let fine_n = (slot.p5.value()
+        + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 4)))
+    .clamp(0.0, 1.0);
+    let stereo_n = (slot.p6.value()
+        + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 5)))
+    .clamp(0.0, 1.0);
+
+    let shift_hz = freq_shift_coarse_hz(eff[0]) + freq_shift_fine_hz(fine_n);
+    let split_hz = freq_shift_split_hz(eff[1]);
+    let fb = freq_shift_feedback(eff[2]);
+    let mix = eff[3].clamp(0.0, 1.0);
+    let mode: FreqShiftMode = slot.freq_shift_mode.value().into();
+    let split_band: FreqSplitBand = slot.freq_shift_split.value().into();
+
+    let x_split = f.ix + filter_freq_to_norm(split_hz) * f.iw;
+    let (band_x0, band_x1) = match split_band {
+        FreqSplitBand::Hi => (x_split, f.ix + f.iw),
+        FreqSplitBand::Lo => (f.ix, x_split),
+        FreqSplitBand::Full => (f.ix, f.ix + f.iw),
+    };
+
+    // Shaded active shifted region
+    let body_y = f.iy + top_inset;
+    let body_h = (f.bottom - body_y).max(8.0);
+    if (band_x1 - band_x0) > 1.0 {
+        let mut band_bg = vg::Path::new();
+        band_bg.rect(band_x0, body_y, band_x1 - band_x0, body_h);
+        let fill_a = if enabled {
+            (18.0 + mix * 22.0) as u8
+        } else {
+            8
+        };
+        canvas.fill_path(
+            &band_bg,
+            &vg::Paint::color(vg::Color::rgba(accent.0, accent.1, accent.2, fill_a)),
+        );
+    }
+
+    // Animated harmonic comb bars moving UP (+freq), DOWN (-freq), or DUAL (<->)
+    let elapsed_s = scope_elapsed_secs();
+    let base_vel = if shift_hz.abs() < 0.05 {
+        0.0
+    } else {
+        shift_hz.signum() * (1.0 + shift_hz.abs()).log10() * 0.55
+    };
+    let dir_vel = match mode {
+        FreqShiftMode::Up => base_vel,
+        FreqShiftMode::Down => -base_vel,
+        FreqShiftMode::Dual => base_vel,
+    };
+    let step_hold = !params.hq_mode.value();
+    let phase_scroll = if step_hold {
+        (elapsed_s * 12.0).floor() / 12.0 * dir_vel
+    } else {
+        elapsed_s * dir_vel
+    };
+
+    canvas.save();
+    canvas.intersect_scissor(band_x0, body_y, (band_x1 - band_x0).max(1.0), body_h);
+
+    let num_lines = 7usize;
+    let echoes = if fb > 0.03 { 3 } else { 1 };
+    for dir_pass in 0..(if mode == FreqShiftMode::Dual { 2 } else { 1 }) {
+        let pass_sign = if dir_pass == 0 { 1.0 } else { -1.0 };
+        let col = if dir_pass == 0 {
+            accent
+        } else {
+            scope_trace_rgb(theme::hex_to_rgb(&pal.accent_gold), pal, enabled)
+        };
+        for k in 0..num_lines {
+            let norm_x = ((k as f32 / num_lines as f32) + phase_scroll * pass_sign).rem_euclid(1.0);
+            let x = f.ix + norm_x * f.iw;
+            for echo in 0..echoes {
+                let fade = (1.0 - echo as f32 / (echoes as f32 + 0.3)) * (0.35 + mix * 0.65);
+                let fb_gain = if echo == 0 { 1.0 } else { fb.powi(echo as i32) };
+                let ex = x - (echo as f32) * pass_sign * dir_vel.signum() * 5.0 * dpx;
+                let h_frac = (0.35 + 0.52 * (1.0 - echo as f32 * 0.25)) * fade * fb_gain;
+                let line_h = body_h * h_frac.clamp(0.12, 0.90);
+                let mut bar = vg::Path::new();
+                bar.move_to(ex, f.bottom);
+                bar.line_to(ex, f.bottom - line_h);
+                let alpha = if enabled {
+                    ((210.0 * fade * fb_gain) as u8).clamp(24, 225)
+                } else {
+                    40
+                };
+                let mut lp = vg::Paint::color(vg::Color::rgba(col.0, col.1, col.2, alpha));
+                lp.set_line_width((if echo == 0 { 1.6 } else { 1.1 }) * dpx);
+                canvas.stroke_path(&bar, &lp);
+            }
+        }
+    }
+
+    // Stereo opposite indicator ribbon when EQ STEREO > 2%
+    if stereo_n > 0.02 {
+        let r_col = scope_trace_rgb(theme::hex_to_rgb(&pal.accent_gold), pal, enabled);
+        let mut st_bar = vg::Path::new();
+        st_bar.rect(band_x0, f.bottom - 2.0 * dpx, (band_x1 - band_x0).max(0.0), 2.0 * dpx);
+        canvas.fill_path(
+            &st_bar,
+            &vg::Paint::color(vg::Color::rgba(
+                r_col.0,
+                r_col.1,
+                r_col.2,
+                if enabled { (80.0 + 140.0 * stereo_n) as u8 } else { 40 },
+            )),
+        );
+    }
+    canvas.restore();
+
+    // Draw LR4 crossover divider line when HI or LO split is selected
+    if split_band != FreqSplitBand::Full {
+        let mut xov = vg::Path::new();
+        xov.move_to(x_split, body_y);
+        xov.line_to(x_split, f.bottom);
+        let mut xp = vg::Paint::color(vg::Color::rgba(
+            accent.0,
+            accent.1,
+            accent.2,
+            if enabled { 220 } else { 95 },
+        ));
+        xp.set_line_width(1.4 * dpx);
+        canvas.stroke_path(&xov, &xp);
     }
 
     f.end(canvas, pal);

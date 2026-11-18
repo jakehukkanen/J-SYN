@@ -3,14 +3,16 @@
 use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::ModDestination;
-use nih_plug::prelude::GuiContext;
+use j_syn_dsp::{format_freq_shift_hz, freq_shift_coarse_hz};
+use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
     bold_label, build_enum_dropdown, build_flex_knob_cell_mod_dim, build_module_header,
 };
 use super::mod_bar::ModUiState;
-use super::{AMBER_RGB, CORAL_RGB, UiData};
+use super::widgets::{KnobDimExt, RotaryKnob};
+use super::{AMBER_RGB, CORAL_RGB, UiData, UiEvent};
 use crate::{InsertModeParam, InsertPosParam, JSynPluginParams};
 
 #[inline]
@@ -52,6 +54,7 @@ pub(super) const INSERT_MODE_ITEMS: &[(&str, InsertModeParam)] = &[
     ("Hard Clip", InsertModeParam::HardClip),
     ("Half Rect", InsertModeParam::HalfRectify),
     ("Full Rect", InsertModeParam::FullRectify),
+    ("Freq Shift", InsertModeParam::FreqShifter),
 ];
 
 pub(super) const INSERT_POS_ITEMS: &[(&str, InsertPosParam)] = &[
@@ -102,21 +105,66 @@ fn build_insert_slot_row(
                 .height(Pixels(19.0))
                 .width(Stretch(1.0));
 
-                HStack::new(cx, move |cx| {
-                    bold_label(cx, "POS", "mini-label")
-                        .width(Pixels(34.0))
-                        .height(Stretch(1.0))
-                        .child_space(Stretch(1.0));
+                HStack::new(cx, {
+                    let params = params.clone();
+                    let gui_context = gui_context.clone();
+                    let p_kt_vis = params.clone();
+                    let p_kt_act = params.clone();
+                    let g_kt_act = gui_context.clone();
+                    move |cx| {
+                        bold_label(cx, "POS", "mini-label")
+                            .width(Pixels(34.0))
+                            .height(Stretch(1.0))
+                            .child_space(Stretch(1.0));
 
-                    build_enum_dropdown(
-                        cx,
-                        params.clone(),
-                        gui_context.clone(),
-                        move |p| &p.routing.inserts[slot_idx].position,
-                        INSERT_POS_ITEMS,
-                    )
-                    .width(Stretch(1.0))
-                    .height(Pixels(19.0));
+                        build_enum_dropdown(
+                            cx,
+                            params.clone(),
+                            gui_context.clone(),
+                            move |p| &p.routing.inserts[slot_idx].position,
+                            INSERT_POS_ITEMS,
+                        )
+                        .width(Stretch(1.0))
+                        .height(Pixels(19.0));
+
+                        Binding::new(
+                            cx,
+                            UiData::mod_ui_rev.map(move |_| {
+                                p_kt_vis.routing.inserts[slot_idx].mode.value()
+                                    == InsertModeParam::FreqShifter
+                            }),
+                            move |cx, is_sh_lens| {
+                                if !is_sh_lens.get(cx) {
+                                    return;
+                                }
+                                let p_kt_c = p_kt_act.clone();
+                                let g_kt_c = g_kt_act.clone();
+                                Button::new(
+                                    cx,
+                                    move |cx| {
+                                        let setter = ParamSetter::new(g_kt_c.as_ref());
+                                        let p = &p_kt_c.routing.inserts[slot_idx].keytrack;
+                                        let next = !p.value();
+                                        setter.begin_set_parameter(p);
+                                        setter.set_parameter(p, next);
+                                        setter.end_set_parameter(p);
+                                        cx.emit(UiEvent::ModUiChanged);
+                                    },
+                                    |cx| bold_label(cx, "KT", "fx-subtab-lbl").hoverable(false),
+                                )
+                                .class("fx-scope-pill")
+                                .class("fx-scope-flt-btn")
+                                .toggle_class(
+                                    "fx-subtab-active",
+                                    UiData::params.map(move |p| {
+                                        p.routing.inserts[slot_idx].keytrack.value()
+                                    }),
+                                )
+                                .width(Pixels(24.0))
+                                .height(Pixels(19.0));
+                            },
+                        );
+                    }
                 })
                 .class("insert-pos-row")
                 .toggle_class(
@@ -134,20 +182,75 @@ fn build_insert_slot_row(
 
         HStack::new(cx, {
             let mod_ui = mod_ui.clone();
+            let p_mode = params.clone();
             move |cx| {
-                build_flex_knob_cell_mod_dim(
+                Binding::new(
                     cx,
-                    UiData::params,
-                    move |p| &p.routing.inserts[slot_idx].drive,
-                    "DRIVE",
-                    false,
-                    accent,
-                    34.0,
-                    ModDestination::insert_drive(slot_idx),
-                    mod_ui.clone(),
-                    0,
-                    p_knob_dim,
-                    slot_check,
+                    UiData::mod_ui_rev.map(move |_| {
+                        (
+                            p_mode.routing.inserts[slot_idx].mode.value()
+                                == InsertModeParam::FreqShifter,
+                            p_mode.routing.inserts[slot_idx].keytrack.value(),
+                        )
+                    }),
+                    move |cx, mode_lens| {
+                        let (is_freq_shift, is_kt) = mode_lens.get(cx);
+                        if is_freq_shift {
+                            let p_cell = p_knob_dim.clone();
+                            let mod_cell = mod_ui.clone();
+                            let formatter = Arc::new(move |norm: f32, _off: Option<f32>| {
+                                let txt = format_freq_shift_hz(freq_shift_coarse_hz(norm));
+                                if is_kt {
+                                    format!("{txt} (KT)")
+                                } else {
+                                    txt
+                                }
+                            });
+                            VStack::new(cx, move |cx| {
+                                bold_label(cx, "SHIFT", "knob-title")
+                                    .width(Stretch(1.0))
+                                    .height(Pixels(12.0))
+                                    .child_space(Stretch(1.0));
+
+                                RotaryKnob::new_with_mod_formatter(
+                                    cx,
+                                    UiData::params,
+                                    move |p| &p.routing.inserts[slot_idx].drive,
+                                    true,
+                                    accent,
+                                    ModDestination::insert_drive(slot_idx),
+                                    mod_cell,
+                                    0,
+                                    formatter,
+                                )
+                                .default_norm(Some(0.5))
+                                .enabled_by(p_cell, slot_check)
+                                .width(Pixels(34.0))
+                                .height(Pixels(34.0))
+                                .left(Stretch(1.0))
+                                .right(Stretch(1.0));
+                            })
+                            .class("knob-cell")
+                            .width(Stretch(1.0))
+                            .height(Auto)
+                            .row_between(Pixels(1.0));
+                        } else {
+                            build_flex_knob_cell_mod_dim(
+                                cx,
+                                UiData::params,
+                                move |p| &p.routing.inserts[slot_idx].drive,
+                                "DRIVE",
+                                false,
+                                accent,
+                                34.0,
+                                ModDestination::insert_drive(slot_idx),
+                                mod_ui.clone(),
+                                0,
+                                p_knob_dim.clone(),
+                                slot_check,
+                            );
+                        }
+                    },
                 );
             }
         })

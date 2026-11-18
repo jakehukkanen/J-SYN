@@ -9,6 +9,7 @@ use j_syn_dsp::{
 };
 use nih_plug::prelude::*;
 
+use super::fx::{FreqShiftModeParam, FreqSplitBandParam};
 use super::{bipolar_percentage_param, percentage_param};
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -285,6 +286,8 @@ pub enum InsertModeParam {
     HalfRectify,
     #[name = "Full Rect"]
     FullRectify,
+    #[name = "Freq Shift"]
+    FreqShifter,
 }
 
 impl From<InsertModeParam> for InsertMode {
@@ -309,6 +312,7 @@ impl From<InsertModeParam> for InsertMode {
             InsertModeParam::HardClip => InsertMode::HardClip,
             InsertModeParam::HalfRectify => InsertMode::HalfRectify,
             InsertModeParam::FullRectify => InsertMode::FullRectify,
+            InsertModeParam::FreqShifter => InsertMode::FreqShifter,
         }
     }
 }
@@ -454,6 +458,18 @@ pub struct InsertSlotPluginParams {
 
     #[id = "ins_mix"]
     pub mix: FloatParam,
+
+    #[id = "ins_sh_m"]
+    pub shift_mode: EnumParam<FreqShiftModeParam>,
+
+    #[id = "ins_sh_s"]
+    pub shift_split: EnumParam<FreqSplitBandParam>,
+
+    #[id = "ins_split"]
+    pub split: FloatParam,
+
+    #[id = "ins_kt"]
+    pub keytrack: BoolParam,
 }
 
 impl InsertSlotPluginParams {
@@ -468,6 +484,10 @@ impl InsertSlotPluginParams {
             position: EnumParam::new("Insert Position", default_pos),
             drive: percentage_param("Insert Drive", 0.25),
             mix: percentage_param("Insert Mix", 1.0),
+            shift_mode: EnumParam::new("Insert Shift Mode", FreqShiftModeParam::Up),
+            shift_split: EnumParam::new("Insert Split Band", FreqSplitBandParam::Full),
+            split: percentage_param("Insert Split Hz", 0.45),
+            keytrack: BoolParam::new("Insert Keytrack", false),
         }
     }
 
@@ -477,6 +497,10 @@ impl InsertSlotPluginParams {
             position: self.position.value().into(),
             drive: self.drive.value(),
             mix: self.mix.value(),
+            shift_mode: self.shift_mode.value().into(),
+            shift_split: self.shift_split.value().into(),
+            split_norm: self.split.value(),
+            keytrack: self.keytrack.value(),
         }
     }
 }
