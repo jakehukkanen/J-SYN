@@ -16,5 +16,7 @@ CrushClone-rs/
 Scream/
 
 # Local scratch / audio renders
+gitignored-captures/
 *.pyc
 *.wav
+.local-install.sh

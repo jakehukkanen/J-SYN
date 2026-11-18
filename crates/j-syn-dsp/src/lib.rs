@@ -14,6 +14,9 @@ pub mod oversample;
 pub mod serde_lenient;
 pub mod voice;
 pub mod wavetable;
+pub mod waveshaper;
+
+pub use waveshaper::DistortionMode;
 
 pub use engine::{SynthEngine, MAX_TAIL_VOICES, MAX_VOICES};
 pub use envelope::{evaluate_adsr_preview, AdsrParams, AdsrStage, AmpAdsr};

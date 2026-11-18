@@ -2,8 +2,8 @@
 //! Zero audio-thread heap allocations; uses pre-allocated biquad crossovers & 4x oversamplers.
 
 use crate::adaa::TanhAdaa2;
-use crate::insert::{mech_clip, tube_saturate};
 use crate::oversample::{Biquad, BiquadCoeffs, Oversampler4x};
+use crate::waveshaper::{shape_sample, DistortionMode};
 
 use super::{
     butterworth_allpass_coeffs, butterworth_hp_coeffs, butterworth_lp_coeffs, flush_denormal,
@@ -201,11 +201,15 @@ impl OttStereo {
     }
 }
 
-/// 4x oversampled stereo master distortion (`Tube`, `Mech`, `Sine`, `Crush`).
+/// 4x oversampled stereo master distortion (`Tube`, `Mech`, `Sine`, `Crush`, `Classic A/B/C`,
+/// `Diode A/B`, `Linear/Sine Fold`, `Hard Clip`, `Half/Full Rect`).
 pub(crate) struct DistortionStereo {
     oversamplers: [Oversampler4x; 2],
     mech_low_shelf: [Biquad; 2],
     mech_high_shelf: [Biquad; 2],
+    classic_hp_x: [f32; 2],
+    classic_hp_y: [f32; 2],
+    classic_lp: [f32; 2],
     tone_lp_l: f32,
     tone_lp_r: f32,
     crush_phase: f32,
@@ -221,6 +225,9 @@ impl DistortionStereo {
             oversamplers: [Oversampler4x::new(); 2],
             mech_low_shelf: [Biquad::default(); 2],
             mech_high_shelf: [Biquad::default(); 2],
+            classic_hp_x: [0.0; 2],
+            classic_hp_y: [0.0; 2],
+            classic_lp: [0.0; 2],
             tone_lp_l: 0.0,
             tone_lp_r: 0.0,
             crush_phase: 1.0,
@@ -250,6 +257,9 @@ impl DistortionStereo {
             self.mech_low_shelf[ch].reset();
             self.mech_high_shelf[ch].reset();
         }
+        self.classic_hp_x = [0.0; 2];
+        self.classic_hp_y = [0.0; 2];
+        self.classic_lp = [0.0; 2];
         self.tone_lp_l = 0.0;
         self.tone_lp_r = 0.0;
         self.crush_phase = 1.0;
@@ -272,12 +282,18 @@ impl DistortionStereo {
     }
 
     #[inline]
-    pub(crate) fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+    pub(crate) fn process(
+        &mut self,
+        in_l: f32,
+        in_r: f32,
+        mode: DistortionMode,
+        p: [f32; 4],
+    ) -> (f32, f32, f32) {
         if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 128 {
             return (0.0, 0.0, 0.0);
         }
 
-        let mode_idx = Self::sub_mode_index(p[0].clamp(0.0, 1.0));
+        let bias = (p[0].clamp(0.0, 1.0) * 2.0) - 1.0;
         let drive = p[1].clamp(0.0, 1.0);
         let tone = p[2].clamp(0.0, 1.0);
         let mix = p[3].clamp(0.0, 1.0);
@@ -286,14 +302,16 @@ impl DistortionStereo {
             return (in_l, in_r, 0.0);
         }
 
-        let (mut wl, mut wr) = if mode_idx == 3 {
+        let (mut wl, mut wr) = if mode == DistortionMode::Crush {
             let step = 1.0 / (1.0 + drive * drive * 31.0);
             let levels = 2.0_f32.powf(11.0 - drive * 8.5);
+            let bo = bias * 0.2;
+            let bq = (bo.clamp(-1.5, 1.5) * levels).round() / levels;
             self.crush_phase += step;
             if self.crush_phase >= 1.0 {
                 self.crush_phase = self.crush_phase.fract();
-                self.hold_l = (in_l.clamp(-1.5, 1.5) * levels).round() / levels;
-                self.hold_r = (in_r.clamp(-1.5, 1.5) * levels).round() / levels;
+                self.hold_l = ((in_l + bo).clamp(-1.5, 1.5) * levels).round() / levels - bq;
+                self.hold_r = ((in_r + bo).clamp(-1.5, 1.5) * levels).round() / levels - bq;
             }
             (self.hold_l, self.hold_r)
         } else {
@@ -302,14 +320,26 @@ impl DistortionStereo {
             for ch in 0..2 {
                 let low_shelf = &mut self.mech_low_shelf[ch];
                 let high_shelf = &mut self.mech_high_shelf[ch];
-                ch_out[ch] = self.oversamplers[ch].process_sample(inputs[ch], |x| match mode_idx {
-                    0 => tube_saturate(x, drive),
-                    1 => {
+                ch_out[ch] = self.oversamplers[ch].process_sample(inputs[ch], |x| match mode {
+                    DistortionMode::Mech => {
                         let m = high_shelf.process(low_shelf.process(x));
-                        mech_clip(m, drive)
+                        shape_sample(DistortionMode::Mech, m, drive, bias)
                     }
-                    _ => (x * (1.0 + drive * 6.0)).sin() * 0.85,
+                    _ => shape_sample(mode, x, drive, bias),
                 });
+            }
+            if mode == DistortionMode::ClassicA {
+                // Subtle ~35 Hz coupling HPF + ~18 kHz warmth LPF matching Classic A's tilt.
+                let hp_r = (-std::f32::consts::TAU * 35.0 / self.sample_rate).exp().clamp(0.9, 0.9999);
+                let lp_a = (1.0 - (-std::f32::consts::TAU * 18_000.0 / self.sample_rate).exp()).clamp(0.05, 1.0);
+                for ch in 0..2 {
+                    let x = ch_out[ch];
+                    let hp = x - self.classic_hp_x[ch] + hp_r * self.classic_hp_y[ch];
+                    self.classic_hp_x[ch] = x;
+                    self.classic_hp_y[ch] = hp;
+                    self.classic_lp[ch] += lp_a * (hp - self.classic_lp[ch]);
+                    ch_out[ch] = self.classic_lp[ch];
+                }
             }
             (ch_out[0], ch_out[1])
         };

@@ -265,6 +265,26 @@ pub enum InsertModeParam {
     SoftClip,
     #[name = "Bitcrush"]
     Bitcrush,
+    #[name = "Classic A"]
+    ClassicA,
+    #[name = "Classic B"]
+    ClassicB,
+    #[name = "Classic C"]
+    ClassicC,
+    #[name = "Diode A"]
+    DiodeA,
+    #[name = "Diode B"]
+    DiodeB,
+    #[name = "Linear Fold"]
+    LinearFold,
+    #[name = "Sine Fold"]
+    SineFold,
+    #[name = "Hard Clip"]
+    HardClip,
+    #[name = "Half Rect"]
+    HalfRectify,
+    #[name = "Full Rect"]
+    FullRectify,
 }
 
 impl From<InsertModeParam> for InsertMode {
@@ -279,6 +299,16 @@ impl From<InsertModeParam> for InsertMode {
             InsertModeParam::Parabolic => InsertMode::Parabolic,
             InsertModeParam::SoftClip => InsertMode::SoftClip,
             InsertModeParam::Bitcrush => InsertMode::Bitcrush,
+            InsertModeParam::ClassicA => InsertMode::ClassicA,
+            InsertModeParam::ClassicB => InsertMode::ClassicB,
+            InsertModeParam::ClassicC => InsertMode::ClassicC,
+            InsertModeParam::DiodeA => InsertMode::DiodeA,
+            InsertModeParam::DiodeB => InsertMode::DiodeB,
+            InsertModeParam::LinearFold => InsertMode::LinearFold,
+            InsertModeParam::SineFold => InsertMode::SineFold,
+            InsertModeParam::HardClip => InsertMode::HardClip,
+            InsertModeParam::HalfRectify => InsertMode::HalfRectify,
+            InsertModeParam::FullRectify => InsertMode::FullRectify,
         }
     }
 }

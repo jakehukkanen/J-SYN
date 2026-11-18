@@ -24,8 +24,8 @@ use super::mod_bar::{ModUiState, FX_VIEW_TAG, MAIN_FX_A_TAG, MAIN_FX_B_TAG};
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
 use super::{AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData, UiEvent};
 use crate::{
-    DiopserStagesParam, FilterModeParam, FxBusTopologyParam, FxFilterSlopeParam, FxTypeParam,
-    JSynPluginParams,
+    DiopserStagesParam, DistortionModeParam, FilterModeParam, FxBusTopologyParam,
+    FxFilterSlopeParam, FxTypeParam, JSynPluginParams,
 };
 
 const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
@@ -74,6 +74,23 @@ const DIOPSER_STAGE_ITEMS: &[(&str, DiopserStagesParam)] = &[
     ("32", DiopserStagesParam::S32),
     ("64", DiopserStagesParam::S64),
     ("128", DiopserStagesParam::S128),
+];
+
+const DISTORTION_MODE_ITEMS: &[(&str, DistortionModeParam)] = &[
+    ("Tube", DistortionModeParam::Tube),
+    ("Mech", DistortionModeParam::Mech),
+    ("Sine", DistortionModeParam::Sine),
+    ("Crush", DistortionModeParam::Crush),
+    ("Classic A", DistortionModeParam::ClassicA),
+    ("Classic B", DistortionModeParam::ClassicB),
+    ("Classic C", DistortionModeParam::ClassicC),
+    ("Diode A", DistortionModeParam::DiodeA),
+    ("Diode B", DistortionModeParam::DiodeB),
+    ("Linear Fold", DistortionModeParam::LinearFold),
+    ("Sine Fold", DistortionModeParam::SineFold),
+    ("Hard Clip", DistortionModeParam::HardClip),
+    ("Half Rect", DistortionModeParam::HalfRectify),
+    ("Full Rect", DistortionModeParam::FullRectify),
 ];
 
 #[inline]
@@ -147,7 +164,7 @@ fn fx_slot_param_label(
             _ => "OUT GN",
         },
         FxTypeParam::Distortion => match param_idx {
-            0 => "TYPE",
+            0 => "BIAS",
             1 => "DRIVE",
             2 => "TONE",
             _ => "MIX",
@@ -279,9 +296,8 @@ fn format_fx_slot_param_value(
             _ => String::new(),
         },
         FxTypeParam::Distortion => match param_idx {
-            0 => FxRackState::format_distortion_submode(n).to_string(),
+            0 | 2 => format!("{:+.0}%", (n - 0.5) * 200.0),
             1 | 3 => format!("{:.0}%", n * 100.0),
-            2 => format!("{:+.0}%", (n - 0.5) * 200.0),
             _ => String::new(),
         },
         FxTypeParam::Chorus => match param_idx {
@@ -383,6 +399,7 @@ struct SlotSnapshot {
     util_inv_l: bool,
     util_inv_r: bool,
     lim_tp: bool,
+    dist_m: DistortionModeParam,
 }
 
 /// Swaps all settings, EQ sub-tabs, and modulation assignments between two slots of `bus_idx`.
@@ -414,6 +431,7 @@ fn swap_fx_slots(
             util_inv_l: s.utility_inv_l.value(),
             util_inv_r: s.utility_inv_r.value(),
             lim_tp: s.limiter_true_peak.value(),
+            dist_m: s.distortion_mode.value(),
         }
     };
     let a = capture(slot_a);
@@ -472,6 +490,10 @@ fn swap_fx_slots(
         setter.begin_set_parameter(&s.limiter_true_peak);
         setter.set_parameter(&s.limiter_true_peak, snap.lim_tp);
         setter.end_set_parameter(&s.limiter_true_peak);
+
+        setter.begin_set_parameter(&s.distortion_mode);
+        setter.set_parameter(&s.distortion_mode, snap.dist_m);
+        setter.end_set_parameter(&s.distortion_mode);
     };
 
     write(slot_a, b);
@@ -774,6 +796,18 @@ fn build_fx_scope_zstack(
                         };
 
                     match fx_ty {
+                        FxTypeParam::Distortion => {
+                            build_enum_dropdown(
+                                cx,
+                                p_ov.clone(),
+                                g_ov.clone(),
+                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].distortion_mode,
+                                DISTORTION_MODE_ITEMS,
+                            )
+                            .class("fx-scope-dd")
+                            .width(Pixels(72.0))
+                            .height(Pixels(17.0));
+                        }
                         FxTypeParam::Filter => {
                             build_enum_dropdown(
                                 cx,

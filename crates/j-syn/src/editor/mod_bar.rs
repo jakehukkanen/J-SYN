@@ -140,7 +140,8 @@ impl ModUiState {
                     | ((fx.tube_res_filter_enabled.value() as u64) << 19)
                     | ((fx.utility_inv_l.value() as u64) << 20)
                     | ((fx.utility_inv_r.value() as u64) << 21)
-                    | ((fx.limiter_true_peak.value() as u64) << 22);
+                    | ((fx.limiter_true_peak.value() as u64) << 22)
+                    | ((fx.distortion_mode.value() as u64) << 23);
                 Self::fnv1a_mix(&mut h, packed);
             }
         }
