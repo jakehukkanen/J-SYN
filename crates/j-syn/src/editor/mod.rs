@@ -1214,7 +1214,12 @@ pub(crate) fn create(
             })
             .position_type(PositionType::SelfDirected)
             .left(UiData::tooltip.map(|tt| {
-                Pixels((tt.center_x - 110.0).clamp(4.0, BASE_WIDTH as f32 - 224.0))
+                let est_pill_w = (tt.text.len() as f32 * 5.6 + 18.0).clamp(44.0, 210.0);
+                let half_w = est_pill_w * 0.5;
+                let clamped_cx = tt
+                    .center_x
+                    .clamp(4.0 + half_w, BASE_WIDTH as f32 - 4.0 - half_w);
+                Pixels(clamped_cx - 110.0)
             }))
             .top(UiData::tooltip.map(|tt| {
                 let top_y = if tt.anchor_top >= 26.0 {
