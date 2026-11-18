@@ -182,12 +182,14 @@ fn split_filter_send(l: f32, r: f32, balance: f32, f1_l: &mut f32, f1_r: &mut f3
 }
 
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn run_inserts_at(
     pos: InsertPosition,
     inserts: &mut [InsertShaperState; 2],
     routing: &RoutingParams,
     engine_mode: EngineMode,
     sample_rate: f32,
+    note_hz: f32,
     mut l: f32,
     mut r: f32,
 ) -> (f32, f32) {
@@ -199,6 +201,7 @@ fn run_inserts_at(
                 &routing.inserts[idx],
                 engine_mode,
                 sample_rate,
+                note_hz,
             );
         }
     }
@@ -498,6 +501,7 @@ fn process_voice_bus<F: StereoFilterStage>(
             &mod_routing,
             params.engine_mode,
             sample_rate,
+            base_hz,
             f1_l,
             f1_r,
         );
@@ -509,6 +513,7 @@ fn process_voice_bus<F: StereoFilterStage>(
             &mod_routing,
             params.engine_mode,
             sample_rate,
+            base_hz,
             f2_l,
             f2_r,
         );
@@ -530,6 +535,7 @@ fn process_voice_bus<F: StereoFilterStage>(
         &mod_routing,
         params.engine_mode,
         sample_rate,
+        base_hz,
         out1_l,
         out1_r,
     );
@@ -572,6 +578,7 @@ fn process_voice_bus<F: StereoFilterStage>(
                 &mod_routing,
                 params.engine_mode,
                 sample_rate,
+                base_hz,
                 post_l,
                 post_r,
             );
@@ -600,6 +607,7 @@ fn process_voice_bus<F: StereoFilterStage>(
                     &mod_routing,
                     params.engine_mode,
                     sample_rate,
+                    base_hz,
                     post_l,
                     post_r,
                 );
@@ -618,6 +626,7 @@ fn process_voice_bus<F: StereoFilterStage>(
                     &mod_routing,
                     params.engine_mode,
                     sample_rate,
+                    base_hz,
                     b1_l,
                     b1_r,
                 );
@@ -627,6 +636,7 @@ fn process_voice_bus<F: StereoFilterStage>(
                     &mod_routing,
                     params.engine_mode,
                     sample_rate,
+                    base_hz,
                     b2_l,
                     b2_r,
                 );

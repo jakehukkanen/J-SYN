@@ -3386,3 +3386,157 @@ fn fx_flanger_high_feedback_polarity_stack_mod_and_idle() {
     let (il, ir) = idle_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &ip, &mod_zero, 120.0, None);
     assert_eq!((il, ir), (0.0, 0.0));
 }
+
+#[test]
+fn freq_shifter_fx_ssb_rejection_dual_split_and_insert_keytracking() {
+    use j_syn_dsp::{
+        freq_shift_coarse_hz, FreqShiftMode, FreqSplitBand, FxRackParams, FxRackState,
+        FxSlotParams, FxType, InsertMode, InsertParams, InsertPosition, InsertShaperState,
+        EngineMode, NUM_MOD_DESTS,
+    };
+
+    fn goertzel_mag(buf: &[f32], freq_hz: f32, sr: f32) -> f32 {
+        let mut re = 0.0_f64;
+        let mut im = 0.0_f64;
+        let w = std::f64::consts::TAU * (freq_hz as f64) / (sr as f64);
+        for (i, &s) in buf.iter().enumerate() {
+            let ph = w * i as f64;
+            re += (s as f64) * ph.cos();
+            im -= (s as f64) * ph.sin();
+        }
+        re.hypot(im) as f32 / (buf.len() as f32 * 0.5)
+    }
+
+    let sr = 48_000.0_f32;
+    let mod_zero = [0.0_f32; NUM_MOD_DESTS];
+
+    // Helper: invert freq_shift_coarse_hz(+hz) -> norm in 0.5..=1.0
+    let norm_for_hz = |hz: f32| -> f32 {
+        let u = (hz / 2_000.0).clamp(-1.0, 1.0);
+        0.5 + 0.5 * u.signum() * u.abs().cbrt()
+    };
+    let shift_norm = norm_for_hz(150.0);
+    assert!((freq_shift_coarse_hz(shift_norm) - 150.0).abs() < 0.05);
+
+    // 1. Master FX SSB UP / DOWN / DUAL sideband rejection on 1000 Hz sine + +150 Hz shift
+    let render_mode = |mode: FreqShiftMode| -> Vec<f32> {
+        let mut rack = FxRackState::new(sr);
+        let mut p = FxRackParams::default();
+        p.buses[0].slots[0] = FxSlotParams {
+            fx_type: FxType::FreqShifter,
+            enabled: true,
+            stack: 1,
+            params: [shift_norm, 0.45, 0.0, 1.0],
+            eq_params: [0.5, 0.0, 0.0, 1.0],
+            freq_shift_mode: mode,
+            freq_shift_split: FreqSplitBand::Full,
+            ..FxSlotParams::default()
+        };
+        let mut out = Vec::with_capacity(4096);
+        for n in 0..8192 {
+            let x = (std::f32::consts::TAU * 1000.0 * n as f32 / sr).sin() * 0.5;
+            let (l, r) = rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &p, &mod_zero, 120.0, None);
+            assert!(l.is_finite() && r.is_finite());
+            if n >= 4096 {
+                out.push(l);
+            }
+        }
+        out
+    };
+
+    let up = render_mode(FreqShiftMode::Up);
+    let m_up_1150 = goertzel_mag(&up, 1150.0, sr);
+    let m_up_850 = goertzel_mag(&up, 850.0, sr);
+    let rej_up_db = 20.0 * (m_up_1150 / m_up_850.max(1e-9)).log10();
+    assert!(
+        rej_up_db > 38.0,
+        "Expected >38 dB SSB UP image rejection (1150={m_up_1150}, 850={m_up_850}, rej={rej_up_db:.1} dB)"
+    );
+
+    let dn = render_mode(FreqShiftMode::Down);
+    let m_dn_850 = goertzel_mag(&dn, 850.0, sr);
+    let m_dn_1150 = goertzel_mag(&dn, 1150.0, sr);
+    let rej_dn_db = 20.0 * (m_dn_850 / m_dn_1150.max(1e-9)).log10();
+    assert!(
+        rej_dn_db > 38.0,
+        "Expected >38 dB SSB DOWN image rejection (850={m_dn_850}, 1150={m_dn_1150}, rej={rej_dn_db:.1} dB)"
+    );
+
+    let dual = render_mode(FreqShiftMode::Dual);
+    let m_dual_1150 = goertzel_mag(&dual, 1150.0, sr);
+    let m_dual_850 = goertzel_mag(&dual, 850.0, sr);
+    assert!(
+        (m_dual_1150 - m_dual_850).abs() < 0.05 && m_dual_1150 > 0.2,
+        "DUAL mode should contain balanced +/-150 Hz sidebands: up={m_dual_1150}, dn={m_dual_850}"
+    );
+
+    // 2. HI split @ 1 kHz preserves 120 Hz bass unshifted while shifting 4000 Hz -> 4150 Hz
+    let mut split_rack = FxRackState::new(sr);
+    let mut sp = FxRackParams::default();
+    let split_1khz_norm = (1000.0_f32 / 20.0).log(1000.0);
+    sp.buses[0].slots[0] = FxSlotParams {
+        fx_type: FxType::FreqShifter,
+        enabled: true,
+        stack: 1,
+        params: [shift_norm, split_1khz_norm, 0.0, 1.0],
+        eq_params: [0.5, 0.0, 0.0, 1.0],
+        freq_shift_mode: FreqShiftMode::Up,
+        freq_shift_split: FreqSplitBand::Hi,
+        ..FxSlotParams::default()
+    };
+    let mut split_tail = Vec::with_capacity(4096);
+    for n in 0..8192 {
+        let t = n as f32 / sr;
+        let x = 0.4 * (std::f32::consts::TAU * 120.0 * t).sin()
+            + 0.4 * (std::f32::consts::TAU * 4000.0 * t).sin();
+        let (l, _) = split_rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
+        if n >= 4096 {
+            split_tail.push(l);
+        }
+    }
+    let bass_dry = goertzel_mag(&split_tail, 120.0, sr);
+    let bass_shifted = goertzel_mag(&split_tail, 270.0, sr);
+    let high_shifted = goertzel_mag(&split_tail, 4150.0, sr);
+    assert!(
+        bass_dry > 0.35 && bass_shifted < 0.02 && high_shifted > 0.30,
+        "HI split must keep 120 Hz clean ({bass_dry}) and shift 4000 Hz -> 4150 Hz ({high_shifted}); shifted bass={bass_shifted}"
+    );
+
+    // 3. Idle recovery returns exact (0.0, 0.0)
+    for _ in 0..30_000 {
+        let _ = split_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
+    }
+    let (il, ir) = split_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
+    assert_eq!((il, ir), (0.0, 0.0));
+
+    // 4. Per-voice InsertMode::FreqShifter keytracking scales BOTH shift Hz & split Hz with note frequency
+    let ins_p = InsertParams {
+        mode: InsertMode::FreqShifter,
+        position: InsertPosition::PreFilter,
+        drive: norm_for_hz(100.0),
+        mix: 1.0,
+        shift_mode: FreqShiftMode::Up,
+        shift_split: FreqSplitBand::Full,
+        split_norm: 0.45,
+        keytrack: true,
+    };
+    let c3_hz = 261.625_58_f32;
+    let c4_hz = c3_hz * 2.0; // 1 octave higher -> +200 Hz effective shift on C4 vs +100 Hz on C3!
+    let run_insert_note = |note_hz: f32| -> Vec<f32> {
+        let mut st = InsertShaperState::new();
+        st.set_sample_rate(sr);
+        let mut buf = Vec::with_capacity(4096);
+        for n in 0..8192 {
+            let x = (std::f32::consts::TAU * 1000.0 * n as f32 / sr).sin() * 0.5;
+            let (l, _) = st.process_stereo(x, x, &ins_p, EngineMode::Hq, sr, note_hz);
+            if n >= 4096 {
+                buf.push(l);
+            }
+        }
+        buf
+    };
+    let ins_c3 = run_insert_note(c3_hz);
+    let ins_c4 = run_insert_note(c4_hz);
+    assert!(goertzel_mag(&ins_c3, 1100.0, sr) > 0.40);
+    assert!(goertzel_mag(&ins_c4, 1200.0, sr) > 0.40);
+}

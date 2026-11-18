@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use j_syn_dsp::{
-    DistortionMode, FxBusTopology, FxFilterSlope, MbDistBandParams, SubBusParams,
-    MB_BAND_LEVEL_DEFAULT_NORM,
+    DistortionMode, FreqShiftMode, FreqSplitBand, FxBusTopology, FxFilterSlope, MbDistBandParams,
+    SubBusParams, MB_BAND_LEVEL_DEFAULT_NORM,
 };
 use nih_plug::prelude::*;
 
@@ -128,6 +128,8 @@ pub enum FxTypeParam {
     MultibandDist,
     #[name = "Flanger"]
     Flanger,
+    #[name = "Freq Shift"]
+    FreqShifter,
 }
 
 impl From<j_syn_dsp::FxType> for FxTypeParam {
@@ -148,6 +150,7 @@ impl From<j_syn_dsp::FxType> for FxTypeParam {
             j_syn_dsp::FxType::Limiter => Self::Limiter,
             j_syn_dsp::FxType::MultibandDist => Self::MultibandDist,
             j_syn_dsp::FxType::Flanger => Self::Flanger,
+            j_syn_dsp::FxType::FreqShifter => Self::FreqShifter,
         }
     }
 }
@@ -170,6 +173,67 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
             FxTypeParam::Limiter => Self::Limiter,
             FxTypeParam::MultibandDist => Self::MultibandDist,
             FxTypeParam::Flanger => Self::Flanger,
+            FxTypeParam::FreqShifter => Self::FreqShifter,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreqShiftModeParam {
+    #[name = "UP"]
+    Up,
+    #[name = "DOWN"]
+    Down,
+    #[name = "DUAL"]
+    Dual,
+}
+
+impl From<FreqShiftModeParam> for FreqShiftMode {
+    fn from(v: FreqShiftModeParam) -> Self {
+        match v {
+            FreqShiftModeParam::Up => Self::Up,
+            FreqShiftModeParam::Down => Self::Down,
+            FreqShiftModeParam::Dual => Self::Dual,
+        }
+    }
+}
+
+impl From<FreqShiftMode> for FreqShiftModeParam {
+    fn from(v: FreqShiftMode) -> Self {
+        match v {
+            FreqShiftMode::Up => Self::Up,
+            FreqShiftMode::Down => Self::Down,
+            FreqShiftMode::Dual => Self::Dual,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreqSplitBandParam {
+    #[name = "HI"]
+    Hi,
+    #[name = "LO"]
+    Lo,
+    #[name = "FULL"]
+    Full,
+}
+
+impl From<FreqSplitBandParam> for FreqSplitBand {
+    fn from(v: FreqSplitBandParam) -> Self {
+        match v {
+            FreqSplitBandParam::Hi => Self::Hi,
+            FreqSplitBandParam::Lo => Self::Lo,
+            FreqSplitBandParam::Full => Self::Full,
+        }
+    }
+}
+
+impl From<FreqSplitBand> for FreqSplitBandParam {
+    fn from(v: FreqSplitBand) -> Self {
+        match v {
+            FreqSplitBand::Hi => Self::Hi,
+            FreqSplitBand::Lo => Self::Lo,
+            FreqSplitBand::Full => Self::Full,
         }
     }
 }
@@ -409,6 +473,10 @@ pub struct FxSlotPluginParams {
     pub limiter_true_peak: BoolParam,
     #[id = "fx_dist_m"]
     pub distortion_mode: EnumParam<DistortionModeParam>,
+    #[id = "fx_fs_m"]
+    pub freq_shift_mode: EnumParam<FreqShiftModeParam>,
+    #[id = "fx_fs_s"]
+    pub freq_shift_split: EnumParam<FreqSplitBandParam>,
     #[nested(array, group = "MB Bands")]
     pub mb_bands: [Box<FxMbBandPluginParams>; 3],
 }
@@ -443,6 +511,8 @@ impl FxSlotPluginParams {
             utility_inv_r: BoolParam::new("Utility Inv R", init.utility_inv_r),
             limiter_true_peak: BoolParam::new("Limiter True Peak", init.limiter_true_peak),
             distortion_mode: EnumParam::new("Distortion Mode", DistortionModeParam::Tube),
+            freq_shift_mode: EnumParam::new("Freq Shift Mode", FreqShiftModeParam::Up),
+            freq_shift_split: EnumParam::new("Freq Shift Split", FreqSplitBandParam::Full),
             mb_bands: std::array::from_fn(|b| Box::new(FxMbBandPluginParams::new_band(b))),
         }
     }
@@ -493,6 +563,8 @@ impl FxSlotPluginParams {
             utility_inv_r: self.utility_inv_r.value(),
             limiter_true_peak: self.limiter_true_peak.value(),
             distortion_mode: self.distortion_mode.value().into(),
+            freq_shift_mode: self.freq_shift_mode.value().into(),
+            freq_shift_split: self.freq_shift_split.value().into(),
             mb_bands: [
                 self.mb_bands[0].to_dsp(),
                 self.mb_bands[1].to_dsp(),

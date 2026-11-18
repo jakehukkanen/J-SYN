@@ -7,9 +7,10 @@ use j_syn_dsp::filter::cutoff_norm_to_hz;
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{
     diopser_freq_hz, flanger_delay_ms, flanger_feedback, flanger_phase_deg, flanger_rate_hz,
-    format_tube_res_tune, format_utility_pan, fx_high_cut_hz, fx_low_cut_hz, limiter_ceil_db,
-    limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, mb_band_level_db, mb_out_gain_db,
-    mb_xover_high_hz, mb_xover_low_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
+    format_freq_shift_hz, format_tube_res_tune, format_utility_pan, freq_shift_coarse_hz,
+    freq_shift_feedback, freq_shift_fine_hz, freq_shift_split_hz, fx_high_cut_hz, fx_low_cut_hz,
+    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, mb_band_level_db,
+    mb_out_gain_db, mb_xover_high_hz, mb_xover_low_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
     tube_res_flt_width_oct, tube_res_lfo_rate_hz, utility_gain_db_from_norm,
     utility_width_from_norm, FxRackState, FxType, MB_BAND_LEVEL_DEFAULT_NORM,
 };
@@ -28,8 +29,8 @@ use super::mod_bar::{ModUiState, FX_VIEW_TAG, MAIN_FX_A_TAG, MAIN_FX_B_TAG};
 use super::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob};
 use super::{AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData, UiEvent};
 use crate::{
-    DiopserStagesParam, DistortionModeParam, FilterModeParam, FxBusTopologyParam,
-    FxFilterSlopeParam, FxTypeParam, JSynPluginParams,
+    DiopserStagesParam, DistortionModeParam, FilterModeParam, FreqShiftModeParam,
+    FreqSplitBandParam, FxBusTopologyParam, FxFilterSlopeParam, FxTypeParam, JSynPluginParams,
 };
 
 const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
@@ -43,11 +44,24 @@ const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Chorus", FxTypeParam::Chorus),
     ("Flanger", FxTypeParam::Flanger),
     ("Phaser", FxTypeParam::Phaser),
+    ("Freq Shift", FxTypeParam::FreqShifter),
     ("Delay", FxTypeParam::Delay),
     ("Reverb", FxTypeParam::Reverb),
     ("Filter", FxTypeParam::Filter),
     ("Dispersion", FxTypeParam::Diopser),
     ("Tube Res.", FxTypeParam::TubeResonator),
+];
+
+pub(super) const FX_FREQ_SHIFT_MODE_ITEMS: &[(&str, FreqShiftModeParam)] = &[
+    ("UP", FreqShiftModeParam::Up),
+    ("DOWN", FreqShiftModeParam::Down),
+    ("DUAL", FreqShiftModeParam::Dual),
+];
+
+pub(super) const FX_FREQ_SPLIT_ITEMS: &[(&str, FreqSplitBandParam)] = &[
+    ("HI", FreqSplitBandParam::Hi),
+    ("LO", FreqSplitBandParam::Lo),
+    ("FULL", FreqSplitBandParam::Full),
 ];
 
 const FX_FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
@@ -198,6 +212,12 @@ fn fx_slot_param_label(
                 2 => "LOW CUT",
                 _ => "TONE",
             },
+            FxTypeParam::FreqShifter => match param_idx {
+                0 => "FINE Hz",
+                1 => "STEREO",
+                2 => "LOW CUT",
+                _ => "HIGH CUT",
+            },
             _ => "--",
         };
     }
@@ -288,12 +308,18 @@ fn fx_slot_param_label(
             2 => "DELAY",
             _ => "MIX",
         },
+        FxTypeParam::FreqShifter => match param_idx {
+            0 => "SHIFT",
+            1 => "SPLIT",
+            2 => "FEEDBK",
+            _ => "MIX",
+        },
         FxTypeParam::MultibandDist => "--",
     }
 }
 
 #[inline]
-fn format_hz(hz: f32) -> String {
+pub(super) fn format_hz(hz: f32) -> String {
     if hz >= 10_000.0 {
         format!("{:.1} kHz", hz / 1000.0)
     } else if hz >= 1000.0 {
@@ -347,6 +373,14 @@ fn format_fx_slot_param_value(
             return match param_idx {
                 0 => format!("{:+.0}%", flanger_feedback(n) * 100.0),
                 1 => format!("{:.0}°", flanger_phase_deg(n)),
+                2 => format_hz(fx_low_cut_hz(n)),
+                _ => format_hz(fx_high_cut_hz(n)),
+            };
+        }
+        if fx_ty == FxTypeParam::FreqShifter {
+            return match param_idx {
+                0 => format_freq_shift_hz(freq_shift_fine_hz(n)),
+                1 => format!("{:.0}%", n * 100.0),
                 2 => format_hz(fx_low_cut_hz(n)),
                 _ => format_hz(fx_high_cut_hz(n)),
             };
@@ -443,6 +477,12 @@ fn format_fx_slot_param_value(
             2 => format!("{:.2} ms", flanger_delay_ms(n)),
             _ => format!("{:.0}%", n * 100.0),
         },
+        FxTypeParam::FreqShifter => match param_idx {
+            0 => format_freq_shift_hz(freq_shift_coarse_hz(n)),
+            1 => format_hz(freq_shift_split_hz(n)),
+            2 => format!("{:.0}%", freq_shift_feedback(n) * 100.0),
+            _ => format!("{:.0}%", n * 100.0),
+        },
         FxTypeParam::MultibandDist => String::new(),
     }
 }
@@ -485,6 +525,8 @@ struct SlotSnapshot {
     util_inv_r: bool,
     lim_tp: bool,
     dist_m: DistortionModeParam,
+    fs_m: FreqShiftModeParam,
+    fs_s: FreqSplitBandParam,
     mb_bands: [(DistortionModeParam, bool, bool, f32, f32, f32, f32); 3],
 }
 
@@ -518,6 +560,8 @@ fn swap_fx_slots(
             util_inv_r: s.utility_inv_r.value(),
             lim_tp: s.limiter_true_peak.value(),
             dist_m: s.distortion_mode.value(),
+            fs_m: s.freq_shift_mode.value(),
+            fs_s: s.freq_shift_split.value(),
             mb_bands: std::array::from_fn(|b| {
                 let mb = &s.mb_bands[b];
                 (
@@ -593,6 +637,14 @@ fn swap_fx_slots(
         setter.set_parameter(&s.distortion_mode, snap.dist_m);
         setter.end_set_parameter(&s.distortion_mode);
 
+        setter.begin_set_parameter(&s.freq_shift_mode);
+        setter.set_parameter(&s.freq_shift_mode, snap.fs_m);
+        setter.end_set_parameter(&s.freq_shift_mode);
+
+        setter.begin_set_parameter(&s.freq_shift_split);
+        setter.set_parameter(&s.freq_shift_split, snap.fs_s);
+        setter.end_set_parameter(&s.freq_shift_split);
+
         for (b, (m, en, solo, drv, bias, lvl, mix)) in snap.mb_bands.into_iter().enumerate() {
             let mb = &s.mb_bands[b];
             setter.begin_set_parameter(&mb.mode);
@@ -664,6 +716,12 @@ fn set_fx_slot_type_with_defaults(
         setter.begin_set_parameter(&slot.limiter_true_peak);
         setter.set_parameter(&slot.limiter_true_peak, false);
         setter.end_set_parameter(&slot.limiter_true_peak);
+        setter.begin_set_parameter(&slot.freq_shift_mode);
+        setter.set_parameter(&slot.freq_shift_mode, FreqShiftModeParam::Up);
+        setter.end_set_parameter(&slot.freq_shift_mode);
+        setter.begin_set_parameter(&slot.freq_shift_split);
+        setter.set_parameter(&slot.freq_shift_split, FreqSplitBandParam::Full);
+        setter.end_set_parameter(&slot.freq_shift_split);
         for mb in &slot.mb_bands {
             setter.begin_set_parameter(&mb.mode);
             setter.set_parameter(&mb.mode, DistortionModeParam::Tube);
@@ -1135,6 +1193,18 @@ fn build_fx_scope_zstack(
                         FxTypeParam::Limiter => {
                             add_util_inv_pill(cx, "TP", |s| &s.limiter_true_peak);
                         }
+                        FxTypeParam::FreqShifter => {
+                            build_enum_dropdown(
+                                cx,
+                                p_ov.clone(),
+                                g_ov.clone(),
+                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].freq_shift_mode,
+                                FX_FREQ_SHIFT_MODE_ITEMS,
+                            )
+                            .class("fx-scope-dd")
+                            .width(Pixels(48.0))
+                            .height(Pixels(17.0));
+                        }
                         _ => {}
                     }
 
@@ -1160,6 +1230,18 @@ fn build_fx_scope_zstack(
                         }
                         FxTypeParam::Utility => {
                             add_util_inv_pill(cx, "Ø R", |s| &s.utility_inv_r);
+                        }
+                        FxTypeParam::FreqShifter => {
+                            build_enum_dropdown(
+                                cx,
+                                p_ov.clone(),
+                                g_ov.clone(),
+                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].freq_shift_split,
+                                FX_FREQ_SPLIT_ITEMS,
+                            )
+                            .class("fx-scope-dd")
+                            .width(Pixels(46.0))
+                            .height(Pixels(17.0));
                         }
                         _ => {}
                     }
@@ -1408,11 +1490,12 @@ fn build_fx_knob_row(
                                 formatter,
                             )
                         } else {
+                            let bipolar = key.fx_type == FxTypeParam::FreqShifter && p_idx == 0;
                             RotaryKnob::new_with_mod_formatter(
                                 cx,
                                 UiData::params,
                                 move |p| p.fx_bus_slots(bus_idx)[slot_idx].param_at(param_slot),
-                                false,
+                                bipolar,
                                 accent,
                                 ModDestination::fx_bus_slot_param(bus_idx, slot_idx, param_slot),
                                 mod_cell,
@@ -1423,7 +1506,13 @@ fn build_fx_knob_row(
                         knob.default_norm(Some(def_norm))
                             .snap_steps(snap_steps)
                             .enabled_by(p_cell, move |p| {
+                                let split_dimmed = key.fx_type == FxTypeParam::FreqShifter
+                                    && !key.is_eq
+                                    && p_idx == 1
+                                    && p.fx_bus_slots(bus_idx)[slot_idx].freq_shift_split.value()
+                                        == FreqSplitBandParam::Full;
                                 slot_enabled_for_bus(p, bus_idx, slot_idx)
+                                    && !split_dimmed
                                     && mb_band.is_none_or(|b| {
                                         p.fx_bus_slots(bus_idx)[slot_idx].mb_bands[b]
                                             .enabled
