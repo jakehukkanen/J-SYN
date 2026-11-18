@@ -2139,9 +2139,9 @@ version = "0.2.0"
 dependencies = [
  "arc-swap",
  "j-syn-dsp",
+ "j-syn-ui",
  "nih_plug",
  "nih_plug_vizia",
- "objc",
  "rfd",
  "serde",
  "serde_json",
@@ -2155,6 +2155,33 @@ dependencies = [
  "hound",
  "rustfft",
  "serde",
+]
+
+[[package]]
+name = "j-syn-ui"
+version = "0.2.0"
+dependencies = [
+ "cgl",
+ "glow",
+ "j-syn-dsp",
+ "libc",
+ "nih_plug",
+ "nih_plug_vizia",
+ "objc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "j-utility"
+version = "0.2.0"
+dependencies = [
+ "j-syn-dsp",
+ "j-syn-ui",
+ "nih_plug",
+ "nih_plug_vizia",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5288,6 +5315,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 name = "xtask"
 version = "0.2.0"
 dependencies = [
+ "cargo_metadata",
  "nih_plug_xtask",
 ]
 

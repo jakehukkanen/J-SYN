@@ -25,6 +25,8 @@ use nih_plug::prelude::{Editor, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
 
+pub(crate) use j_syn_ui::{theme, tokens, widgets, UiKitEvent, UiShellState};
+
 use crate::{JSynPluginParams, PitchModeParam};
 
 mod controls;
@@ -42,10 +44,7 @@ mod osc_panel;
 mod routing_tab;
 mod scope;
 mod settings_view;
-mod theme;
-mod tokens;
 mod voice_tab;
-mod widgets;
 
 use controls::{
     bold_label, build_center_tab_button, build_dropdown_trigger_labels, build_header_knob_cell,
@@ -61,8 +60,8 @@ use noise_panel::build_noise_panel;
 use osc_panel::build_osc_panel;
 use routing_tab::build_routing_tab;
 
-const BASE_WIDTH: u32 = tokens::WINDOW_W;
-const BASE_HEIGHT: u32 = tokens::WINDOW_H;
+pub const BASE_WIDTH: u32 = tokens::WINDOW_W;
+pub const BASE_HEIGHT: u32 = tokens::WINDOW_H;
 
 pub(super) const AMBER_RGB: (u8, u8, u8) = (245, 179, 73);
 pub(super) const GOLD_RGB: (u8, u8, u8) = (242, 203, 97);
@@ -108,21 +107,6 @@ impl Data for CenterStageTab {
 }
 
 #[derive(Clone, PartialEq, Debug, Default)]
-pub(crate) struct TooltipState {
-    pub visible: bool,
-    pub text: String,
-    pub center_x: f32,
-    pub anchor_top: f32,
-    pub anchor_bottom: f32,
-}
-
-impl Data for TooltipState {
-    fn same(&self, other: &Self) -> bool {
-        self == other
-    }
-}
-
-#[derive(Clone, PartialEq, Debug, Default)]
 pub(crate) struct ModContextMenuState {
     pub visible: bool,
     pub dest_idx: usize,
@@ -153,10 +137,8 @@ pub(crate) enum UiEvent {
     SelectModSeqSubTab(ModSeqSubTab),
     ModUiChanged,
     ModValChanged,
-    SetUiScale(u32),
     SetGearRadius(f32),
     CommitGearRadius,
-    SelectTheme(String),
     SetMacroName(usize, String),
     InitPatch,
     SavePatch,
@@ -173,11 +155,6 @@ pub(crate) enum UiEvent {
     OpenWtFolder(String),
     OpenPresetFolder(String),
     SyncExternalState,
-    ShowTooltip(TooltipState),
-    HideTooltip,
-    ShowModContextMenu(ModDestination, f32, f32),
-    ShowActionModContextMenu(ModDestination, f32, f32),
-    ShowPitchContextMenu(usize, ModDestination, f32, f32),
     ToggleModMenuPicker,
     HideModContextMenu,
     ModMenuRefresh,
@@ -197,14 +174,7 @@ pub(crate) struct UiData {
     pub center_tab: CenterStageTab,
     pub mod_ui_rev: u64,
     pub mod_val_rev: u64,
-    pub ui_scale_pct: u32,
     pub gear_radius: f32,
-    pub theme_name: String,
-    pub themes_rev: u64,
-    #[lens(ignore)]
-    pub active_theme: theme::ThemePalette,
-    #[lens(ignore)]
-    pub dynamic_css: Arc<std::sync::RwLock<String>>,
     pub macro_names: [String; 8],
     pub current_preset_name: String,
     pub presets_dir_rev: u64,
@@ -213,12 +183,66 @@ pub(crate) struct UiData {
     pub expanded_wt_folder: Option<String>,
     pub presets_dir_display: String,
     pub wavetables_dir_display: String,
-    pub tooltip: TooltipState,
     pub mod_menu: ModContextMenuState,
 }
 
 impl Model for UiData {
-    fn event(&mut self, _cx: &mut EventContext, event: &mut Event) {
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|kit_event, meta| match kit_event {
+            UiKitEvent::ModUiChanged => {
+                self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
+                self.mod_val_rev = self.mod_val_rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiKitEvent::ModValChanged => {
+                self.mod_val_rev = self.mod_val_rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiKitEvent::ShowModContextMenu(dest, x, y) => {
+                cx.emit(UiKitEvent::HideTooltip);
+                self.mod_menu = ModContextMenuState {
+                    visible: true,
+                    dest_idx: dest.index(),
+                    osc_pitch_idx: None,
+                    always_show_actions: false,
+                    show_mod_picker: false,
+                    anchor_x: *x,
+                    anchor_y: *y,
+                    rev: self.mod_menu.rev.wrapping_add(1),
+                };
+                meta.consume();
+            }
+            UiKitEvent::ShowActionModContextMenu(dest, x, y) => {
+                cx.emit(UiKitEvent::HideTooltip);
+                self.mod_menu = ModContextMenuState {
+                    visible: true,
+                    dest_idx: dest.index(),
+                    osc_pitch_idx: None,
+                    always_show_actions: true,
+                    show_mod_picker: false,
+                    anchor_x: *x,
+                    anchor_y: *y,
+                    rev: self.mod_menu.rev.wrapping_add(1),
+                };
+                meta.consume();
+            }
+            UiKitEvent::ShowPitchContextMenu(osc_idx, dest, x, y) => {
+                cx.emit(UiKitEvent::HideTooltip);
+                self.mod_menu = ModContextMenuState {
+                    visible: true,
+                    dest_idx: dest.index(),
+                    osc_pitch_idx: Some(*osc_idx),
+                    always_show_actions: true,
+                    show_mod_picker: false,
+                    anchor_x: *x,
+                    anchor_y: *y,
+                    rev: self.mod_menu.rev.wrapping_add(1),
+                };
+                meta.consume();
+            }
+            _ => {}
+        });
+
         event.map(|ui_event, meta| match ui_event {
             UiEvent::SelectViewMode(mode) => {
                 self.view_mode = *mode;
@@ -227,7 +251,7 @@ impl Model for UiData {
                     MainViewMode::Matrix => 2,
                     MainViewMode::Settings => 3,
                 });
-                self.tooltip.visible = false;
+                cx.emit(UiKitEvent::HideTooltip);
                 self.mod_ui.clear_drag();
                 meta.consume();
             }
@@ -239,7 +263,7 @@ impl Model for UiData {
                     BottomTab::Routing => CenterStageTab::Routing,
                     BottomTab::ModSeq => CenterStageTab::Mod(self.modseq_subtab),
                 };
-                self.tooltip.visible = false;
+                cx.emit(UiKitEvent::HideTooltip);
                 meta.consume();
             }
             UiEvent::SelectModSeqSubTab(sub) => {
@@ -248,7 +272,7 @@ impl Model for UiData {
                 if self.active_tab == BottomTab::ModSeq {
                     self.center_tab = CenterStageTab::Mod(*sub);
                 }
-                self.tooltip.visible = false;
+                cx.emit(UiKitEvent::HideTooltip);
                 meta.consume();
             }
             UiEvent::ModUiChanged => {
@@ -260,13 +284,6 @@ impl Model for UiData {
                 self.mod_val_rev = self.mod_val_rev.wrapping_add(1);
                 meta.consume();
             }
-            UiEvent::SetUiScale(pct) => {
-                self.ui_scale_pct = *pct;
-                let mut cfg = crate::presets::JSynConfig::load();
-                cfg.ui_scale = *pct;
-                let _ = cfg.save();
-                meta.consume();
-            }
             UiEvent::SetGearRadius(r) => {
                 self.gear_radius = r.clamp(0.10, 0.60);
                 meta.consume();
@@ -275,20 +292,6 @@ impl Model for UiData {
                 let mut cfg = crate::presets::JSynConfig::load();
                 cfg.gear_radius = self.gear_radius.clamp(0.10, 0.60);
                 let _ = cfg.save();
-                meta.consume();
-            }
-            UiEvent::SelectTheme(name) => {
-                let pal = theme::find_theme_by_name(name);
-                if let Ok(mut guard) = self.dynamic_css.write() {
-                    *guard = pal.render_css();
-                }
-                let mut cfg = crate::presets::JSynConfig::load();
-                cfg.theme = pal.name.clone();
-                let _ = cfg.save();
-                self.theme_name = pal.name.clone();
-                self.active_theme = pal;
-                let _ = _cx.reload_styles();
-                _cx.needs_redraw();
                 meta.consume();
             }
             UiEvent::SetMacroName(idx, name) => {
@@ -472,7 +475,7 @@ impl Model for UiData {
                 self.expanded_wt_folder = None;
                 self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
                 self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
-                self.themes_rev = self.themes_rev.wrapping_add(1);
+                cx.emit(UiKitEvent::ReloadThemes);
                 meta.consume();
             }
             UiEvent::ToggleWtFolder(folder) => {
@@ -526,56 +529,6 @@ impl Model for UiData {
                 self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
                 meta.consume();
             }
-            UiEvent::ShowTooltip(state) => {
-                self.tooltip = state.clone();
-                meta.consume();
-            }
-            UiEvent::HideTooltip => {
-                self.tooltip.visible = false;
-                meta.consume();
-            }
-            UiEvent::ShowModContextMenu(dest, x, y) => {
-                self.tooltip.visible = false;
-                self.mod_menu = ModContextMenuState {
-                    visible: true,
-                    dest_idx: dest.index(),
-                    osc_pitch_idx: None,
-                    always_show_actions: false,
-                    show_mod_picker: false,
-                    anchor_x: *x,
-                    anchor_y: *y,
-                    rev: self.mod_menu.rev.wrapping_add(1),
-                };
-                meta.consume();
-            }
-            UiEvent::ShowActionModContextMenu(dest, x, y) => {
-                self.tooltip.visible = false;
-                self.mod_menu = ModContextMenuState {
-                    visible: true,
-                    dest_idx: dest.index(),
-                    osc_pitch_idx: None,
-                    always_show_actions: true,
-                    show_mod_picker: false,
-                    anchor_x: *x,
-                    anchor_y: *y,
-                    rev: self.mod_menu.rev.wrapping_add(1),
-                };
-                meta.consume();
-            }
-            UiEvent::ShowPitchContextMenu(osc_idx, dest, x, y) => {
-                self.tooltip.visible = false;
-                self.mod_menu = ModContextMenuState {
-                    visible: true,
-                    dest_idx: dest.index(),
-                    osc_pitch_idx: Some(*osc_idx),
-                    always_show_actions: true,
-                    show_mod_picker: false,
-                    anchor_x: *x,
-                    anchor_y: *y,
-                    rev: self.mod_menu.rev.wrapping_add(1),
-                };
-                meta.consume();
-            }
             UiEvent::ToggleModMenuPicker => {
                 self.mod_menu.show_mod_picker = !self.mod_menu.show_mod_picker;
                 self.mod_menu.rev = self.mod_menu.rev.wrapping_add(1);
@@ -591,62 +544,6 @@ impl Model for UiData {
                 meta.consume();
             }
         });
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[allow(unexpected_cfgs)]
-pub(super) fn notify_baseview_resize_macos() {
-    use objc::runtime::{Class, Object};
-    use objc::{class, msg_send, sel, sel_impl};
-
-    unsafe fn visit_subviews(view: *mut Object) {
-        if view.is_null() {
-            return;
-        }
-        unsafe {
-            let cls: *const Class = msg_send![view, class];
-            if !cls.is_null() && (*cls).instance_variable("baseview_state").is_some() {
-                let sel = sel!(viewDidChangeBackingProperties:);
-                let nil: *mut Object = std::ptr::null_mut();
-                let delay: f64 = 0.025;
-                let _: () = msg_send![
-                    view,
-                    performSelector: sel
-                    withObject: nil
-                    afterDelay: delay
-                ];
-            }
-            let subviews: *mut Object = msg_send![view, subviews];
-            if subviews.is_null() {
-                return;
-            }
-            let count: usize = msg_send![subviews, count];
-            for i in 0..count {
-                let child: *mut Object = msg_send![subviews, objectAtIndex: i];
-                visit_subviews(child);
-            }
-        }
-    }
-
-    unsafe {
-        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
-        if app.is_null() {
-            return;
-        }
-        let windows: *mut Object = msg_send![app, windows];
-        if windows.is_null() {
-            return;
-        }
-        let count: usize = msg_send![windows, count];
-        for i in 0..count {
-            let win: *mut Object = msg_send![windows, objectAtIndex: i];
-            if win.is_null() {
-                continue;
-            }
-            let content_view: *mut Object = msg_send![win, contentView];
-            visit_subviews(content_view);
-        }
     }
 }
 
@@ -1057,179 +954,148 @@ fn build_right_wing(
     .height(Stretch(1.0));
 }
 
-pub(crate) fn create(
+pub fn build_j_syn_ui(
+    cx: &mut Context,
     params: Arc<JSynPluginParams>,
-    editor_state: Arc<ViziaState>,
+    gui_context: Arc<dyn GuiContext>,
     bank: Arc<WavetableBank>,
     telemetry: Arc<ModUiTelemetry>,
-) -> Option<Box<dyn Editor>> {
-    create_vizia_editor(editor_state, ViziaTheming::Builtin, move |cx, gui_context| {
-        cx.add_font_mem(include_bytes!("../../assets/fonts/PlusJakartaSans-Regular.ttf"));
-        cx.add_font_mem(include_bytes!("../../assets/fonts/PlusJakartaSans-Bold.ttf"));
-        cx.set_default_font(&["Plus Jakarta Sans"]);
+    initial_theme: theme::ThemePalette,
+    initial_scale_pct: u32,
+    persist_settings: bool,
+) {
+    let initial_cfg = crate::presets::JSynConfig::load();
 
-        let initial_cfg = crate::presets::JSynConfig::load();
-        let initial_scale_pct = initial_cfg.ui_scale.clamp(85, 200);
-        let initial_theme = theme::find_theme_by_name(&initial_cfg.theme);
-        let dynamic_css = Arc::new(std::sync::RwLock::new(initial_theme.render_css()));
-        let _ = cx.add_stylesheet(theme::DynamicCssSource(dynamic_css.clone()));
-
-        let mod_ui = Arc::new(ModUiState::new(params.clone(), telemetry.clone()));
-        let initial_macro_names = params
-            .macro_names
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_else(|_| std::array::from_fn(|i| format!("MACRO {}", i + 1)));
-        UiData {
-            params: params.clone(),
-            mod_ui: mod_ui.clone(),
-            gui_context: gui_context.clone(),
-            bank: bank.clone(),
-            view_mode: MainViewMode::Main,
-            active_tab: BottomTab::ModSeq,
-            modseq_subtab: ModSeqSubTab::MSeq(0),
-            center_tab: CenterStageTab::Mod(ModSeqSubTab::MSeq(0)),
-            mod_ui_rev: 0,
-            mod_val_rev: 0,
-            ui_scale_pct: initial_scale_pct,
-            gear_radius: initial_cfg.gear_radius.clamp(0.10, 0.60),
-            theme_name: initial_theme.name.clone(),
-            themes_rev: 0,
-            active_theme: initial_theme,
-            dynamic_css,
-            macro_names: initial_macro_names,
-            current_preset_name: "INIT".to_string(),
-            presets_dir_rev: 0,
-            wavetables_dir_rev: 0,
-            expanded_preset_folder: None,
-            expanded_wt_folder: None,
-            presets_dir_display: format_dir_display(initial_cfg.presets_dir.as_deref()),
-            wavetables_dir_display: format_dir_display(initial_cfg.wavetables_dir.as_deref()),
-            tooltip: TooltipState::default(),
-            mod_menu: ModContextMenuState::default(),
-        }
-        .build(cx);
-
-        let bank_for_ui = bank.clone();
-        let params_for_ui = params.clone();
-        let gui_ctx_for_ui = gui_context.clone();
-        let params_menu = params_for_ui.clone();
-        let gui_ctx_menu = gui_ctx_for_ui.clone();
-        let mod_ui_for_ui = mod_ui.clone();
-
-        VStack::new(cx, move |cx| {
-            // Prevent Spacebar (e.g. DAW transport play/stop) from triggering focused buttons.
-            cx.add_listener(|_view: &mut VStack, _cx, event| {
-                event.map(|window_event, meta| match window_event {
-                    WindowEvent::KeyDown(Code::Space, _)
-                    | WindowEvent::KeyUp(Code::Space, _)
-                    | WindowEvent::Press { mouse: false }
-                    | WindowEvent::PressDown { mouse: false } => {
-                        meta.consume();
-                    }
-                    _ => {}
-                });
-            });
-
-            mod_bar::start_ui_redraw_timer(cx, mod_ui_for_ui.clone());
-
-            build_header_bar(cx, mod_ui_for_ui.clone());
-
-            // Main chassis: 3-Wing Widescreen Layout (Left Oscs + Noise, Center Synth Core, Right 3-Lane FX),
-            // MATRIX Overview, or Settings.
-            VStack::new(cx, move |cx| {
-                VStack::new(cx, move |cx| {
-                    let bank_m = bank_for_ui.clone();
-                    let params_m = params_for_ui.clone();
-                    let gui_m = gui_ctx_for_ui.clone();
-                    let mod_ui_m = mod_ui_for_ui.clone();
-
-                    Binding::new(cx, UiData::view_mode, move |cx, mode| {
-                        match mode.get(cx) {
-                            MainViewMode::Main => {
-                                let bank_c = bank_m.clone();
-                                let params_c = params_m.clone();
-                                let gui_c = gui_m.clone();
-                                let mod_ui_c = mod_ui_m.clone();
-                                HStack::new(cx, move |cx| {
-                                    build_left_wing(
-                                        cx,
-                                        bank_c,
-                                        params_c.clone(),
-                                        gui_c.clone(),
-                                        mod_ui_c.clone(),
-                                    );
-                                    build_center_wing(
-                                        cx,
-                                        params_c.clone(),
-                                        gui_c.clone(),
-                                        mod_ui_c.clone(),
-                                    );
-                                    build_right_wing(cx, params_c, gui_c, mod_ui_c);
-                                })
-                                .col_between(Pixels(tokens::SPACE_MD))
-                                .width(Stretch(1.0))
-                                .height(Stretch(1.0));
-                            }
-                            MainViewMode::Matrix => {
-                                matrix_tab::build_matrix_view(cx, mod_ui_m.clone());
-                            }
-                            MainViewMode::Settings => {
-                                settings_view::build_settings_view(
-                                    cx,
-                                    params_m.clone(),
-                                    gui_m.clone(),
-                                );
-                            }
-                        }
-                    });
-                })
-                .class("section-panel")
-                .width(Stretch(1.0))
-                .height(Stretch(1.0));
+    let mut shell = UiShellState::new(initial_theme, initial_scale_pct);
+    if persist_settings {
+        shell = shell
+            .with_theme_callback(|name| {
+                let mut cfg = crate::presets::JSynConfig::load();
+                cfg.theme = name.to_string();
+                let _ = cfg.save();
             })
-            .class("main-chassis")
+            .with_scale_callback(|pct| {
+                let mut cfg = crate::presets::JSynConfig::load();
+                cfg.ui_scale = pct;
+                let _ = cfg.save();
+            });
+    }
+    shell.install(cx);
+
+    let mod_ui = Arc::new(ModUiState::new(params.clone(), telemetry));
+    let initial_macro_names = params
+        .macro_names
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_else(|_| std::array::from_fn(|i| format!("MACRO {}", i + 1)));
+    UiData {
+        params: params.clone(),
+        mod_ui: mod_ui.clone(),
+        gui_context: gui_context.clone(),
+        bank: bank.clone(),
+        view_mode: MainViewMode::Main,
+        active_tab: BottomTab::ModSeq,
+        modseq_subtab: ModSeqSubTab::MSeq(0),
+        center_tab: CenterStageTab::Mod(ModSeqSubTab::MSeq(0)),
+        mod_ui_rev: 0,
+        mod_val_rev: 0,
+        gear_radius: initial_cfg.gear_radius.clamp(0.10, 0.60),
+        macro_names: initial_macro_names,
+        current_preset_name: "INIT".to_string(),
+        presets_dir_rev: 0,
+        wavetables_dir_rev: 0,
+        expanded_preset_folder: None,
+        expanded_wt_folder: None,
+        presets_dir_display: format_dir_display(initial_cfg.presets_dir.as_deref()),
+        wavetables_dir_display: format_dir_display(initial_cfg.wavetables_dir.as_deref()),
+        mod_menu: ModContextMenuState::default(),
+    }
+    .build(cx);
+
+    let bank_for_ui = bank;
+    let params_for_ui = params;
+    let gui_ctx_for_ui = gui_context;
+    let params_menu = params_for_ui.clone();
+    let gui_ctx_menu = gui_ctx_for_ui.clone();
+    let mod_ui_for_ui = mod_ui.clone();
+
+    VStack::new(cx, move |cx| {
+        // Prevent Spacebar (e.g. DAW transport play/stop) from triggering focused buttons.
+        cx.add_listener(|_view: &mut VStack, _cx, event| {
+            event.map(|window_event, meta| match window_event {
+                WindowEvent::KeyDown(Code::Space, _)
+                | WindowEvent::KeyUp(Code::Space, _)
+                | WindowEvent::Press { mouse: false }
+                | WindowEvent::PressDown { mouse: false } => {
+                    meta.consume();
+                }
+                _ => {}
+            });
+        });
+
+        mod_bar::start_ui_redraw_timer(cx, mod_ui_for_ui.clone());
+
+        build_header_bar(cx, mod_ui_for_ui.clone());
+
+        // Main chassis: 3-Wing Widescreen Layout (Left Oscs + Noise, Center Synth Core, Right 3-Lane FX),
+        // MATRIX Overview, or Settings.
+        VStack::new(cx, move |cx| {
+            VStack::new(cx, move |cx| {
+                let bank_m = bank_for_ui.clone();
+                let params_m = params_for_ui.clone();
+                let gui_m = gui_ctx_for_ui.clone();
+                let mod_ui_m = mod_ui_for_ui.clone();
+
+                Binding::new(cx, UiData::view_mode, move |cx, mode| {
+                    match mode.get(cx) {
+                        MainViewMode::Main => {
+                            let bank_c = bank_m.clone();
+                            let params_c = params_m.clone();
+                            let gui_c = gui_m.clone();
+                            let mod_ui_c = mod_ui_m.clone();
+                            HStack::new(cx, move |cx| {
+                                build_left_wing(
+                                    cx,
+                                    bank_c,
+                                    params_c.clone(),
+                                    gui_c.clone(),
+                                    mod_ui_c.clone(),
+                                );
+                                build_center_wing(
+                                    cx,
+                                    params_c.clone(),
+                                    gui_c.clone(),
+                                    mod_ui_c.clone(),
+                                );
+                                build_right_wing(cx, params_c, gui_c, mod_ui_c);
+                            })
+                            .col_between(Pixels(tokens::SPACE_MD))
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0));
+                        }
+                        MainViewMode::Matrix => {
+                            matrix_tab::build_matrix_view(cx, mod_ui_m.clone());
+                        }
+                        MainViewMode::Settings => {
+                            settings_view::build_settings_view(
+                                cx,
+                                params_m.clone(),
+                                gui_m.clone(),
+                            );
+                        }
+                    }
+                });
+            })
+            .class("section-panel")
             .width(Stretch(1.0))
             .height(Stretch(1.0));
+        })
+        .class("main-chassis")
+        .width(Stretch(1.0))
+        .height(Stretch(1.0));
 
-            // Global floating value tooltip overlay
-            HStack::new(cx, |cx| {
-                HStack::new(cx, |cx| {
-                    bold_label(cx, UiData::tooltip.map(|tt| tt.text.clone()), "knob-tooltip-text")
-                        .width(Auto)
-                        .height(Stretch(1.0))
-                        .child_space(Stretch(1.0))
-                        .hoverable(false);
-                })
-                .class("knob-tooltip")
-                .width(Auto)
-                .height(Pixels(20.0))
-                .hoverable(false);
-            })
-            .position_type(PositionType::SelfDirected)
-            .left(UiData::tooltip.map(|tt| {
-                let est_pill_w = (tt.text.len() as f32 * 5.6 + 18.0).clamp(44.0, 210.0);
-                let half_w = est_pill_w * 0.5;
-                let clamped_cx = tt
-                    .center_x
-                    .clamp(4.0 + half_w, BASE_WIDTH as f32 - 4.0 - half_w);
-                Pixels(clamped_cx - 110.0)
-            }))
-            .top(UiData::tooltip.map(|tt| {
-                let top_y = if tt.anchor_top >= 26.0 {
-                    tt.anchor_top - 24.0
-                } else {
-                    (tt.anchor_bottom + 4.0).min(BASE_HEIGHT as f32 - 24.0)
-                };
-                Pixels(top_y)
-            }))
-            .child_left(Stretch(1.0))
-            .child_right(Stretch(1.0))
-            .width(Pixels(220.0))
-            .height(Pixels(20.0))
-            .z_index(300)
-            .display(UiData::tooltip.map(|tt| tt.visible))
-            .hoverable(false);
+        // Global floating value tooltip overlay
+        j_syn_ui::build_tooltip_overlay(cx, BASE_WIDTH as f32, BASE_HEIGHT as f32);
 
             // Click-away backdrop for floating Modulation Context Menu
             Element::new(cx)
@@ -1400,6 +1266,28 @@ pub(crate) fn create(
         .class("plugin-root")
         .width(Stretch(1.0))
         .height(Stretch(1.0));
+}
+
+pub(crate) fn create(
+    params: Arc<JSynPluginParams>,
+    editor_state: Arc<ViziaState>,
+    bank: Arc<WavetableBank>,
+    telemetry: Arc<ModUiTelemetry>,
+) -> Option<Box<dyn Editor>> {
+    create_vizia_editor(editor_state, ViziaTheming::Builtin, move |cx, gui_context| {
+        let initial_cfg = crate::presets::JSynConfig::load();
+        let initial_scale_pct = initial_cfg.ui_scale.clamp(85, 200);
+        let initial_theme = theme::find_theme_by_name(&initial_cfg.theme);
+        build_j_syn_ui(
+            cx,
+            params.clone(),
+            gui_context,
+            bank.clone(),
+            telemetry.clone(),
+            initial_theme,
+            initial_scale_pct,
+            true,
+        );
     })
 }
 

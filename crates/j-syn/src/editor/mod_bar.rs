@@ -8,12 +8,13 @@ use j_syn_dsp::mod_matrix::{
     ModDestination, ModMatrixSource, ModSlot, ModUiTelemetry, NUM_MOD_DESTS, NUM_MOD_SLOTS,
 };
 use j_syn_dsp::modseq::ModSeqStepShape;
+use j_syn_ui::ModUiHost;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 
 use super::controls::bold_label;
 use super::modseq_tab::ModSeqSubTab;
-use super::{BottomTab, UiEvent};
+use super::{theme, BottomTab, UiEvent};
 use crate::JSynPluginParams;
 
 const UNSET_U8: u8 = 255;
@@ -640,6 +641,52 @@ impl ModUiState {
     }
 }
 
+impl ModUiHost for ModUiState {
+    #[inline]
+    fn dragging_source(&self) -> ModMatrixSource {
+        ModUiState::dragging_source(self)
+    }
+
+    #[inline]
+    fn is_drop_target(&self, dest: ModDestination) -> bool {
+        ModUiState::is_drop_target(self, dest)
+    }
+
+    fn register_drop_rect(&self, dest: ModDestination, tab_tag: u8, bounds: BoundingBox) {
+        ModUiState::register_drop_rect(self, dest, tab_tag, bounds);
+    }
+
+    fn slots_for_dest(&self, dest: ModDestination) -> ([ModSlot; 4], [usize; 4], usize) {
+        ModUiState::slots_for_dest(self, dest)
+    }
+
+    #[inline]
+    fn has_slots_for_dest(&self, dest: ModDestination) -> bool {
+        ModUiState::has_slots_for_dest(self, dest)
+    }
+
+    fn primary_slot_for_dest(&self, dest: ModDestination) -> Option<(usize, ModSlot)> {
+        ModUiState::primary_slot_for_dest(self, dest)
+    }
+
+    fn focus_slot(&self, dest: ModDestination, slot_idx: usize) {
+        ModUiState::focus_slot(self, dest, slot_idx);
+    }
+
+    fn adjust_slot_depth(&self, slot_idx: usize, new_depth: f32) {
+        ModUiState::adjust_slot_depth(self, slot_idx, new_depth);
+    }
+
+    fn remove_primary_slot_for_dest(&self, dest: ModDestination) -> bool {
+        ModUiState::remove_primary_slot_for_dest(self, dest)
+    }
+
+    #[inline]
+    fn dest_offset(&self, dest: ModDestination) -> f32 {
+        self.telemetry.dest_offset(dest)
+    }
+}
+
 /// Draggable modulation source pill (`E1..E4`, `MS1..MS4`, `VEL`, `KEY`, `MW`, `AT`, `M1..M8`).
 pub(crate) struct ModSourcePill {
     source: ModMatrixSource,
@@ -763,8 +810,8 @@ impl View for ModSourcePill {
             return;
         }
         let dpx = cx.scale_factor();
-        let pal = super::theme::current_palette(cx);
-        let (r, g, b) = super::theme::mod_source_rgb(&pal, self.source);
+        let pal = theme::current_palette(cx);
+        let (r, g, b) = theme::mod_source_rgb(&pal, self.source);
         let is_dragging = self.mod_ui.dragging_source() == self.source;
         let is_active_tab = self.mod_ui.is_source_tab_active(self.source);
         let is_hovered = self.hovered;
@@ -775,13 +822,13 @@ impl View for ModSourcePill {
         let fill = if is_dragging {
             vg::Color::rgba(r, g, b, 90)
         } else if is_active_tab {
-            let (mr, mg, mb) = super::theme::hex_to_rgb(&pal.surface_hover);
-            let (tr, tg, tb) = super::theme::lerp_rgb((mr, mg, mb), (r, g, b), 0.16);
+            let (mr, mg, mb) = theme::hex_to_rgb(&pal.surface_hover);
+            let (tr, tg, tb) = theme::lerp_rgb((mr, mg, mb), (r, g, b), 0.16);
             vg::Color::rgb(tr, tg, tb)
         } else if is_hovered {
-            super::theme::vg_color(&pal.surface_hover, 255)
+            theme::vg_color(&pal.surface_hover, 255)
         } else {
-            super::theme::vg_color(&pal.surface_mid, 255)
+            theme::vg_color(&pal.surface_mid, 255)
         };
         canvas.fill_path(&bg, &vg::Paint::color(fill));
 

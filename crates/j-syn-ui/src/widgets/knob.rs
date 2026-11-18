@@ -9,14 +9,14 @@ use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::util::ModifiersExt;
 use nih_plug_vizia::widgets::RawParamEvent;
 
-use crate::editor::mod_bar::ModUiState;
-use crate::editor::UiEvent;
+use crate::shell::{ModUiHost, UiKitEvent};
+use crate::theme;
+
 use super::{
     emit_widget_tooltip, format_mod_range_tooltip, handle_mod_depth_move,
-    update_mod_collar_cursor, DisabledTooltipFormatter, DragState, EnabledPredicate, ModDepthDrag,
+    update_mod_collar_cursor, DisabledTooltipFn, DragState, EnabledCheck, ModDepthDrag,
     ModTargetBinding, ValueFormatter, KNOB_DRAG_PIXELS, KNOB_FINE_MULTIPLIER,
 };
-
 
 /// Skeuomorphic 3D rotary knob widget rendered via `femtovg` (`vizia::vg`).
 pub struct RotaryKnob {
@@ -32,20 +32,22 @@ pub struct RotaryKnob {
     accent_rgb: (u8, u8, u8),
     mod_binding: Option<ModTargetBinding>,
     value_formatter: Option<ValueFormatter>,
-    enabled_state: Option<(Arc<crate::JSynPluginParams>, EnabledPredicate)>,
-    disabled_tooltip: Option<DisabledTooltipFormatter>,
+    enabled_check: Option<EnabledCheck>,
+    disabled_tooltip: Option<DisabledTooltipFn>,
     snap_steps: Option<u32>,
     default_override: Option<f32>,
 }
 
 pub trait KnobDimExt {
-    fn enabled_by<F>(self, params: Arc<crate::JSynPluginParams>, check: F) -> Self
+    fn enabled_by<Params, F>(self, params: Arc<Params>, check: F) -> Self
     where
-        F: Fn(&crate::JSynPluginParams) -> bool + Send + Sync + 'static;
+        Params: Send + Sync + 'static,
+        F: Fn(&Params) -> bool + Send + Sync + 'static;
 
-    fn disabled_tooltip<F>(self, fmt: F) -> Self
+    fn disabled_tooltip<Params, F>(self, params: Arc<Params>, fmt: F) -> Self
     where
-        F: Fn(&crate::JSynPluginParams) -> String + Send + Sync + 'static;
+        Params: Send + Sync + 'static,
+        F: Fn(&Params) -> String + Send + Sync + 'static;
 
     fn snap_steps(self, steps: u32) -> Self;
 
@@ -53,19 +55,21 @@ pub trait KnobDimExt {
 }
 
 impl KnobDimExt for Handle<'_, RotaryKnob> {
-    fn enabled_by<F>(self, params: Arc<crate::JSynPluginParams>, check: F) -> Self
+    fn enabled_by<Params, F>(self, params: Arc<Params>, check: F) -> Self
     where
-        F: Fn(&crate::JSynPluginParams) -> bool + Send + Sync + 'static,
+        Params: Send + Sync + 'static,
+        F: Fn(&Params) -> bool + Send + Sync + 'static,
     {
-        let pred: EnabledPredicate = Arc::new(check);
-        self.modify(move |knob| knob.enabled_state = Some((params, pred)))
+        let pred: EnabledCheck = Arc::new(move || check(&params));
+        self.modify(move |knob| knob.enabled_check = Some(pred))
     }
 
-    fn disabled_tooltip<F>(self, fmt: F) -> Self
+    fn disabled_tooltip<Params, F>(self, params: Arc<Params>, fmt: F) -> Self
     where
-        F: Fn(&crate::JSynPluginParams) -> String + Send + Sync + 'static,
+        Params: Send + Sync + 'static,
+        F: Fn(&Params) -> String + Send + Sync + 'static,
     {
-        let formatter: DisabledTooltipFormatter = Arc::new(fmt);
+        let formatter: DisabledTooltipFn = Arc::new(move || fmt(&params));
         self.modify(move |knob| knob.disabled_tooltip = Some(formatter))
     }
 
@@ -84,8 +88,7 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        #[allow(dead_code)]
-    accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
     ) -> Handle<'a, Self>
     where
         L: Lens<Target = Params> + Clone,
@@ -126,10 +129,9 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        #[allow(dead_code)]
-    accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
         dest: ModDestination,
-        mod_ui: Arc<ModUiState>,
+        mod_ui: Arc<dyn ModUiHost>,
         tab_tag: u8,
     ) -> Handle<'a, Self>
     where
@@ -153,15 +155,15 @@ impl RotaryKnob {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_mod_formatter<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        #[allow(dead_code)]
-    accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
         dest: ModDestination,
-        mod_ui: Arc<ModUiState>,
+        mod_ui: Arc<dyn ModUiHost>,
         tab_tag: u8,
         value_formatter: ValueFormatter,
     ) -> Handle<'a, Self>
@@ -186,13 +188,43 @@ impl RotaryKnob {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_opt_mod_formatter<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        bipolar: bool,
+        accent_rgb: (u8, u8, u8),
+        mod_target: Option<(ModDestination, Arc<dyn ModUiHost>, u8)>,
+        value_formatter: Option<ValueFormatter>,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self::build_inner(
+            cx,
+            params,
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            mod_target.map(|(dest, mod_ui, tab_tag)| ModTargetBinding {
+                dest,
+                mod_ui,
+                tab_tag,
+            }),
+            value_formatter,
+        )
+    }
+
     fn build_inner<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        #[allow(dead_code)]
-    accent_rgb: (u8, u8, u8),
+        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
         mod_binding: Option<ModTargetBinding>,
         value_formatter: Option<ValueFormatter>,
     ) -> Handle<'a, Self>
@@ -214,7 +246,7 @@ impl RotaryKnob {
             accent_rgb,
             mod_binding,
             value_formatter,
-            enabled_state: None,
+            enabled_check: None,
             disabled_tooltip: None,
             snap_steps: None,
             default_override: None,
@@ -250,11 +282,11 @@ impl RotaryKnob {
         } else if let Some(md) = self.mod_depth_drag {
             format!("Mod: {:+.0}%", md.start_depth * 100.0)
         } else if !self.drag_active {
-            if let (Some((params, pred)), Some(disabled_fmt)) =
-                (&self.enabled_state, &self.disabled_tooltip)
+            if let (Some(check), Some(disabled_fmt)) =
+                (&self.enabled_check, &self.disabled_tooltip)
             {
-                if !pred(params) {
-                    return disabled_fmt(params);
+                if !check() {
+                    return disabled_fmt();
                 }
             }
             self.format_norm_value(self.param_base.modulated_normalized_value(), None)
@@ -342,7 +374,7 @@ impl View for RotaryKnob {
                 self.hovered = false;
                 if !self.drag_active && self.mod_depth_drag.is_none() {
                     update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
-                    cx.emit(UiEvent::HideTooltip);
+                    cx.emit(UiKitEvent::HideTooltip);
                 }
                 cx.needs_redraw();
             }
@@ -368,7 +400,7 @@ impl View for RotaryKnob {
                             cx.focus();
                             cx.set_active(true);
                             update_mod_collar_cursor(cx, true, &mut self.collar_cursor_active);
-                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             self.emit_tooltip(cx);
                             cx.needs_redraw();
                             meta.consume();
@@ -400,7 +432,7 @@ impl View for RotaryKnob {
                 if let Some(ref mb) = self.mod_binding {
                     if cx.modifiers().shift() {
                         if mb.mod_ui.remove_primary_slot_for_dest(mb.dest) {
-                            cx.emit(UiEvent::ModUiChanged);
+                            cx.emit(UiKitEvent::ModUiChanged);
                             cx.needs_redraw();
                             meta.consume();
                             return;
@@ -408,7 +440,7 @@ impl View for RotaryKnob {
                     } else if mb.mod_ui.has_slots_for_dest(mb.dest) {
                         let bounds = cx.bounds();
                         let scale = cx.scale_factor().max(0.01);
-                        cx.emit(UiEvent::ShowModContextMenu(
+                        cx.emit(UiKitEvent::ShowModContextMenu(
                             mb.dest,
                             bounds.x / scale,
                             (bounds.y + bounds.h + 4.0) / scale,
@@ -436,7 +468,7 @@ impl View for RotaryKnob {
                     if self.hovered {
                         self.emit_tooltip(cx);
                     } else {
-                        cx.emit(UiEvent::HideTooltip);
+                        cx.emit(UiKitEvent::HideTooltip);
                     }
                     cx.needs_redraw();
                     meta.consume();
@@ -454,7 +486,7 @@ impl View for RotaryKnob {
                         self.emit_tooltip(cx);
                     } else {
                         update_mod_collar_cursor(cx, false, &mut self.collar_cursor_active);
-                        cx.emit(UiEvent::HideTooltip);
+                        cx.emit(UiKitEvent::HideTooltip);
                     }
                     cx.needs_redraw();
                     meta.consume();
@@ -560,11 +592,13 @@ impl View for RotaryKnob {
         let end_angle = start_angle + sweep_angle;
         let val_angle = start_angle + norm * sweep_angle;
 
+        let pal = theme::current_palette(cx);
+
         if let Some(ref mb) = self.mod_binding {
             mb.mod_ui.register_drop_rect(mb.dest, mb.tab_tag, bounds);
             let drag_src = mb.mod_ui.dragging_source();
             if drag_src != ModMatrixSource::None {
-                let (sr, sg, sb) = drag_src.color_rgb();
+                let (sr, sg, sb) = theme::mod_source_rgb(&pal, drag_src);
                 let is_hover = mb.mod_ui.is_drop_target(mb.dest);
                 let mut ring = vg::Path::new();
                 ring.circle(center_x, center_y, mod_ring_r + 1.0 * dpx);
@@ -579,11 +613,7 @@ impl View for RotaryKnob {
             }
         }
 
-        let pal = crate::editor::theme::current_palette(cx);
-        let is_enabled = self
-            .enabled_state
-            .as_ref()
-            .is_none_or(|(p, check)| check(p));
+        let is_enabled = self.enabled_check.as_ref().is_none_or(|check| check());
 
         let num_ticks = 9;
         for i in 0..num_ticks {
@@ -597,22 +627,29 @@ impl View for RotaryKnob {
             let is_major = i == 0 || i == num_ticks - 1 || i == num_ticks / 2;
             let mut paint = if is_enabled {
                 if is_major {
-                    vg::Paint::color(crate::editor::theme::vg_color(&pal.text_muted, 200))
+                    vg::Paint::color(theme::vg_color(&pal.text_muted, 200))
                 } else {
-                    vg::Paint::color(crate::editor::theme::vg_color(&pal.text_dim, 145))
+                    vg::Paint::color(theme::vg_color(&pal.text_dim, 145))
                 }
             } else if is_major {
-                vg::Paint::color(crate::editor::theme::vg_color(&pal.text_dim, 85))
+                vg::Paint::color(theme::vg_color(&pal.text_dim, 85))
             } else {
-                vg::Paint::color(crate::editor::theme::vg_color(&pal.text_dim, 55))
+                vg::Paint::color(theme::vg_color(&pal.text_dim, 55))
             };
             paint.set_line_width((if is_major { 1.1 } else { 0.8 }) * dpx);
             canvas.stroke_path(&tick, &paint);
         }
 
         let mut track_path = vg::Path::new();
-        track_path.arc(center_x, center_y, arc_r, start_angle, end_angle, vg::Solidity::Hole);
-        let mut track_paint = vg::Paint::color(crate::editor::theme::vg_color(&pal.knob_track, 245));
+        track_path.arc(
+            center_x,
+            center_y,
+            arc_r,
+            start_angle,
+            end_angle,
+            vg::Solidity::Hole,
+        );
+        let mut track_paint = vg::Paint::color(theme::vg_color(&pal.knob_track, 245));
         track_paint.set_line_width(2.8 * dpx);
         track_paint.set_line_cap(vg::LineCap::Round);
         canvas.stroke_path(&track_path, &track_paint);
@@ -620,7 +657,7 @@ impl View for RotaryKnob {
         let (ar, ag, ab) = if is_enabled {
             pal.accent_rgb()
         } else {
-            crate::editor::theme::hex_to_rgb(&pal.text_dim)
+            theme::hex_to_rgb(&pal.text_dim)
         };
         let (arc_a0, arc_a1) = if self.bipolar {
             let mid_angle = start_angle + 0.5 * sweep_angle;
@@ -636,7 +673,14 @@ impl View for RotaryKnob {
         if (arc_a1 - arc_a0).abs() > 0.015 {
             if is_enabled {
                 let mut glow_path = vg::Path::new();
-                glow_path.arc(center_x, center_y, arc_r, arc_a0, arc_a1, vg::Solidity::Hole);
+                glow_path.arc(
+                    center_x,
+                    center_y,
+                    arc_r,
+                    arc_a0,
+                    arc_a1,
+                    vg::Solidity::Hole,
+                );
                 let mut glow_paint = vg::Paint::color(vg::Color::rgba(ar, ag, ab, 80));
                 glow_paint.set_line_width(5.5 * dpx);
                 glow_paint.set_line_cap(vg::LineCap::Round);
@@ -644,7 +688,14 @@ impl View for RotaryKnob {
             }
 
             let mut val_path = vg::Path::new();
-            val_path.arc(center_x, center_y, arc_r, arc_a0, arc_a1, vg::Solidity::Hole);
+            val_path.arc(
+                center_x,
+                center_y,
+                arc_r,
+                arc_a0,
+                arc_a1,
+                vg::Solidity::Hole,
+            );
             let mut val_paint =
                 vg::Paint::color(vg::Color::rgba(ar, ag, ab, if is_enabled { 250 } else { 150 }));
             val_paint.set_line_width(2.4 * dpx);
@@ -672,14 +723,14 @@ impl View for RotaryKnob {
             center_x,
             center_y + body_r,
             if is_enabled {
-                crate::editor::theme::vg_lerp(&pal.border_light, &pal.text_muted, 0.25, 255)
+                theme::vg_lerp(&pal.border_light, &pal.text_muted, 0.25, 255)
             } else {
-                crate::editor::theme::vg_lerp(&pal.panel_header_bg, &pal.border_light, 0.35, 255)
+                theme::vg_lerp(&pal.panel_header_bg, &pal.border_light, 0.35, 255)
             },
             if is_enabled {
-                crate::editor::theme::vg_color(&pal.knob_body, 255)
+                theme::vg_color(&pal.knob_body, 255)
             } else {
-                crate::editor::theme::vg_lerp(&pal.knob_body, &pal.panel_bg, 0.25, 255)
+                theme::vg_lerp(&pal.knob_body, &pal.panel_bg, 0.25, 255)
             },
         );
         canvas.fill_path(&body_path, &body_paint);
@@ -687,7 +738,7 @@ impl View for RotaryKnob {
         let mut rim_stroke = vg::Paint::color(if self.hovered || self.drag_active {
             vg::Color::rgba(ar, ag, ab, if is_enabled { 210 } else { 145 })
         } else {
-            crate::editor::theme::vg_color(&pal.border_dark, 235)
+            theme::vg_color(&pal.border_dark, 235)
         });
         rim_stroke.set_line_width(1.1 * dpx);
         canvas.stroke_path(&body_path, &rim_stroke);
@@ -695,24 +746,24 @@ impl View for RotaryKnob {
         let (cap_hi, cap_lo) = if is_enabled {
             if self.hovered || self.drag_active {
                 (
-                    crate::editor::theme::vg_lerp(&pal.border_light, &pal.text_bright, 0.45, 255),
-                    crate::editor::theme::vg_lerp(&pal.knob_body, &pal.panel_header_bg, 0.55, 255),
+                    theme::vg_lerp(&pal.border_light, &pal.text_bright, 0.45, 255),
+                    theme::vg_lerp(&pal.knob_body, &pal.panel_header_bg, 0.55, 255),
                 )
             } else {
                 (
-                    crate::editor::theme::vg_lerp(&pal.border_light, &pal.text_muted, 0.40, 255),
-                    crate::editor::theme::vg_lerp(&pal.knob_body, &pal.panel_header_bg, 0.35, 255),
+                    theme::vg_lerp(&pal.border_light, &pal.text_muted, 0.40, 255),
+                    theme::vg_lerp(&pal.knob_body, &pal.panel_header_bg, 0.35, 255),
                 )
             }
         } else if self.hovered || self.drag_active {
             (
-                crate::editor::theme::vg_lerp(&pal.panel_header_bg, &pal.text_muted, 0.25, 255),
-                crate::editor::theme::vg_lerp(&pal.knob_body, &pal.panel_header_bg, 0.20, 255),
+                theme::vg_lerp(&pal.panel_header_bg, &pal.text_muted, 0.25, 255),
+                theme::vg_lerp(&pal.knob_body, &pal.panel_header_bg, 0.20, 255),
             )
         } else {
             (
-                crate::editor::theme::vg_lerp(&pal.panel_header_bg, &pal.text_muted, 0.15, 255),
-                crate::editor::theme::vg_color(&pal.knob_body, 255),
+                theme::vg_lerp(&pal.panel_header_bg, &pal.text_muted, 0.15, 255),
+                theme::vg_color(&pal.knob_body, 255),
             )
         };
         let mut cap_path = vg::Path::new();
@@ -738,9 +789,9 @@ impl View for RotaryKnob {
         ptr_path.move_to(px0, py0);
         ptr_path.line_to(px1, py1);
         let mut ptr_paint = vg::Paint::color(if is_enabled {
-            vg::Color::rgb(255, 244, 228)
+            theme::vg_color(&pal.text_bright, 255)
         } else {
-            vg::Color::rgba(155, 142, 130, 140)
+            theme::vg_color(&pal.text_dim, 140)
         });
         ptr_paint.set_line_width(1.8 * dpx);
         ptr_paint.set_line_cap(vg::LineCap::Round);
@@ -759,7 +810,7 @@ impl View for RotaryKnob {
                     end_angle,
                     vg::Solidity::Hole,
                 );
-                let mut mod_track_paint = vg::Paint::color(vg::Color::rgba(14, 11, 9, 235));
+                let mut mod_track_paint = vg::Paint::color(theme::vg_color(&pal.knob_track, 235));
                 mod_track_paint.set_line_width(3.4 * dpx);
                 mod_track_paint.set_line_cap(vg::LineCap::Round);
                 canvas.stroke_path(&mod_track, &mod_track_paint);
@@ -768,9 +819,9 @@ impl View for RotaryKnob {
                 for slot in slots.iter().take(count) {
                     let arc_active = is_enabled && !slot.bypassed;
                     let (sr, sg, sb) = if arc_active {
-                        crate::editor::theme::mod_source_rgb(&pal, slot.source)
+                        theme::mod_source_rgb(&pal, slot.source)
                     } else {
-                        crate::editor::theme::hex_to_rgb(&pal.text_dim)
+                        theme::hex_to_rgb(&pal.text_dim)
                     };
                     let target_norm = (base_norm + slot.depth).clamp(0.0, 1.0);
                     let (lo_norm, hi_norm) = if slot.bipolar {
@@ -787,15 +838,30 @@ impl View for RotaryKnob {
                         let a1 = start_angle + hi_norm * sweep_angle;
                         if arc_active {
                             let mut mglow = vg::Path::new();
-                            mglow.arc(center_x, center_y, mod_ring_r, a0, a1, vg::Solidity::Hole);
-                            let mut mglow_paint = vg::Paint::color(vg::Color::rgba(sr, sg, sb, 75));
+                            mglow.arc(
+                                center_x,
+                                center_y,
+                                mod_ring_r,
+                                a0,
+                                a1,
+                                vg::Solidity::Hole,
+                            );
+                            let mut mglow_paint =
+                                vg::Paint::color(vg::Color::rgba(sr, sg, sb, 75));
                             mglow_paint.set_line_width(4.2 * dpx);
                             mglow_paint.set_line_cap(vg::LineCap::Round);
                             canvas.stroke_path(&mglow, &mglow_paint);
                         }
 
                         let mut mpath = vg::Path::new();
-                        mpath.arc(center_x, center_y, mod_ring_r, a0, a1, vg::Solidity::Hole);
+                        mpath.arc(
+                            center_x,
+                            center_y,
+                            mod_ring_r,
+                            a0,
+                            a1,
+                            vg::Solidity::Hole,
+                        );
                         let mut mpaint = vg::Paint::color(vg::Color::rgba(
                             sr,
                             sg,
@@ -823,22 +889,22 @@ impl View for RotaryKnob {
                     end_tick.move_to(tx0, ty0);
                     end_tick.line_to(tx1, ty1);
                     let mut tick_paint = vg::Paint::color(if arc_active {
-                        vg::Color::rgb(255, 250, 240)
+                        theme::vg_color(&pal.text_bright, 255)
                     } else {
-                        vg::Color::rgba(165, 154, 144, 165)
+                        theme::vg_color(&pal.text_dim, 165)
                     });
                     tick_paint.set_line_width(1.7 * dpx);
                     tick_paint.set_line_cap(vg::LineCap::Round);
                     canvas.stroke_path(&end_tick, &tick_paint);
                 }
 
-                let live_offset = mb.mod_ui.telemetry.dest_offset(mb.dest);
+                let live_offset = mb.mod_ui.dest_offset(mb.dest);
                 let live_norm = (base_norm + live_offset).clamp(0.0, 1.0);
                 let live_angle = start_angle + live_norm * sweep_angle;
                 let (dr, dg, db) = if is_enabled {
-                    slots[0].source.color_rgb()
+                    theme::mod_source_rgb(&pal, slots[0].source)
                 } else {
-                    (110, 100, 92)
+                    theme::hex_to_rgb(&pal.text_dim)
                 };
                 let lx = center_x + live_angle.cos() * mod_ring_r;
                 let ly = center_y + live_angle.sin() * mod_ring_r;
@@ -847,9 +913,9 @@ impl View for RotaryKnob {
                 canvas.fill_path(
                     &dot,
                     &vg::Paint::color(if is_enabled {
-                        vg::Color::rgb(255, 248, 232)
+                        theme::vg_color(&pal.text_bright, 255)
                     } else {
-                        vg::Color::rgba(165, 154, 144, 165)
+                        theme::vg_color(&pal.text_dim, 165)
                     }),
                 );
                 let mut dot_ring = vg::Paint::color(vg::Color::rgb(dr, dg, db));
@@ -859,4 +925,3 @@ impl View for RotaryKnob {
         }
     }
 }
-

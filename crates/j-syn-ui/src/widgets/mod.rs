@@ -1,17 +1,16 @@
-//! Custom skeuomorphic `femtovg` and `ParamWidgetBase` controls (`RotaryKnob`, `LedToggleSwitch`, `ParamStepPill`).
+//! Custom skeuomorphic `femtovg` and `ParamWidgetBase` controls (`RotaryKnob`, `LedToggleSwitch`, `ParamStepPill`, `PitchDragBox`, `RatioDragBox`).
 
 use std::sync::Arc;
 
-use j_syn_dsp::mod_matrix::{ModDestination, ModMatrixSource};
+use j_syn_dsp::mod_matrix::ModDestination;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::util::ModifiersExt;
 
-use crate::editor::mod_bar::ModUiState;
-use crate::editor::{TooltipState, UiEvent};
+use crate::shell::{ModUiHost, TooltipState, UiKitEvent};
 
-pub(super) type ValueFormatter = Arc<dyn Fn(f32, Option<f32>) -> String + Send + Sync>;
-pub(super) type EnabledPredicate = Arc<dyn Fn(&crate::JSynPluginParams) -> bool + Send + Sync>;
-pub(super) type DisabledTooltipFormatter = Arc<dyn Fn(&crate::JSynPluginParams) -> String + Send + Sync>;
+pub type ValueFormatter = Arc<dyn Fn(f32, Option<f32>) -> String + Send + Sync>;
+pub(super) type EnabledCheck = Arc<dyn Fn() -> bool + Send + Sync>;
+pub(super) type DisabledTooltipFn = Arc<dyn Fn() -> String + Send + Sync>;
 
 pub(super) const KNOB_DRAG_PIXELS: f32 = 150.0;
 pub(super) const KNOB_FINE_MULTIPLIER: f32 = 0.12;
@@ -19,31 +18,29 @@ pub(super) const MOD_DEPTH_DRAG_PIXELS: f32 = 120.0;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct DragState {
-    start_y: f32,
-    start_val: f32,
+    pub start_y: f32,
+    pub start_val: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ModDepthDrag {
-    slot_idx: usize,
-    start_y: f32,
-    start_depth: f32,
+    pub slot_idx: usize,
+    pub start_y: f32,
+    pub start_depth: f32,
 }
 
 #[derive(Clone)]
-pub(super) struct ModTargetBinding {
-    dest: ModDestination,
-    mod_ui: Arc<ModUiState>,
-    tab_tag: u8,
+pub struct ModTargetBinding {
+    pub dest: ModDestination,
+    pub mod_ui: Arc<dyn ModUiHost>,
+    pub tab_tag: u8,
 }
 
 pub(super) fn mod_slot_offsets(mb: &ModTargetBinding, md: ModDepthDrag) -> (f32, f32, f32) {
-    let mat = mb.mod_ui.params.mod_matrix.snapshot();
-    let slot = mat
-        .slots
-        .get(md.slot_idx)
-        .copied()
-        .filter(|s| s.enabled && s.source != ModMatrixSource::None)
+    let (slots, indices, count) = mb.mod_ui.slots_for_dest(mb.dest);
+    let slot = (0..count)
+        .find(|&i| indices[i] == md.slot_idx)
+        .map(|i| slots[i])
         .or_else(|| mb.mod_ui.primary_slot_for_dest(mb.dest).map(|(_, s)| s));
     let (depth, bipolar) = match slot {
         Some(s) => (s.depth, s.bipolar),
@@ -80,7 +77,7 @@ pub(super) fn emit_widget_tooltip(cx: &mut EventContext, text: String) {
         return;
     }
     let dpx = cx.scale_factor().max(0.1);
-    cx.emit(UiEvent::ShowTooltip(TooltipState {
+    cx.emit(UiKitEvent::ShowTooltip(TooltipState {
         visible: true,
         text,
         center_x: (bounds.x + bounds.w * 0.5) / dpx,
@@ -108,14 +105,14 @@ pub(super) fn handle_mod_depth_move(
     md.start_y = y;
     md.start_depth = new_depth;
     if prev_pct != next_pct {
-        cx.emit(UiEvent::ModUiChanged);
+        cx.emit(UiKitEvent::ModUiChanged);
     }
     cx.needs_redraw();
     true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::editor) enum ResizeCursorAxis {
+pub enum ResizeCursorAxis {
     Default,
     Vertical,
     Horizontal,
@@ -139,7 +136,7 @@ fn set_macos_cursor(axis: ResizeCursorAxis) {
     }
 }
 
-pub(in crate::editor) fn set_resize_cursor(cx: &mut EventContext, axis: ResizeCursorAxis) {
+pub fn set_resize_cursor(cx: &mut EventContext, axis: ResizeCursorAxis) {
     let icon = match axis {
         ResizeCursorAxis::Vertical => CursorIcon::RowResize,
         ResizeCursorAxis::Horizontal => CursorIcon::ColResize,
@@ -150,7 +147,11 @@ pub(in crate::editor) fn set_resize_cursor(cx: &mut EventContext, axis: ResizeCu
     set_macos_cursor(axis);
 }
 
-pub(super) fn update_mod_collar_cursor(cx: &mut EventContext, active: bool, cursor_active: &mut bool) {
+pub(super) fn update_mod_collar_cursor(
+    cx: &mut EventContext,
+    active: bool,
+    cursor_active: &mut bool,
+) {
     if active {
         set_resize_cursor(cx, ResizeCursorAxis::Vertical);
         *cursor_active = true;
@@ -165,8 +166,7 @@ mod pill;
 mod ratio;
 mod switch;
 
-pub use knob::RotaryKnob;
-pub(super) use knob::KnobDimExt;
-pub use pill::{ParamStepPill, PitchDragBox, PitchGroupModOverlay, PitchPart};
+pub use knob::{KnobDimExt, RotaryKnob};
+pub use pill::{ParamStepPill, PitchDragBox, PitchGroupModOverlay, PitchPart, decompose_pitch_st};
 pub use ratio::RatioDragBox;
 pub use switch::LedToggleSwitch;

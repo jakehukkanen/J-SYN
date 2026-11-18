@@ -1,6 +1,7 @@
 //! Multi-theme palette definitions, custom `<config_dir>/themes/*.json` loading,
-//! and dynamic CSS + `femtovg` color resolution for `J-SYN`.
+//! and dynamic CSS + `femtovg` color resolution shared across all J-SYN ecosystem plugins.
 
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use j_syn_dsp::mod_matrix::ModMatrixSource;
@@ -8,7 +9,10 @@ use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use serde::{Deserialize, Serialize};
 
-use crate::presets::JSynConfig;
+use crate::shell::UiShellState;
+
+/// Base CSS template shared by `J-SYN` and standalone FX plugins.
+pub const BASE_THEME_CSS: &str = include_str!("theme.css");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThemePalette {
@@ -260,10 +264,14 @@ impl ThemePalette {
         hex_to_rgb(&self.mod_midi)
     }
 
-    /// Maps the canonical `Studio Amber` CSS hex tokens in `theme.css` in a single pass
-    /// so custom and built-in themes apply cleanly without double-replacement.
+    /// Maps the canonical `Studio Amber` CSS hex tokens (both `#rrggbb` and `#rrggbbaa`)
+    /// in `theme.css` in a single pass so custom and built-in themes apply cleanly
+    /// without double-replacement.
     pub fn render_css(&self) -> String {
-        let base = include_str!("../theme.css");
+        Self::render_css_from(BASE_THEME_CSS, self)
+    }
+
+    pub fn render_css_from(base: &str, pal: &Self) -> String {
         let mut out = String::with_capacity(base.len());
         let bytes = base.as_bytes();
         let mut i = 0;
@@ -271,7 +279,7 @@ impl ThemePalette {
             if bytes[i] == b'#' && i + 7 <= bytes.len() {
                 let slice = &base[i..i + 7];
                 if slice[1..].bytes().all(|b| b.is_ascii_hexdigit()) {
-                    let mapped = self.map_hex_token(slice);
+                    let mapped = pal.map_hex_token(slice);
                     out.push_str(mapped);
                     i += 7;
                     continue;
@@ -284,7 +292,8 @@ impl ThemePalette {
         out
     }
 
-    fn map_hex_token<'a>(&'a self, token: &'a str) -> &'a str {
+    /// Maps a 6-digit `#rrggbb` (or the RGB prefix of `#rrggbbaa`) canonical token to this palette.
+    pub fn map_hex_token<'a>(&'a self, token: &'a str) -> &'a str {
         let lower = token.to_ascii_lowercase();
         match lower.as_str() {
             // Window & deepest backgrounds
@@ -337,10 +346,35 @@ impl ThemePalette {
     }
 }
 
+/// Shared config directory (`j-syn`) used across the plugin ecosystem for themes and user settings.
+pub fn ecosystem_config_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME").map(|h| {
+            PathBuf::from(h)
+                .join("Library")
+                .join("Application Support")
+                .join("j-syn")
+        })
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("j-syn"))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config").join("j-syn"))
+    }
+}
+
+pub fn themes_dir() -> Option<PathBuf> {
+    ecosystem_config_dir().map(|d| d.join("themes"))
+}
+
 #[inline]
 pub fn hex_to_rgb(hex: &str) -> (u8, u8, u8) {
     let clean = hex.trim().trim_start_matches('#');
-    if clean.len() == 6 {
+    if clean.len() == 6 || clean.len() == 8 {
         if let (Ok(r), Ok(g), Ok(b)) = (
             u8::from_str_radix(&clean[0..2], 16),
             u8::from_str_radix(&clean[2..4], 16),
@@ -377,7 +411,7 @@ pub fn vg_lerp(hex_a: &str, hex_b: &str, t: f32, alpha: u8) -> vg::Color {
 pub fn load_all_themes() -> Vec<ThemePalette> {
     let mut themes = ThemePalette::built_in_themes();
 
-    if let Some(dir) = JSynConfig::themes_dir() {
+    if let Some(dir) = themes_dir() {
         if !dir.exists() {
             if std::fs::create_dir_all(&dir).is_ok() {
                 let template_path = dir.join("Studio Amber.json");
@@ -413,7 +447,9 @@ pub fn load_all_themes() -> Vec<ThemePalette> {
             }
             custom.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
             for pal in custom {
-                if let Some(existing) = themes.iter_mut().find(|t| t.name.eq_ignore_ascii_case(&pal.name)) {
+                if let Some(existing) =
+                    themes.iter_mut().find(|t| t.name.eq_ignore_ascii_case(&pal.name))
+                {
                     *existing = pal;
                 } else {
                     themes.push(pal);
@@ -435,14 +471,14 @@ pub fn find_theme_by_name(name: &str) -> ThemePalette {
 }
 
 #[inline]
-pub(super) fn current_palette(cx: &DrawContext) -> ThemePalette {
-    cx.data::<super::UiData>()
+pub fn current_palette(cx: &DrawContext) -> ThemePalette {
+    cx.data::<UiShellState>()
         .map(|d| d.active_theme.clone())
         .unwrap_or_else(ThemePalette::studio_amber)
 }
 
 #[inline]
-pub(super) fn mod_source_rgb(pal: &ThemePalette, src: ModMatrixSource) -> (u8, u8, u8) {
+pub fn mod_source_rgb(pal: &ThemePalette, src: ModMatrixSource) -> (u8, u8, u8) {
     match src {
         ModMatrixSource::Env1
         | ModMatrixSource::Env2
@@ -469,7 +505,7 @@ pub(super) fn mod_source_rgb(pal: &ThemePalette, src: ModMatrixSource) -> (u8, u
     }
 }
 
-pub(crate) struct DynamicCssSource(pub Arc<RwLock<String>>);
+pub struct DynamicCssSource(pub Arc<RwLock<String>>);
 
 impl nih_plug_vizia::vizia::util::IntoCssStr for DynamicCssSource {
     fn get_style(&self) -> Result<String, std::io::Error> {
@@ -482,6 +518,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn theme_css_parses_cleanly() {
+        assert!(
+            !BASE_THEME_CSS.contains(":focus-within"),
+            "Vizia's CSS parser does not support :focus-within"
+        );
+    }
+
+    #[test]
     fn built_in_themes_render_valid_css() {
         let themes = ThemePalette::built_in_themes();
         assert_eq!(themes.len(), 5);
@@ -489,6 +533,7 @@ mod tests {
             let css = theme.render_css();
             assert!(css.contains(".plugin-root"));
             assert!(css.contains(&theme.accent_primary));
+            assert!(!css.contains(":focus-within"));
         }
     }
 }
