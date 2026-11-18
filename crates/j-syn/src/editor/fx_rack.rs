@@ -6,9 +6,10 @@ use std::sync::Arc;
 use j_syn_dsp::filter::cutoff_norm_to_hz;
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{
-    diopser_freq_hz, format_tube_res_tune, format_utility_pan, fx_high_cut_hz, fx_low_cut_hz,
-    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, mb_band_level_db,
-    mb_out_gain_db, mb_xover_high_hz, mb_xover_low_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
+    diopser_freq_hz, flanger_delay_ms, flanger_feedback, flanger_phase_deg, flanger_rate_hz,
+    format_tube_res_tune, format_utility_pan, fx_high_cut_hz, fx_low_cut_hz, limiter_ceil_db,
+    limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, mb_band_level_db, mb_out_gain_db,
+    mb_xover_high_hz, mb_xover_low_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
     tube_res_flt_width_oct, tube_res_lfo_rate_hz, utility_gain_db_from_norm,
     utility_width_from_norm, FxRackState, FxType, MB_BAND_LEVEL_DEFAULT_NORM,
 };
@@ -40,6 +41,7 @@ const FX_TYPE_ITEMS: &[(&str, FxTypeParam)] = &[
     ("Clipper", FxTypeParam::JSatClipper),
     ("Limiter", FxTypeParam::Limiter),
     ("Chorus", FxTypeParam::Chorus),
+    ("Flanger", FxTypeParam::Flanger),
     ("Phaser", FxTypeParam::Phaser),
     ("Delay", FxTypeParam::Delay),
     ("Reverb", FxTypeParam::Reverb),
@@ -190,6 +192,12 @@ fn fx_slot_param_label(
                 2 => "LINK",
                 _ => "PUNCH",
             },
+            FxTypeParam::Flanger => match param_idx {
+                0 => "FEEDBK",
+                1 => "PHASE",
+                2 => "LOW CUT",
+                _ => "TONE",
+            },
             _ => "--",
         };
     }
@@ -274,6 +282,12 @@ fn fx_slot_param_label(
             2 => "LOOKAHD",
             _ => "MIX",
         },
+        FxTypeParam::Flanger => match param_idx {
+            0 => "RATE",
+            1 => "DEPTH",
+            2 => "DELAY",
+            _ => "MIX",
+        },
         FxTypeParam::MultibandDist => "--",
     }
 }
@@ -327,6 +341,14 @@ fn format_fx_slot_param_value(
             return match param_idx {
                 0 => format!("{:.0} ms", limiter_release_ms(n)),
                 _ => format!("{:.0}%", n * 100.0),
+            };
+        }
+        if fx_ty == FxTypeParam::Flanger {
+            return match param_idx {
+                0 => format!("{:+.0}%", flanger_feedback(n) * 100.0),
+                1 => format!("{:.0}°", flanger_phase_deg(n)),
+                2 => format_hz(fx_low_cut_hz(n)),
+                _ => format_hz(fx_high_cut_hz(n)),
             };
         }
         return match param_idx {
@@ -414,6 +436,11 @@ fn format_fx_slot_param_value(
                     format!("{ms:.1} ms")
                 }
             }
+            _ => format!("{:.0}%", n * 100.0),
+        },
+        FxTypeParam::Flanger => match param_idx {
+            0 => format!("{:.2} Hz", flanger_rate_hz(n)),
+            2 => format!("{:.2} ms", flanger_delay_ms(n)),
             _ => format!("{:.0}%", n * 100.0),
         },
         FxTypeParam::MultibandDist => String::new(),
@@ -1138,7 +1165,7 @@ fn build_fx_scope_zstack(
                     }
 
                     if let Some(sub_lbl) = FxType::from(fx_ty).subtab_label() {
-                        let sub_w = if sub_lbl == "LFO" || sub_lbl == "ADV" {
+                        let sub_w = if matches!(sub_lbl, "LFO" | "ADV" | "MOD") {
                             26.0
                         } else {
                             22.0

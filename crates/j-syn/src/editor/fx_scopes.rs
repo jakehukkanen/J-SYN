@@ -6,11 +6,11 @@ use std::time::Instant;
 
 use j_syn_dsp::mod_matrix::{FxScopeRing, ModDestination, ModUiTelemetry, FX_SCOPE_LEN};
 use j_syn_dsp::{
-    evaluate_diopser_ripple, evaluate_tube_res_scope_response, filter_response_db_from_slot,
-    limiter_ceil_db, limiter_gain_db, mb_band_level_db, mb_band_magnitude_at_hz,
-    mb_ordered_xover_hz, mb_xover_high_norm, mb_xover_low_norm, tube_res_lfo_rate_hz,
-    utility_gain_db_from_norm, utility_pan_bipolar, utility_width_from_norm, FxRackState,
-    MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
+    evaluate_diopser_ripple, evaluate_flanger_scope_response, evaluate_tube_res_scope_response,
+    filter_response_db_from_slot, flanger_rate_hz, limiter_ceil_db, limiter_gain_db,
+    mb_band_level_db, mb_band_magnitude_at_hz, mb_ordered_xover_hz, mb_xover_high_norm,
+    mb_xover_low_norm, tube_res_lfo_rate_hz, utility_gain_db_from_norm, utility_pan_bipolar,
+    utility_width_from_norm, FxRackState, MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
 };
 use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
@@ -44,6 +44,7 @@ pub(super) fn fx_accent_rgb(fx_ty: FxTypeParam) -> (u8, u8, u8) {
         FxTypeParam::Utility => (108, 214, 255),
         FxTypeParam::Limiter => (255, 122, 89),
         FxTypeParam::MultibandDist => (255, 108, 72),
+        FxTypeParam::Flanger => (156, 168, 255),
     }
 }
 
@@ -483,6 +484,12 @@ fn paint_diopser_scope(
 }
 
 #[inline]
+fn scope_elapsed_secs() -> f32 {
+    static START_EPOCH: OnceLock<Instant> = OnceLock::new();
+    START_EPOCH.get_or_init(Instant::now).elapsed().as_secs_f32()
+}
+
+#[inline]
 #[allow(clippy::too_many_arguments)]
 fn paint_tube_res_scope(
     canvas: &mut Canvas,
@@ -494,8 +501,7 @@ fn paint_tube_res_scope(
     mod_ui: &ModUiState,
     pal: &ThemePalette,
 ) {
-    static START_EPOCH: OnceLock<Instant> = OnceLock::new();
-    let elapsed_s = START_EPOCH.get_or_init(Instant::now).elapsed().as_secs_f32();
+    let elapsed_s = scope_elapsed_secs();
 
     let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
     let enabled = slot.enabled.value();
@@ -1136,6 +1142,16 @@ impl View for FxSlotVisualizer {
                 &self.mod_ui,
                 &pal,
             ),
+            FxTypeParam::Flanger => paint_flanger_scope(
+                canvas,
+                bounds,
+                dpx,
+                self.bus_idx,
+                self.slot_idx,
+                &self.params,
+                &self.mod_ui,
+                &pal,
+            ),
             FxTypeParam::Filter => paint_filter_scope(
                 canvas,
                 bounds,
@@ -1465,6 +1481,140 @@ fn paint_multiband_dist_scope(
             if enabled { 220 } else { 90 },
         ));
         canvas.fill_path(&tick, &tp);
+    }
+
+    f.end(canvas, pal);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_flanger_scope(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    dpx: f32,
+    bus_idx: usize,
+    slot_idx: usize,
+    params: &JSynPluginParams,
+    mod_ui: &ModUiState,
+    pal: &ThemePalette,
+) {
+    let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
+    let enabled = slot.enabled.value();
+    let f = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 3.0, enabled, pal);
+
+    paint_filter_freq_grid(canvas, f.ix, f.iy, f.iw, f.ih, dpx, pal, enabled, &[], 0.0, 1.0);
+
+    let (_pre, post, act) = read_scope_snapshot(mod_ui, bus_idx, slot_idx);
+    let accent = scope_trace_rgb(fx_accent_rgb(FxTypeParam::Flanger), pal, enabled);
+    paint_filled_waveform_trace(
+        canvas,
+        &post,
+        f.ix,
+        f.iy,
+        f.iw,
+        f.ih,
+        1.25,
+        accent,
+        if enabled { 34 + (act * 24.0) as u8 } else { 10 },
+        if enabled { 4 } else { 2 },
+        if enabled { 85 } else { 32 },
+        1.0 * dpx,
+    );
+
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
+    let tel = &mod_ui.telemetry;
+    let eff_eq = [
+        (slot.p5.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 4)))
+        .clamp(0.0, 1.0),
+        (slot.p6.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 5)))
+        .clamp(0.0, 1.0),
+        (slot.p7.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 6)))
+        .clamp(0.0, 1.0),
+        (slot.p8.value()
+            + tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 7)))
+        .clamp(0.0, 1.0),
+    ];
+
+    let rate_hz = flanger_rate_hz(eff[0]);
+    let lfo_phase = (scope_elapsed_secs() * rate_hz).fract();
+
+    let mut path_l = vg::Path::new();
+    let mut path_r = vg::Path::new();
+    let mut fill_l = vg::Path::new();
+    fill_l.move_to(f.ix, f.bottom);
+
+    const PTS: usize = 96;
+    for i in 0..PTS {
+        let t = i as f32 / (PTS - 1) as f32;
+        let freq_hz = 20.0 * 1000.0_f32.powf(t);
+        let (mag_l, mag_r, _, _) = evaluate_flanger_scope_response(eff, eff_eq, lfo_phase, freq_hz);
+        let x = f.ix + t * f.iw;
+        let y_l = (f.bottom - (mag_l * 0.42).clamp(0.0, 0.96) * f.ih).clamp(f.iy + 2.0 * dpx, f.bottom);
+        let y_r = (f.bottom - (mag_r * 0.42).clamp(0.0, 0.96) * f.ih).clamp(f.iy + 2.0 * dpx, f.bottom);
+        fill_l.line_to(x, y_l);
+        if i == 0 {
+            path_l.move_to(x, y_l);
+            path_r.move_to(x, y_r);
+        } else {
+            path_l.line_to(x, y_l);
+            path_r.line_to(x, y_r);
+        }
+    }
+    fill_l.line_to(f.ix + f.iw, f.bottom);
+    fill_l.close();
+
+    paint_vertical_gradient_fill(
+        canvas,
+        &fill_l,
+        f.ix,
+        f.iy,
+        f.bottom,
+        accent,
+        if enabled { 56 } else { 16 },
+        if enabled { 6 } else { 2 },
+    );
+
+    let r_rgb = scope_trace_rgb(theme::hex_to_rgb(&pal.accent_gold), pal, enabled);
+    let mut rp = vg::Paint::color(vg::Color::rgba(
+        r_rgb.0,
+        r_rgb.1,
+        r_rgb.2,
+        if enabled { 155 } else { 65 },
+    ));
+    rp.set_line_width(1.1 * dpx);
+    canvas.stroke_path(&path_r, &rp);
+
+    let mut lp = vg::Paint::color(vg::Color::rgba(
+        accent.0,
+        accent.1,
+        accent.2,
+        if enabled { 225 } else { 95 },
+    ));
+    lp.set_line_width(1.4 * dpx);
+    canvas.stroke_path(&path_l, &lp);
+
+    // Compact L/R stereo LFO phase orbit indicator in bottom-right corner
+    let rad = 7.0 * dpx;
+    let cx_o = f.ix + f.iw - rad - 3.0 * dpx;
+    let cy_o = f.bottom - rad - 3.0 * dpx;
+    let mut ring = vg::Path::new();
+    ring.circle(cx_o, cy_o, rad);
+    let mut ring_p = vg::Paint::color(theme::vg_color(
+        &pal.scope_grid,
+        if enabled { 140 } else { 55 },
+    ));
+    ring_p.set_line_width(1.0 * dpx);
+    canvas.stroke_path(&ring, &ring_p);
+
+    let ang_l = lfo_phase * std::f32::consts::TAU;
+    let ang_r = ang_l + eff_eq[1] * std::f32::consts::PI;
+    for (ang, col) in [(ang_r, r_rgb), (ang_l, accent)] {
+        let mut dot = vg::Path::new();
+        dot.circle(cx_o + ang.cos() * rad * 0.72, cy_o + ang.sin() * rad * 0.72, 1.8 * dpx);
+        let dp = vg::Paint::color(vg::Color::rgba(col.0, col.1, col.2, if enabled { 235 } else { 100 }));
+        canvas.fill_path(&dot, &dp);
     }
 
     f.end(canvas, pal);

@@ -126,6 +126,8 @@ pub enum FxTypeParam {
     Limiter,
     #[name = "MB Dist"]
     MultibandDist,
+    #[name = "Flanger"]
+    Flanger,
 }
 
 impl From<j_syn_dsp::FxType> for FxTypeParam {
@@ -145,6 +147,7 @@ impl From<j_syn_dsp::FxType> for FxTypeParam {
             j_syn_dsp::FxType::Utility => Self::Utility,
             j_syn_dsp::FxType::Limiter => Self::Limiter,
             j_syn_dsp::FxType::MultibandDist => Self::MultibandDist,
+            j_syn_dsp::FxType::Flanger => Self::Flanger,
         }
     }
 }
@@ -166,6 +169,7 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
             FxTypeParam::Utility => Self::Utility,
             FxTypeParam::Limiter => Self::Limiter,
             FxTypeParam::MultibandDist => Self::MultibandDist,
+            FxTypeParam::Flanger => Self::Flanger,
         }
     }
 }

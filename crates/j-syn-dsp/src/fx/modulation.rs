@@ -7,6 +7,7 @@ use crate::filter::fast_tanh;
 use crate::oversample::{Biquad, BiquadCoeffs};
 
 const CHORUS_BUF_LEN: usize = 4096;
+const MAX_FLANGE_SAMPLES: usize = 4096;
 const MAX_DELAY_SAMPLES: usize = 96_000;
 const REVERB_COMB_LEN: usize = 4096;
 const REVERB_AP_LEN: usize = 1024;
@@ -40,6 +41,88 @@ pub fn apply_stereo_width(l: f32, r: f32, width_norm: f32) -> (f32, f32) {
     let mid = 0.5 * (l + r);
     let side = 0.5 * (l - r) * side_scale;
     (mid + side, mid - side)
+}
+
+/// Maps normalized `0.0..=1.0` to `0.02 Hz .. 15.0 Hz` Flanger LFO rate (log).
+#[inline]
+pub fn flanger_rate_hz(norm: f32) -> f32 {
+    0.02 * 750.0_f32.powf(norm.clamp(0.0, 1.0))
+}
+
+/// Maps normalized `0.0..=1.0` to `0.1 ms .. 15.0 ms` Flanger center delay (log).
+#[inline]
+pub fn flanger_delay_ms(norm: f32) -> f32 {
+    0.1 * 150.0_f32.powf(norm.clamp(0.0, 1.0))
+}
+
+/// Maps normalized `0.0..=1.0` to bipolar `-99% .. +99%` Flanger feedback (`0.50` = `0%`).
+#[inline]
+pub fn flanger_feedback(norm: f32) -> f32 {
+    (norm.clamp(0.0, 1.0) * 2.0 - 1.0) * 0.99
+}
+
+/// Maps normalized `0.0..=1.0` to `0° .. 180°` stereo L/R LFO phase offset.
+#[inline]
+pub fn flanger_phase_deg(norm: f32) -> f32 {
+    norm.clamp(0.0, 1.0) * 180.0
+}
+
+#[inline]
+fn read_hermite(buf: &[f32], write_pos: usize, delay_samples: f32) -> f32 {
+    let len = buf.len();
+    let d = delay_samples.clamp(1.0, (len - 3) as f32);
+    let d_int = d as usize;
+    let t = d - d_int as f32;
+    let y_m1 = buf[(write_pos + len - (d_int - 1)) % len];
+    let y0 = buf[(write_pos + len - d_int) % len];
+    let y1 = buf[(write_pos + len - (d_int + 1)) % len];
+    let y2 = buf[(write_pos + len - (d_int + 2)) % len];
+    let c0 = y0;
+    let c1 = 0.5 * (y1 - y_m1);
+    let c2 = y_m1 - 2.5 * y0 + 2.0 * y1 - 0.5 * y2;
+    let c3 = 0.5 * (y2 - y_m1) + 1.5 * (y0 - y1);
+    ((c3 * t + c2) * t + c1) * t + c0
+}
+
+#[inline]
+pub(crate) fn flanger_comb_mag(delay_s: f32, fb: f32, freq_hz: f32) -> f32 {
+    let theta = -std::f32::consts::TAU * freq_hz * delay_s;
+    let cos_t = theta.cos();
+    let sin_t = theta.sin();
+    // H(w) = 0.5 + 0.5 * z^-d / (1 - fb * z^-d)
+    let denom_re = 1.0 - fb * cos_t;
+    let denom_im = -fb * sin_t;
+    let denom_sq = (denom_re * denom_re + denom_im * denom_im).max(1e-6);
+    let tap_re = 0.5 * (cos_t * denom_re + sin_t * denom_im) / denom_sq;
+    let tap_im = 0.5 * (sin_t * denom_re - cos_t * denom_im) / denom_sq;
+    let re = 0.5 + tap_re;
+    let im = tap_im;
+    (re * re + im * im).sqrt().clamp(0.0, 4.0)
+}
+
+/// Evaluates instantaneous Flanger L/R comb magnitude responses at `freq_hz` for scope display.
+pub fn evaluate_flanger_scope_response(
+    p: [f32; 4],
+    eq: [f32; 4],
+    lfo_phase: f32,
+    freq_hz: f32,
+) -> (f32, f32, f32, f32) {
+    let depth = p[1].clamp(0.0, 1.0);
+    let center_ms = flanger_delay_ms(p[2]);
+    let fb = flanger_feedback(eq[0]);
+    let phase_rad = eq[1].clamp(0.0, 1.0) * std::f32::consts::PI;
+
+    let ang_l = lfo_phase * std::f32::consts::TAU;
+    let ang_r = ang_l + phase_rad;
+    let delay_ms = |ang: f32| (center_ms * 4.0_f32.powf(depth * 0.65 * ang.sin())).clamp(0.08, 19.5);
+    let dl = delay_ms(ang_l);
+    let dr = delay_ms(ang_r);
+    (
+        flanger_comb_mag(dl * 0.001, fb, freq_hz),
+        flanger_comb_mag(dr * 0.001, fb, freq_hz),
+        dl,
+        dr,
+    )
 }
 
 #[inline]
@@ -644,6 +727,124 @@ impl ReverbStereo {
         let out_l = in_l + (stereo_l - in_l) * mix;
         let out_r = in_r + (stereo_r - in_r) * mix;
         let activity = (stereo_l.abs().max(stereo_r.abs()) * mix).clamp(0.0, 1.0);
+        (flush_denormal(out_l), flush_denormal(out_r), activity)
+    }
+}
+
+/// High-precision cubic Hermite stereo Flanger (`MAIN` = `RATE, DEPTH, DELAY, MIX`,
+/// `MOD` = `FEEDBK, PHASE, LOW CUT, TONE`).
+pub(crate) struct FlangerStereo {
+    buf_l: Box<[f32]>,
+    buf_r: Box<[f32]>,
+    fb_l: f32,
+    fb_r: f32,
+    eq: EqStageStereo,
+    write_pos: usize,
+    lfo_phase: f32,
+    sample_rate: f32,
+    dirty: bool,
+    idle_samples: u32,
+}
+
+impl FlangerStereo {
+    pub(crate) fn new(sample_rate: f32) -> Self {
+        let sr = sample_rate.max(1_000.0);
+        Self {
+            buf_l: vec![0.0; MAX_FLANGE_SAMPLES].into_boxed_slice(),
+            buf_r: vec![0.0; MAX_FLANGE_SAMPLES].into_boxed_slice(),
+            fb_l: 0.0,
+            fb_r: 0.0,
+            eq: EqStageStereo::new(sr),
+            write_pos: 0,
+            lfo_phase: 0.0,
+            sample_rate: sr,
+            dirty: false,
+            idle_samples: 1024,
+        }
+    }
+
+    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+        let sr = sample_rate.max(1_000.0);
+        self.sample_rate = sr;
+        self.eq.set_sample_rate(sr);
+    }
+
+    pub(crate) fn reset(&mut self) {
+        if self.dirty {
+            self.buf_l.fill(0.0);
+            self.buf_r.fill(0.0);
+            self.dirty = false;
+        }
+        self.fb_l = 0.0;
+        self.fb_r = 0.0;
+        self.eq.reset();
+        self.write_pos = 0;
+        self.lfo_phase = 0.0;
+        self.idle_samples = 1024;
+    }
+
+    #[inline]
+    pub(crate) fn process(
+        &mut self,
+        in_l: f32,
+        in_r: f32,
+        p: [f32; 4],
+        eq: [f32; 4],
+    ) -> (f32, f32, f32) {
+        if track_idle(&mut self.idle_samples, in_l, in_r) {
+            if !self.dirty {
+                return (0.0, 0.0, 0.0);
+            }
+            if self.idle_samples > (MAX_FLANGE_SAMPLES as u32 + 64) {
+                self.reset();
+                return (0.0, 0.0, 0.0);
+            }
+        }
+
+        let rate_hz = flanger_rate_hz(p[0]);
+        let depth = p[1].clamp(0.0, 1.0);
+        let center_ms = flanger_delay_ms(p[2]);
+        let mix = p[3].clamp(0.0, 1.0);
+
+        let fb = flanger_feedback(eq[0]);
+        let phase_rad = eq[1].clamp(0.0, 1.0) * std::f32::consts::PI;
+        let low_cut = eq[2].clamp(0.0, 1.0);
+        let tone = eq[3].clamp(0.0, 1.0);
+
+        self.dirty = true;
+
+        self.lfo_phase = (self.lfo_phase + rate_hz / self.sample_rate).fract();
+        let ang_l = self.lfo_phase * std::f32::consts::TAU;
+        let ang_r = ang_l + phase_rad;
+
+        let sr_ms = self.sample_rate * 0.001;
+        let max_d = (MAX_FLANGE_SAMPLES - 4) as f32;
+        let d_ms_l = (center_ms * 4.0_f32.powf(depth * 0.65 * ang_l.sin())).clamp(0.08, 19.5);
+        let d_ms_r = (center_ms * 4.0_f32.powf(depth * 0.65 * ang_r.sin())).clamp(0.08, 19.5);
+        let d_samp_l = (d_ms_l * sr_ms).clamp(1.0, max_d);
+        let d_samp_r = (d_ms_r * sr_ms).clamp(1.0, max_d);
+
+        // Soft-limit feedback injection so +-99% feedback sweeps stay bounded and musical
+        let in_fb_l = fast_tanh((in_l + self.fb_l * fb) * 0.72) * 1.38;
+        let in_fb_r = fast_tanh((in_r + self.fb_r * fb) * 0.72) * 1.38;
+
+        let tap_l = read_hermite(&self.buf_l, self.write_pos, d_samp_l);
+        let tap_r = read_hermite(&self.buf_r, self.write_pos, d_samp_r);
+        let (flt_l, flt_r) = self.eq.process(tap_l, tap_r, low_cut, tone);
+
+        self.buf_l[self.write_pos] = flush_denormal(in_fb_l);
+        self.buf_r[self.write_pos] = flush_denormal(in_fb_r);
+        self.fb_l = flush_denormal(flt_l);
+        self.fb_r = flush_denormal(flt_r);
+        self.write_pos = (self.write_pos + 1) % MAX_FLANGE_SAMPLES;
+
+        let flanged_l = 0.5 * (in_l + flt_l);
+        let flanged_r = 0.5 * (in_r + flt_r);
+        let out_l = in_l + (flanged_l - in_l) * mix;
+        let out_r = in_r + (flanged_r - in_r) * mix;
+        let activity =
+            (0.5 * (ang_l.sin().abs() + ang_r.sin().abs()) * mix * (0.35 + 0.65 * fb.abs()))
+                .clamp(0.0, 1.0);
         (flush_denormal(out_l), flush_denormal(out_r), activity)
     }
 }

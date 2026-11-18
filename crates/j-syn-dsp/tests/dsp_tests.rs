@@ -3311,3 +3311,78 @@ fn fx_multiband_dist_flat_xover_per_band_harmonics_solo_and_idle() {
     let (il, ir) = solo_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
     assert_eq!((il, ir), (0.0, 0.0));
 }
+
+#[test]
+fn fx_flanger_high_feedback_polarity_stack_mod_and_idle() {
+    use j_syn_dsp::{
+        FxRackParams, FxRackState, FxSlotParams, FxType, ModDestination, NUM_MOD_DESTS,
+    };
+
+    let sr = 48_000.0;
+    let mod_zero = [0.0_f32; NUM_MOD_DESTS];
+
+    // 1. Positive (+95%) vs negative (-95%) feedback sweeps stay bounded & produce distinct comb spectra
+    let run_sweep = |fb_norm: f32, stack: u8, mods: &[f32; NUM_MOD_DESTS]| -> (f32, f64) {
+        let mut rack = FxRackState::new(sr);
+        let mut p = FxRackParams::default();
+        p.buses[0].slots[0] = FxSlotParams {
+            fx_type: FxType::Flanger,
+            enabled: true,
+            stack,
+            // Rate ~1.5 Hz, Depth 100%, Manual ~1.0 ms (matched harmonic), Mix 100%
+            params: [0.64, 1.0, 0.46, 1.0],
+            // Feedbk, Phase 90°, LowCut off (20Hz), Tone open (~12kHz)
+            eq_params: [fb_norm, 0.50, 0.0, 0.85],
+            ..FxSlotParams::default()
+        };
+        let mut peak = 0.0_f32;
+        let mut rms_sq = 0.0_f64;
+        for n in 0..8192 {
+            // Broadband saw-like impulse pulse train at 250 Hz -> rich harmonic combs
+            let phase = (n as f32 * 250.0 / sr).fract();
+            let x = (phase * 2.0 - 1.0) * 0.35;
+            let (l, r) = rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &p, mods, 120.0, None);
+            assert!(l.is_finite() && r.is_finite(), "Flanger NaN/Inf at fb_norm={fb_norm}");
+            peak = peak.max(l.abs()).max(r.abs());
+            if n >= 2048 {
+                rms_sq += (l as f64) * (l as f64);
+            }
+        }
+        (peak, rms_sq / 6144.0)
+    };
+
+    let fb_pos = 0.5 + 0.95 / 1.98;
+    let fb_neg = 0.5 - 0.95 / 1.98;
+    let (pk_pos, energy_pos) = run_sweep(fb_pos, 1, &mod_zero);
+    let (pk_neg, energy_neg) = run_sweep(fb_neg, 1, &mod_zero);
+    assert!(pk_pos < 2.5 && pk_neg < 2.5, "Flanger feedback ran away: +{pk_pos} / -{pk_neg}");
+    assert!(
+        (energy_pos - energy_neg).abs() > 1e-3,
+        "Positive (+95%) vs negative (-95%) feedback must differ in hollow vs resonant energy: pos={energy_pos}, neg={energy_neg}"
+    );
+
+    // 2. STACK=3 & ModDestination modulation + idle recovery
+    let mut mods = [0.0_f32; NUM_MOD_DESTS];
+    mods[ModDestination::fx_bus_slot_param(0, 0, 0).index()] = 0.25; // Rate mod
+    mods[ModDestination::fx_bus_slot_param(0, 0, 4).index()] = -0.3; // Feedback mod
+    let (pk_stack, _) = run_sweep(0.85, 3, &mods);
+    assert!(pk_stack > 0.02 && pk_stack < 3.0);
+
+    let mut idle_rack = FxRackState::new(sr);
+    let mut ip = FxRackParams::default();
+    ip.buses[0].slots[0] = FxSlotParams {
+        fx_type: FxType::Flanger,
+        enabled: true,
+        stack: 1,
+        params: [0.4, 0.7, 0.45, 1.0],
+        eq_params: [0.8, 0.5, 0.0, 0.85],
+        ..FxSlotParams::default()
+    };
+    let (wl, wr) = idle_rack.process_buses_sample((0.4, -0.4), (0.0, 0.0), (0.0, 0.0), &ip, &mod_zero, 120.0, None);
+    assert!(wl.is_finite() && wr.is_finite());
+    for _ in 0..4500 {
+        let _ = idle_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &ip, &mod_zero, 120.0, None);
+    }
+    let (il, ir) = idle_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &ip, &mod_zero, 120.0, None);
+    assert_eq!((il, ir), (0.0, 0.0));
+}
