@@ -191,7 +191,7 @@ pub struct JSynPluginParams {
     pub bus_a_pan: FloatParam,
 
     #[nested(id_prefix = "bus_b", group = "Bus B FX")]
-    pub fx_bus_b: FxBusPluginParams,
+    pub fx_bus_b: Box<FxBusPluginParams>,
 
     #[id = "fx_bus_topo"]
     pub fx_bus_topology: EnumParam<FxBusTopologyParam>,
@@ -336,7 +336,7 @@ impl Default for JSynPluginParams {
             fx_slots: std::array::from_fn(FxSlotPluginParams::new_slot),
             bus_a_level: fx_level_param("Bus A Level"),
             bus_a_pan: bipolar_percentage_param("Bus A Pan", 0.0),
-            fx_bus_b: FxBusPluginParams::new_bus_b(),
+            fx_bus_b: Box::new(FxBusPluginParams::new_bus_b()),
             fx_bus_topology: EnumParam::new("FX Bus Routing", FxBusTopologyParam::Parallel),
             sub_bus: SubBusPluginParams::default(),
             macros: std::array::from_fn(MacroPluginParams::new),

@@ -83,6 +83,31 @@ impl RotaryKnob {
         Self::build_inner(cx, params, params_to_param, bipolar, accent_rgb, None, None)
     }
 
+    pub fn new_with_formatter<'a, L, Params, P, FMap>(
+        cx: &'a mut Context,
+        params: L,
+        params_to_param: FMap,
+        bipolar: bool,
+        accent_rgb: (u8, u8, u8),
+        value_formatter: ValueFormatter,
+    ) -> Handle<'a, Self>
+    where
+        L: Lens<Target = Params> + Clone,
+        Params: 'static,
+        P: Param + 'static,
+        FMap: Fn(&Params) -> &P + Copy + 'static,
+    {
+        Self::build_inner(
+            cx,
+            params,
+            params_to_param,
+            bipolar,
+            accent_rgb,
+            None,
+            Some(value_formatter),
+        )
+    }
+
     pub fn new_with_mod<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         params: L,

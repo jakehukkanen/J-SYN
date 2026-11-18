@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use j_syn_dsp::{DistortionMode, FxBusTopology, FxFilterSlope, SubBusParams};
+use j_syn_dsp::{
+    DistortionMode, FxBusTopology, FxFilterSlope, MbDistBandParams, SubBusParams,
+    MB_BAND_LEVEL_DEFAULT_NORM,
+};
 use nih_plug::prelude::*;
 
 use super::{bipolar_percentage_param, fx_level_param, FilterModeParam};
@@ -121,6 +124,8 @@ pub enum FxTypeParam {
     Utility,
     #[name = "Limiter"]
     Limiter,
+    #[name = "MB Dist"]
+    MultibandDist,
 }
 
 impl From<j_syn_dsp::FxType> for FxTypeParam {
@@ -139,6 +144,7 @@ impl From<j_syn_dsp::FxType> for FxTypeParam {
             j_syn_dsp::FxType::TubeResonator => Self::TubeResonator,
             j_syn_dsp::FxType::Utility => Self::Utility,
             j_syn_dsp::FxType::Limiter => Self::Limiter,
+            j_syn_dsp::FxType::MultibandDist => Self::MultibandDist,
         }
     }
 }
@@ -159,6 +165,7 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
             FxTypeParam::TubeResonator => Self::TubeResonator,
             FxTypeParam::Utility => Self::Utility,
             FxTypeParam::Limiter => Self::Limiter,
+            FxTypeParam::MultibandDist => Self::MultibandDist,
         }
     }
 }
@@ -300,6 +307,65 @@ impl From<DistortionModeParam> for DistortionMode {
 }
 
 #[derive(Params)]
+pub struct FxMbBandPluginParams {
+    #[id = "mb_en"]
+    pub enabled: BoolParam,
+    #[id = "mb_solo"]
+    pub solo: BoolParam,
+    #[id = "mb_m"]
+    pub mode: EnumParam<DistortionModeParam>,
+    #[id = "mb_drv"]
+    pub drive: FloatParam,
+    #[id = "mb_bias"]
+    pub bias: FloatParam,
+    #[id = "mb_lvl"]
+    pub level: FloatParam,
+    #[id = "mb_mix"]
+    pub mix: FloatParam,
+}
+
+impl FxMbBandPluginParams {
+    pub fn new_band(_band_idx: usize) -> Self {
+        Self {
+            enabled: BoolParam::new("Band Enabled", true),
+            solo: BoolParam::new("Band Solo", false),
+            mode: EnumParam::new("Band Mode", DistortionModeParam::Tube),
+            drive: FloatParam::new("Band Drive", 0.30, FloatRange::Linear { min: 0.0, max: 1.0 }),
+            bias: FloatParam::new("Band Bias", 0.50, FloatRange::Linear { min: 0.0, max: 1.0 }),
+            level: FloatParam::new(
+                "Band Level",
+                MB_BAND_LEVEL_DEFAULT_NORM,
+                FloatRange::Linear { min: 0.0, max: 1.0 },
+            ),
+            mix: FloatParam::new("Band Mix", 1.00, FloatRange::Linear { min: 0.0, max: 1.0 }),
+        }
+    }
+
+    #[inline]
+    pub fn param_at(&self, idx: usize) -> &FloatParam {
+        match idx {
+            0 => &self.drive,
+            1 => &self.bias,
+            2 => &self.level,
+            _ => &self.mix,
+        }
+    }
+
+    #[inline]
+    pub fn to_dsp(&self) -> MbDistBandParams {
+        MbDistBandParams {
+            mode: self.mode.value().into(),
+            enabled: self.enabled.value(),
+            solo: self.solo.value(),
+            drive: self.drive.value(),
+            bias: self.bias.value(),
+            level: self.level.value(),
+            mix: self.mix.value(),
+        }
+    }
+}
+
+#[derive(Params)]
 pub struct FxSlotPluginParams {
     #[id = "fx_en"]
     pub enabled: BoolParam,
@@ -339,6 +405,8 @@ pub struct FxSlotPluginParams {
     pub limiter_true_peak: BoolParam,
     #[id = "fx_dist_m"]
     pub distortion_mode: EnumParam<DistortionModeParam>,
+    #[nested(array, group = "MB Bands")]
+    pub mb_bands: [Box<FxMbBandPluginParams>; 3],
 }
 
 impl FxSlotPluginParams {
@@ -371,6 +439,7 @@ impl FxSlotPluginParams {
             utility_inv_r: BoolParam::new("Utility Inv R", init.utility_inv_r),
             limiter_true_peak: BoolParam::new("Limiter True Peak", init.limiter_true_peak),
             distortion_mode: EnumParam::new("Distortion Mode", DistortionModeParam::Tube),
+            mb_bands: std::array::from_fn(|b| Box::new(FxMbBandPluginParams::new_band(b))),
         }
     }
 
@@ -420,6 +489,11 @@ impl FxSlotPluginParams {
             utility_inv_r: self.utility_inv_r.value(),
             limiter_true_peak: self.limiter_true_peak.value(),
             distortion_mode: self.distortion_mode.value().into(),
+            mb_bands: [
+                self.mb_bands[0].to_dsp(),
+                self.mb_bands[1].to_dsp(),
+                self.mb_bands[2].to_dsp(),
+            ],
         }
     }
 }

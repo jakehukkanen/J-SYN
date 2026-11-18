@@ -7,19 +7,23 @@ use std::time::Instant;
 use j_syn_dsp::mod_matrix::{FxScopeRing, ModDestination, ModUiTelemetry, FX_SCOPE_LEN};
 use j_syn_dsp::{
     evaluate_diopser_ripple, evaluate_tube_res_scope_response, filter_response_db_from_slot,
-    limiter_ceil_db, limiter_gain_db, tube_res_lfo_rate_hz, utility_gain_db_from_norm,
-    utility_pan_bipolar, utility_width_from_norm, FxRackState,
+    limiter_ceil_db, limiter_gain_db, mb_band_level_db, mb_band_magnitude_at_hz,
+    mb_ordered_xover_hz, mb_xover_high_norm, mb_xover_low_norm, tube_res_lfo_rate_hz,
+    utility_gain_db_from_norm, utility_pan_bipolar, utility_width_from_norm, FxRackState,
+    MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
 };
+use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::RawParamEvent;
 
 use super::mod_bar::ModUiState;
 use super::scope::{
-    paint_filled_waveform_trace, paint_filter_freq_grid, paint_filter_response_curve_with_eval,
-    paint_scope_bg, paint_scope_border, paint_vertical_gradient_fill, scope_trace_rgb,
+    filter_db_to_raw_y, filter_freq_to_norm, paint_filled_waveform_trace, paint_filter_freq_grid,
+    paint_filter_response_curve_with_eval, paint_scope_bg, paint_scope_border,
+    paint_vertical_gradient_fill, scope_trace_rgb,
 };
-use super::{theme, theme::ThemePalette};
+use super::{theme, theme::ThemePalette, UiEvent};
 use crate::{FxTypeParam, JSynPluginParams};
 
 #[inline]
@@ -38,6 +42,7 @@ pub(super) fn fx_accent_rgb(fx_ty: FxTypeParam) -> (u8, u8, u8) {
         FxTypeParam::TubeResonator => (255, 164, 88),
         FxTypeParam::Utility => (108, 214, 255),
         FxTypeParam::Limiter => (255, 122, 89),
+        FxTypeParam::MultibandDist => (255, 108, 72),
     }
 }
 
@@ -1120,6 +1125,16 @@ impl View for FxSlotVisualizer {
                 &self.mod_ui,
                 &pal,
             ),
+            FxTypeParam::MultibandDist => paint_multiband_dist_scope(
+                canvas,
+                bounds,
+                dpx,
+                self.bus_idx,
+                self.slot_idx,
+                &self.params,
+                &self.mod_ui,
+                &pal,
+            ),
             FxTypeParam::Filter => paint_filter_scope(
                 canvas,
                 bounds,
@@ -1303,5 +1318,291 @@ impl View for MasterScope {
             true,
             &pal,
         );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_multiband_dist_scope(
+    canvas: &mut Canvas,
+    bounds: BoundingBox,
+    dpx: f32,
+    bus_idx: usize,
+    slot_idx: usize,
+    params: &JSynPluginParams,
+    mod_ui: &ModUiState,
+    pal: &ThemePalette,
+) {
+    let slot = &params.fx_bus_slots(bus_idx)[slot_idx];
+    let enabled = slot.enabled.value();
+    let f = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 3.0, enabled, pal);
+
+    const DB_MIN: f32 = -24.0;
+    const DB_MAX: f32 = 14.0;
+    paint_filter_freq_grid(
+        canvas,
+        f.ix,
+        f.iy,
+        f.iw,
+        f.ih,
+        dpx,
+        pal,
+        enabled,
+        &[(0.0, 145, 58)],
+        DB_MIN,
+        DB_MAX,
+    );
+
+    let eff = slot_eff_params(slot, mod_ui, bus_idx, slot_idx);
+    let (low_hz, high_hz) = mb_ordered_xover_hz(eff[0], eff[1]);
+    let active_tab = mod_ui.fx_mb_tab(bus_idx, slot_idx);
+    let any_solo = slot.mb_bands.iter().any(|b| b.solo.value());
+
+    let band_colors: [(u8, u8, u8); 3] = [
+        (255, 118, 78),
+        (245, 184, 72),
+        (110, 212, 245),
+    ];
+
+    const STEPS: usize = 72;
+    for (b_idx, (band, &base_rgb)) in slot.mb_bands.iter().zip(band_colors.iter()).enumerate() {
+        let is_selected = active_tab == (b_idx as u8 + 1);
+        let is_audible = !any_solo || band.solo.value();
+        let is_active = band.enabled.value();
+        let drive = band.drive.value().clamp(0.0, 1.0);
+        let lvl_db = if is_active {
+            mb_band_level_db(band.level.value())
+        } else {
+            0.0
+        };
+
+        let rgb = scope_trace_rgb(base_rgb, pal, enabled && is_audible);
+        let mut fill = vg::Path::new();
+        let mut stroke = vg::Path::new();
+        for i in 0..STEPS {
+            let t = i as f32 / (STEPS - 1) as f32;
+            let freq = 20.0 * 1000.0_f32.powf(t);
+            let mag = mb_band_magnitude_at_hz(b_idx, low_hz, high_hz, freq).max(1e-4);
+            let db = (20.0 * mag.log10() + lvl_db).clamp(DB_MIN, DB_MAX);
+            let x = f.ix + t * f.iw;
+            let y = filter_db_to_raw_y(db, f.iy, f.ih, DB_MIN, DB_MAX).clamp(f.iy, f.bottom);
+            if i == 0 {
+                fill.move_to(x, f.bottom);
+                fill.line_to(x, y);
+                stroke.move_to(x, y);
+            } else {
+                fill.line_to(x, y);
+                stroke.line_to(x, y);
+            }
+        }
+        fill.line_to(f.ix + f.iw, f.bottom);
+        fill.close();
+
+        let drive_boost = if is_active { (drive * 32.0) as u8 } else { 0 };
+        let top_a = if !enabled || !is_audible {
+            10
+        } else if is_selected {
+            72 + drive_boost / 2
+        } else if active_tab == 0 {
+            34 + drive_boost / 2
+        } else {
+            18
+        };
+        let bot_a = top_a / 4;
+        paint_vertical_gradient_fill(canvas, &fill, f.ix, f.iy, f.bottom, rgb, top_a, bot_a);
+
+        let stroke_a = if !enabled || !is_audible {
+            55
+        } else if is_selected {
+            245
+        } else if active_tab == 0 {
+            195
+        } else {
+            115
+        };
+        let mut sp = vg::Paint::color(vg::Color::rgba(rgb.0, rgb.1, rgb.2, stroke_a));
+        sp.set_line_width((if is_selected { 1.8 } else { 1.25 }) * dpx);
+        sp.set_line_join(vg::LineJoin::Round);
+        canvas.stroke_path(&stroke, &sp);
+    }
+
+    let (_pre, post, act) = read_scope_snapshot(mod_ui, bus_idx, slot_idx);
+    let wave_rgb = scope_trace_rgb(fx_accent_rgb(FxTypeParam::MultibandDist), pal, enabled);
+    paint_filled_waveform_trace(
+        canvas,
+        &post,
+        f.ix,
+        f.iy,
+        f.iw,
+        f.ih,
+        1.25,
+        wave_rgb,
+        if enabled { 34 + (act * 28.0) as u8 } else { 10 },
+        if enabled { 4 } else { 2 },
+        if enabled { 100 } else { 40 },
+        1.0 * dpx,
+    );
+
+    // Crossover split vertical markers with handle ticks
+    for xov_hz in [low_hz, high_hz] {
+        let x = f.ix + filter_freq_to_norm(xov_hz) * f.iw;
+        let mut line = vg::Path::new();
+        line.move_to(x, f.iy);
+        line.line_to(x, f.bottom);
+        let mut lp = vg::Paint::color(theme::vg_color(
+            &pal.text_primary,
+            if enabled { 185 } else { 75 },
+        ));
+        lp.set_line_width(1.2 * dpx);
+        canvas.stroke_path(&line, &lp);
+
+        let mut tick = vg::Path::new();
+        tick.rounded_rect(x - 2.5 * dpx, f.bottom - 5.0 * dpx, 5.0 * dpx, 5.0 * dpx, 1.5 * dpx);
+        let tp = vg::Paint::color(vg::Color::rgba(
+            wave_rgb.0,
+            wave_rgb.1,
+            wave_rgb.2,
+            if enabled { 220 } else { 90 },
+        ));
+        canvas.fill_path(&tick, &tp);
+    }
+
+    f.end(canvas, pal);
+}
+
+/// Transparent overlay enabling horizontal drag of `LOW XOV` / `HIGH XOV` markers on `MultibandDist` scopes.
+pub(super) struct MultibandXoverDragOverlay {
+    bus_idx: usize,
+    slot_idx: usize,
+    params: Arc<JSynPluginParams>,
+    gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
+    dragging_handle: Option<usize>, // 0 = low xover, 1 = high xover
+}
+
+impl MultibandXoverDragOverlay {
+    pub(super) fn new<'a>(
+        cx: &'a mut Context,
+        bus_idx: usize,
+        slot_idx: usize,
+        params: Arc<JSynPluginParams>,
+        gui_context: Arc<dyn GuiContext>,
+        mod_ui: Arc<ModUiState>,
+    ) -> Handle<'a, Self> {
+        Self {
+            bus_idx,
+            slot_idx,
+            params,
+            gui_context,
+            mod_ui,
+            dragging_handle: None,
+        }
+        .build(cx, |_| {})
+    }
+
+    fn x_to_hz(&self, bounds: BoundingBox, mouse_x: f32) -> f32 {
+        let pad_x = 4.0;
+        let ix = bounds.x + pad_x;
+        let iw = (bounds.w - 2.0 * pad_x).max(1.0);
+        let t = ((mouse_x - ix) / iw).clamp(0.0, 1.0);
+        20.0 * 1000.0_f32.powf(t)
+    }
+
+    fn nearest_handle(&self, bounds: BoundingBox, mouse_x: f32) -> Option<usize> {
+        let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
+        let (low_hz, high_hz) = mb_ordered_xover_hz(slot.p1.value(), slot.p2.value());
+        let pad_x = 4.0;
+        let ix = bounds.x + pad_x;
+        let iw = (bounds.w - 2.0 * pad_x).max(1.0);
+        let x_low = ix + filter_freq_to_norm(low_hz) * iw;
+        let x_high = ix + filter_freq_to_norm(high_hz) * iw;
+        let d_low = (mouse_x - x_low).abs();
+        let d_high = (mouse_x - x_high).abs();
+        if d_low.min(d_high) <= 10.0 {
+            Some(if d_low <= d_high { 0 } else { 1 })
+        } else {
+            None
+        }
+    }
+}
+
+impl View for MultibandXoverDragOverlay {
+    fn element(&self) -> Option<&'static str> {
+        Some("mb-xover-drag")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseDown(MouseButton::Left) => {
+                let bounds = cx.bounds();
+                let mx = cx.mouse().cursorx;
+                if let Some(handle) = self.nearest_handle(bounds, mx) {
+                    let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
+                    let param = if handle == 0 { &slot.p1 } else { &slot.p2 };
+                    let setter = ParamSetter::new(self.gui_context.as_ref());
+                    setter.begin_set_parameter(param);
+                    self.dragging_handle = Some(handle);
+                    cx.capture();
+                    cx.emit(WindowEvent::SetCursor(CursorIcon::EwResize));
+                    meta.consume();
+                }
+            }
+            WindowEvent::MouseDoubleClick(MouseButton::Left) => {
+                let bounds = cx.bounds();
+                let mx = cx.mouse().cursorx;
+                if let Some(handle) = self.nearest_handle(bounds, mx) {
+                    let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
+                    let (param, def) = if handle == 0 {
+                        (&slot.p1, MB_XOVER_LOW_DEFAULT_NORM)
+                    } else {
+                        (&slot.p2, MB_XOVER_HIGH_DEFAULT_NORM)
+                    };
+                    let setter = ParamSetter::new(self.gui_context.as_ref());
+                    setter.begin_set_parameter(param);
+                    setter.set_parameter(param, def);
+                    setter.end_set_parameter(param);
+                    cx.emit(UiEvent::ModValChanged);
+                    meta.consume();
+                }
+            }
+            WindowEvent::MouseMove(x, _) => {
+                let bounds = cx.bounds();
+                if let Some(handle) = self.dragging_handle {
+                    let hz = self.x_to_hz(bounds, *x);
+                    let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
+                    let setter = ParamSetter::new(self.gui_context.as_ref());
+                    if handle == 0 {
+                        let norm = mb_xover_low_norm(hz);
+                        setter.set_parameter(&slot.p1, norm);
+                    } else {
+                        let norm = mb_xover_high_norm(hz);
+                        setter.set_parameter(&slot.p2, norm);
+                    }
+                    cx.emit(UiEvent::ModValChanged);
+                    meta.consume();
+                } else if self.nearest_handle(bounds, *x).is_some() {
+                    cx.emit(WindowEvent::SetCursor(CursorIcon::EwResize));
+                } else {
+                    cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
+                }
+            }
+            WindowEvent::MouseUp(MouseButton::Left) => {
+                if let Some(handle) = self.dragging_handle.take() {
+                    let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
+                    let param = if handle == 0 { &slot.p1 } else { &slot.p2 };
+                    let setter = ParamSetter::new(self.gui_context.as_ref());
+                    setter.end_set_parameter(param);
+                    cx.release();
+                    cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
+                    let _ = &self.mod_ui;
+                    meta.consume();
+                }
+            }
+            WindowEvent::MouseOut => {
+                if self.dragging_handle.is_none() {
+                    cx.emit(WindowEvent::SetCursor(CursorIcon::Default));
+                }
+            }
+            _ => {}
+        });
     }
 }

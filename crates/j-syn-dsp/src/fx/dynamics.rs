@@ -11,7 +11,7 @@ use super::{
 };
 
 #[derive(Debug, Clone, Copy, Default)]
-struct Lr4BandFilter {
+pub(crate) struct Lr4BandFilter {
     lp1: Biquad,
     lp2: Biquad,
     hp1: Biquad,
@@ -19,7 +19,7 @@ struct Lr4BandFilter {
 }
 
 impl Lr4BandFilter {
-    fn set_freq(&mut self, sample_rate: f64, freq_hz: f64) {
+    pub(crate) fn set_freq(&mut self, sample_rate: f64, freq_hz: f64) {
         let lp = butterworth_lp_coeffs(sample_rate, freq_hz);
         let hp = butterworth_hp_coeffs(sample_rate, freq_hz);
         self.lp1.set_coeffs(lp);
@@ -28,7 +28,7 @@ impl Lr4BandFilter {
         self.hp2.set_coeffs(hp);
     }
 
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.lp1.reset();
         self.lp2.reset();
         self.hp1.reset();
@@ -36,7 +36,7 @@ impl Lr4BandFilter {
     }
 
     #[inline]
-    fn split(&mut self, x: f32) -> (f32, f32) {
+    pub(crate) fn split(&mut self, x: f32) -> (f32, f32) {
         let low = self.lp2.process(self.lp1.process(x));
         let high = self.hp2.process(self.hp1.process(x));
         (low, high)
@@ -201,25 +201,21 @@ impl OttStereo {
     }
 }
 
-/// 4x oversampled stereo master distortion (`Tube`, `Mech`, `Sine`, `Crush`, `Classic A/B/C`,
-/// `Diode A/B`, `Linear/Sine Fold`, `Hard Clip`, `Half/Full Rect`).
-pub(crate) struct DistortionStereo {
+/// Shared 4x oversampled stereo waveshaper core reused by `DistortionStereo` and `MultiBandDistStereo`.
+pub(crate) struct DistortionCore {
     oversamplers: [Oversampler4x; 2],
     mech_low_shelf: [Biquad; 2],
     mech_high_shelf: [Biquad; 2],
     classic_hp_x: [f32; 2],
     classic_hp_y: [f32; 2],
     classic_lp: [f32; 2],
-    tone_lp_l: f32,
-    tone_lp_r: f32,
     crush_phase: f32,
     hold_l: f32,
     hold_r: f32,
     sample_rate: f32,
-    idle_samples: u32,
 }
 
-impl DistortionStereo {
+impl DistortionCore {
     pub(crate) fn new(sample_rate: f32) -> Self {
         let mut s = Self {
             oversamplers: [Oversampler4x::new(); 2],
@@ -228,13 +224,10 @@ impl DistortionStereo {
             classic_hp_x: [0.0; 2],
             classic_hp_y: [0.0; 2],
             classic_lp: [0.0; 2],
-            tone_lp_l: 0.0,
-            tone_lp_r: 0.0,
             crush_phase: 1.0,
             hold_l: 0.0,
             hold_r: 0.0,
             sample_rate: 44_100.0,
-            idle_samples: 1024,
         };
         s.set_sample_rate(sample_rate);
         s
@@ -260,49 +253,21 @@ impl DistortionStereo {
         self.classic_hp_x = [0.0; 2];
         self.classic_hp_y = [0.0; 2];
         self.classic_lp = [0.0; 2];
-        self.tone_lp_l = 0.0;
-        self.tone_lp_r = 0.0;
         self.crush_phase = 1.0;
         self.hold_l = 0.0;
         self.hold_r = 0.0;
-        self.idle_samples = 1024;
     }
 
     #[inline]
-    pub fn sub_mode_index(p0: f32) -> usize {
-        if p0 < 0.25 {
-            0
-        } else if p0 < 0.50 {
-            1
-        } else if p0 < 0.75 {
-            2
-        } else {
-            3
-        }
-    }
-
-    #[inline]
-    pub(crate) fn process(
+    pub(crate) fn process_wet(
         &mut self,
         in_l: f32,
         in_r: f32,
         mode: DistortionMode,
-        p: [f32; 4],
-    ) -> (f32, f32, f32) {
-        if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 128 {
-            return (0.0, 0.0, 0.0);
-        }
-
-        let bias = (p[0].clamp(0.0, 1.0) * 2.0) - 1.0;
-        let drive = p[1].clamp(0.0, 1.0);
-        let tone = p[2].clamp(0.0, 1.0);
-        let mix = p[3].clamp(0.0, 1.0);
-
-        if mix <= 1e-5 {
-            return (in_l, in_r, 0.0);
-        }
-
-        let (mut wl, mut wr) = if mode == DistortionMode::Crush {
+        bias: f32,
+        drive: f32,
+    ) -> (f32, f32) {
+        if mode == DistortionMode::Crush {
             let step = 1.0 / (1.0 + drive * drive * 31.0);
             let levels = 2.0_f32.powf(11.0 - drive * 8.5);
             let bo = bias * 0.2;
@@ -329,9 +294,11 @@ impl DistortionStereo {
                 });
             }
             if mode == DistortionMode::ClassicA {
-                // Subtle ~35 Hz coupling HPF + ~18 kHz warmth LPF matching Classic A's tilt.
-                let hp_r = (-std::f32::consts::TAU * 35.0 / self.sample_rate).exp().clamp(0.9, 0.9999);
-                let lp_a = (1.0 - (-std::f32::consts::TAU * 18_000.0 / self.sample_rate).exp()).clamp(0.05, 1.0);
+                let hp_r = (-std::f32::consts::TAU * 35.0 / self.sample_rate)
+                    .exp()
+                    .clamp(0.9, 0.9999);
+                let lp_a = (1.0 - (-std::f32::consts::TAU * 18_000.0 / self.sample_rate).exp())
+                    .clamp(0.05, 1.0);
                 for ch in 0..2 {
                     let x = ch_out[ch];
                     let hp = x - self.classic_hp_x[ch] + hp_r * self.classic_hp_y[ch];
@@ -342,7 +309,67 @@ impl DistortionStereo {
                 }
             }
             (ch_out[0], ch_out[1])
+        }
+    }
+}
+
+/// 4x oversampled stereo master distortion (`Tube`, `Mech`, `Sine`, `Crush`, `Classic A/B/C`,
+/// `Diode A/B`, `Linear/Sine Fold`, `Hard Clip`, `Half/Full Rect`).
+pub(crate) struct DistortionStereo {
+    core: DistortionCore,
+    tone_lp_l: f32,
+    tone_lp_r: f32,
+    sample_rate: f32,
+    idle_samples: u32,
+}
+
+impl DistortionStereo {
+    pub(crate) fn new(sample_rate: f32) -> Self {
+        let mut s = Self {
+            core: DistortionCore::new(sample_rate),
+            tone_lp_l: 0.0,
+            tone_lp_r: 0.0,
+            sample_rate: 44_100.0,
+            idle_samples: 1024,
         };
+        s.set_sample_rate(sample_rate);
+        s
+    }
+
+    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate.max(1_000.0);
+        self.core.set_sample_rate(sample_rate);
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.core.reset();
+        self.tone_lp_l = 0.0;
+        self.tone_lp_r = 0.0;
+        self.idle_samples = 1024;
+    }
+
+    #[inline]
+    pub(crate) fn process(
+        &mut self,
+        in_l: f32,
+        in_r: f32,
+        mode: DistortionMode,
+        p: [f32; 4],
+    ) -> (f32, f32, f32) {
+        if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 128 {
+            return (0.0, 0.0, 0.0);
+        }
+
+        let bias = (p[0].clamp(0.0, 1.0) * 2.0) - 1.0;
+        let drive = p[1].clamp(0.0, 1.0);
+        let tone = p[2].clamp(0.0, 1.0);
+        let mix = p[3].clamp(0.0, 1.0);
+
+        if mix <= 1e-5 {
+            return (in_l, in_r, 0.0);
+        }
+
+        let (mut wl, mut wr) = self.core.process_wet(in_l, in_r, mode, bias, drive);
 
         if tone < 0.495 {
             let t_norm = (0.5 - tone) * 2.0;
