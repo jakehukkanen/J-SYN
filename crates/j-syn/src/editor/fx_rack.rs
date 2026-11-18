@@ -889,18 +889,6 @@ fn build_fx_scope_zstack(
                     Element::new(cx).width(Stretch(1.0)).hoverable(false);
 
                     match fx_ty {
-                        FxTypeParam::Distortion => {
-                            build_enum_dropdown(
-                                cx,
-                                p_ov.clone(),
-                                g_ov.clone(),
-                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].distortion_mode,
-                                DISTORTION_MODE_ITEMS,
-                            )
-                            .class("fx-scope-dd")
-                            .width(Pixels(72.0))
-                            .height(Pixels(17.0));
-                        }
                         FxTypeParam::Filter => {
                             build_enum_dropdown_with_override(
                                 cx,
