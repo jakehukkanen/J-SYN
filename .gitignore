@@ -20,3 +20,4 @@ gitignored-captures/
 *.pyc
 *.wav
 .local-install.sh
+.swp
