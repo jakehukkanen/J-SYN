@@ -177,7 +177,7 @@ fn build_theme_picker(cx: &mut Context) -> Handle<'_, ScrollDropdown> {
             )
         },
     )
-    .width(Pixels(112.0))
+    .width(Pixels(88.0))
     .height(Pixels(tokens::PILL_H))
 }
 
@@ -241,13 +241,13 @@ pub fn build_mbdist_ui(
                     .top(Stretch(1.0))
                     .bottom(Stretch(1.0));
                 bold_label(cx, "J-MBDIST", "header-title")
-                    .font_size(13.0)
+                    .font_size(12.0)
                     .width(Auto)
                     .height(Auto)
                     .top(Stretch(1.0))
                     .bottom(Stretch(1.0));
             })
-            .col_between(Pixels(tokens::SPACE_MD))
+            .col_between(Pixels(tokens::SPACE_SM))
             .width(Auto)
             .height(Stretch(1.0));
 
@@ -258,15 +258,15 @@ pub fn build_mbdist_ui(
                 .bottom(Stretch(1.0));
 
             build_ui_scale_picker(cx)
-                .width(Pixels(54.0))
+                .width(Pixels(48.0))
                 .height(Pixels(tokens::PILL_H))
                 .top(Stretch(1.0))
                 .bottom(Stretch(1.0));
         })
         .class("header-bar")
         .col_between(Pixels(tokens::SPACE_SM))
-        .child_left(Pixels(tokens::SPACE_LG))
-        .child_right(Pixels(tokens::SPACE_LG))
+        .child_left(Pixels(tokens::SPACE_MD))
+        .child_right(Pixels(tokens::SPACE_MD))
         .height(Pixels(tokens::STANDALONE_FX_HEADER_H))
         .width(Stretch(1.0));
 
@@ -392,7 +392,7 @@ pub fn build_mbdist_ui(
                             ..FxSlotScopeSnapshot::default()
                         }
                     },
-                    tokens::KNOB_FX_UNIT,
+                    tokens::KNOB_FX_UNIT_2X2,
                 );
             })
             .class("hardware-module")

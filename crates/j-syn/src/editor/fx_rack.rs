@@ -1269,7 +1269,7 @@ fn build_fx_unit_card(
                         tab_host,
                         Some((mod_dests, m_unit, 0)),
                         move || slot_scope_snapshot(bus_idx, slot_idx, &p_scope, &m_scope),
-                        tokens::KNOB_FX_UNIT,
+                        tokens::KNOB_FX_UNIT_2X2,
                     );
                     return;
                 }
@@ -1307,7 +1307,13 @@ fn build_fx_unit_card(
         "module-disabled",
         UiData::mod_ui_rev.map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
     )
-    .width(Stretch(1.0))
+    .width(UiData::params.map(move |p| {
+        if p.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() == FxTypeParam::MultibandDist {
+            Pixels(tokens::FX_UNIT_W)
+        } else {
+            Stretch(1.0)
+        }
+    }))
     .height(Auto)
     .row_between(Pixels(tokens::SPACE_SM));
 }

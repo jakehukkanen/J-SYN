@@ -31,6 +31,7 @@ pub const KNOB_OSC: f32 = 30.0;
 pub const KNOB_FLT: f32 = 30.0;
 pub const KNOB_STD: f32 = 28.0;
 pub const KNOB_FX_UNIT: f32 = 27.0;
+pub const KNOB_FX_UNIT_2X2: f32 = 44.0;
 pub const KNOB_COMPACT: f32 = 24.0;
 pub const KNOB_MINI: f32 = 18.0;
 pub const KNOB_HEADER: f32 = 36.0;
@@ -67,7 +68,7 @@ pub const MACRO_PILL_W: f32 = 28.0;
 pub const MACRO_HDR_H: f32 = 15.0;
 
 // Right Wing: 3-Lane Scrollable FX Rack & Variable-Height FX Units
-pub const FX_UNIT_W: f32 = 220.0;
+pub const FX_UNIT_W: f32 = 210.0;
 pub const FX_LANE_HEADER_H: f32 = 54.0;
 pub const FX_LANE_ROUTE_COL_W: f32 = 76.0;
 pub const FX_LANE_KNOBS_W: f32 = 92.0;
@@ -83,6 +84,7 @@ pub const FX_UNIT_SCOPE_TALL_H: f32 = 72.0;
 pub const FX_UNIT_OVERLAY_PILL_H: f32 = 17.0;
 pub const FX_UNIT_OVERLAY_PILL_W: f32 = 30.0;
 pub const FX_UNIT_KNOB_ROW_H: f32 = 40.0;
+pub const FX_UNIT_KNOB_ROW_2X2_H: f32 = 58.0;
 
 // Standalone single-FX plugin shell metrics (built around FX_UNIT_W)
 pub const STANDALONE_FX_PAD: f32 = 12.0;
@@ -109,15 +111,25 @@ pub const fn fx_unit_scope_height(fx_type: FxType) -> f32 {
     }
 }
 
+/// Card width for standalone single-FX plugins (`210 px` for migrated units, `260 px` legacy).
+#[inline]
+pub const fn standalone_fx_card_width(fx_type: FxType) -> f32 {
+    match fx_type {
+        FxType::MultibandDist => FX_UNIT_W,
+        _ => STANDALONE_FX_CARD_W,
+    }
+}
+
 /// Computes the deterministic logical window `(width, height)` for a standalone single-FX plugin.
 #[inline]
 pub const fn standalone_fx_window_size(fx_type: FxType) -> (u32, u32) {
     let scope_h = fx_unit_scope_height(fx_type) as u32;
-    let w = (STANDALONE_FX_CARD_W + STANDALONE_FX_PAD * 2.0) as u32;
+    let w = (standalone_fx_card_width(fx_type) + STANDALONE_FX_PAD * 2.0) as u32;
     let extra_h = match fx_type {
-        // Band tab bar (18 + 4) + context/mode strip (18 + 4) + second knob row (40 + 4)
+        // Band tab bar (18 + 4) + context/mode strip (18 + 4) + 2x2 knob grid delta (122 - 40 = 82)
         FxType::MultibandDist => {
-            ((PILL_H + SPACE_SM) as u32) * 2 + ((FX_UNIT_KNOB_ROW_H + SPACE_SM) as u32)
+            ((PILL_H + SPACE_SM) as u32) * 2
+                + ((FX_UNIT_KNOB_ROW_2X2_H * 2.0 + SPACE_MD - FX_UNIT_KNOB_ROW_H) as u32)
         }
         _ => 0,
     };

@@ -546,7 +546,7 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                 .height(Auto);
             }
         })
-        .row_between(Pixels(tokens::SPACE_SM))
+        .row_between(Pixels(tokens::SPACE_MD))
         .width(Stretch(1.0))
         .height(Auto);
     })
