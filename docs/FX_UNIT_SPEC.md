@@ -46,6 +46,7 @@ Reference checklist for extracting or redesigning any `J-SYN` FX Unit in `crates
   - `.top(Pixels(tokens::FX_UNIT_2X2_TOP_PAD))` (`10.0 px`)
   - `.bottom(Pixels(tokens::FX_UNIT_2X2_BOTTOM_PAD))` (`6.0 px`)
   - Enforces visual vertical equidistance (`~17 px` each) between the bottom of the scope/tab/dropdown and Row 1 labels, between Row 1 knobs and Row 2 labels, and between Row 2 knobs and the bottom of the FX card.
+- **5-Knob `3-over-2` Layout (e.g. `Filter`):** Row 1 uses 3 `46 px` knobs with `.child_left(Pixels(tokens::SPACE_SM)).child_right(Pixels(tokens::SPACE_SM))`, and Row 2 uses 2 `46 px` knobs with `FX_UNIT_2X2_INSET_X`. Dim mode-specific knobs (like `FREQ 2`) via `.enabled_by(...)` so layout height and modulation drop rects stay stable across mode switches.
 
 ---
 
