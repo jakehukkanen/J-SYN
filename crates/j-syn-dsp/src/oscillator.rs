@@ -219,15 +219,15 @@ impl OscillatorState {
             self.fb_dc_x1 = 0.0;
             self.fb_dc_y1 = 0.0;
             self.phases[0] = 0.0;
-            for i in 1..MAX_UNISON {
+            for (i, phase) in self.phases.iter_mut().enumerate().skip(1) {
                 // Deterministic symmetric unison phase spread around 0.0
                 let spread_offset = (i as f32 / MAX_UNISON as f32) * 0.12;
-                self.phases[i] = spread_offset.fract();
+                *phase = spread_offset.fract();
             }
         } else {
-            for i in 0..MAX_UNISON {
+            for phase in &mut self.phases {
                 let rand_offset = xorshift32_next(rng_state);
-                self.phases[i] = (self.phases[i] + rand_offset).fract();
+                *phase = (*phase + rand_offset).fract();
             }
         }
     }
@@ -237,6 +237,7 @@ impl OscillatorState {
     /// Returns `(raw_mono, out_left, out_right)` where `raw_mono` is the pre-`Level`, pre-`Pan`
     /// output used as the cross-modulation tap for other oscillators.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn process_sample(
         &mut self,
         osc_idx: usize,
@@ -296,7 +297,7 @@ impl OscillatorState {
         // Normalization factor for unison energy
         let uni_norm = 1.0 / (unison_count as f32).sqrt();
 
-        for u in 0..unison_count {
+        for (u, phase) in self.phases[..unison_count].iter_mut().enumerate() {
             let (detune_ratio, uni_pan) = if unison_count == 1 {
                 (1.0_f32, 0.0_f32)
             } else {
@@ -309,7 +310,7 @@ impl OscillatorState {
             };
 
             let inc = (base_inc * detune_ratio).clamp(0.0, 0.49);
-            let p_raw = (self.phases[u] + phase_offset).rem_euclid(1.0);
+            let p_raw = (*phase + phase_offset).rem_euclid(1.0);
 
             let sample = sample_with_warp_and_pm(
                 wavetable,
@@ -323,7 +324,7 @@ impl OscillatorState {
                 engine_mode,
             );
 
-            self.phases[u] = (self.phases[u] + inc).rem_euclid(1.0);
+            *phase = (*phase + inc).rem_euclid(1.0);
 
             mono_sum += sample;
 
@@ -336,8 +337,8 @@ impl OscillatorState {
         }
 
         // Keep inactive unison phases advancing so raising Unison mid-note stays smooth
-        for u in unison_count..MAX_UNISON {
-            self.phases[u] = (self.phases[u] + base_inc).rem_euclid(1.0);
+        for phase in &mut self.phases[unison_count..MAX_UNISON] {
+            *phase = (*phase + base_inc).rem_euclid(1.0);
         }
 
         let mut raw_mono = mono_sum * uni_norm;

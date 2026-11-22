@@ -40,7 +40,7 @@ pub fn evaluate_adsr_preview(params: &AdsrParams, t_norm: f32) -> f32 {
 
     if t < atk {
         let x = t / atk;
-        let curve = (1.0 - (-1.609_437_9 * x).exp()) / 0.8;
+        let curve = (1.0 - (-1.609_438 * x).exp()) / 0.8;
         curve.clamp(0.0, 1.0)
     } else if t < atk + dec {
         let x = (t - atk) / dec;
@@ -135,8 +135,8 @@ impl AmpAdsr {
                 let atk_samples = (attack_s.max(0.001) * sr).max(1.0);
                 // Concave/exponential rise targeting 1.25 so it crosses 1.0 at exact attack time.
                 const TARGET: f32 = 1.25;
-                // ln(1.25 / 0.25) = ln(5) ≈ 1.6094379
-                let coeff = 1.0 - (-1.609_437_9 / atk_samples).exp();
+                // ln(1.25 / 0.25) = ln(5) ≈ 1.609438
+                let coeff = 1.0 - (-1.609_438 / atk_samples).exp();
                 self.level += (TARGET - self.level) * coeff;
                 if self.level >= 1.0 {
                     self.level = 1.0;

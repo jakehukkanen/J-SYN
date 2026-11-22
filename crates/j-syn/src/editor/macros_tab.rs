@@ -8,7 +8,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use super::controls::{build_param_readout_box, build_rotary_knob_with_opt_mod};
 use super::mod_bar::{ModSourcePill, ModUiState};
 use super::tokens;
-use super::{UiData, UiEvent, AMBER_RGB};
+use super::{UiData, UiEvent};
 
 pub(super) fn build_macros_tab(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     HStack::new(cx, move |cx| {
@@ -82,7 +82,6 @@ fn build_macro_card(cx: &mut Context, idx: usize, mod_ui: Arc<ModUiState>) {
                 UiData::params,
                 move |p| &p.macros[idx].value,
                 false,
-                AMBER_RGB,
                 None,
             )
             .width(Pixels(tokens::KNOB_COMPACT))

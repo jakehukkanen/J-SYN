@@ -404,12 +404,11 @@ fn process_voice_bus<F: StereoFilterStage>(
     }
     for _ in 0..3 {
         for i in 0..4 {
-            if osc_active[i] {
-                if let Some(src_idx) = mod_oscs[i].mod_source.osc_index() {
-                    if mod_oscs[src_idx].enabled {
-                        osc_active[src_idx] = true;
-                    }
-                }
+            if osc_active[i]
+                && let Some(src_idx) = mod_oscs[i].mod_source.osc_index()
+                && mod_oscs[src_idx].enabled
+            {
+                osc_active[src_idx] = true;
             }
         }
     }
@@ -800,6 +799,7 @@ impl Voice {
 
     /// Evaluates modulation sources and updates destination offsets for this voice.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn update_modulation(
         &mut self,
         dt_seconds: f32,

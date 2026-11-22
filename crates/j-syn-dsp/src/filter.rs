@@ -434,7 +434,7 @@ impl FilterSvfCore {
                 } else {
                     let stages = params.slope.num_2pole_stages().max(1);
                     let k0 = 2.0 - 1.95 * res;
-                    let k_helper = (1.4142 - 0.45 * res).max(0.75);
+                    let k_helper = (std::f32::consts::SQRT_2 - 0.45 * res).max(0.75);
                     let peak_boost = 0.6 + 1.8 * res;
                     let sat = drive > 0.25 || res > 0.85;
                     for (ch, &x) in [in_l, in_r].iter().enumerate() {
@@ -459,7 +459,7 @@ impl FilterSvfCore {
                             FilterMode::Peak => x_in + peak_boost * k0 * bp0,
                             _ => lp0,
                         };
-                        for stage in 1..stages {
+                        for svf in self.svfs.iter_mut().take(stages).skip(1) {
                             let mid = if drive > 1e-4 {
                                 fast_tanh(sig * (1.0 + drive * 1.2))
                             } else {
@@ -469,8 +469,8 @@ impl FilterSvfCore {
                                 g,
                                 k_helper,
                                 mid,
-                                &mut self.svfs[stage].ic1eq[ch],
-                                &mut self.svfs[stage].ic2eq[ch],
+                                &mut svf.ic1eq[ch],
+                                &mut svf.ic2eq[ch],
                                 sat,
                             );
                             sig = match params.mode {
@@ -726,7 +726,7 @@ impl FilterSvfCore {
         } else {
             2.0 - 1.95 * res
         };
-        let k_helper = (1.4142 - 0.45 * res).max(0.75);
+        let k_helper = (std::f32::consts::SQRT_2 - 0.45 * res).max(0.75);
         let peak_boost = (0.6 + 1.8 * res) / (stages as f32).sqrt();
         let sat = drive > 0.25 || res > 0.85;
 
@@ -801,7 +801,7 @@ fn evaluate_combo_band_mag(
         ComboBandKind::Notch => (one_minus_w2.abs() * drive_gain) / d0,
     };
     if stages > 1 {
-        let k_helper = (1.4142 - 0.45 * res).max(0.75);
+        let k_helper = (std::f32::consts::SQRT_2 - 0.45 * res).max(0.75);
         let d_h = (one_minus_w2 * one_minus_w2 + (k_helper * w).powi(2))
             .sqrt()
             .max(1e-4);
@@ -971,7 +971,7 @@ pub fn evaluate_filter_response_db(params: &FilterParams, freq_hz: f32) -> f32 {
                     _ => 1.0 / d0,
                 };
                 if stages > 1 {
-                    let k_helper = (1.4142 - 0.45 * res).max(0.75);
+                    let k_helper = (std::f32::consts::SQRT_2 - 0.45 * res).max(0.75);
                     let d_h = (one_minus_w2 * one_minus_w2 + (k_helper * w).powi(2))
                         .sqrt()
                         .max(1e-4);

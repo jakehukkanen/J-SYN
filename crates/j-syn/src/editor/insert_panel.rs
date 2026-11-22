@@ -85,7 +85,6 @@ fn build_insert_card(
                     move |p| &p.routing.inserts[slot_idx].enabled,
                     slot_label,
                     slot_label,
-                    accent,
                 )
                 .width(Pixels(tokens::INSERT_LED_W))
                 .height(Pixels(tokens::HEADER_STRIP_H));
@@ -132,7 +131,6 @@ fn build_insert_card(
                         move |p| &p.routing.inserts[slot_idx].drive,
                         "DRIVE",
                         false,
-                        accent,
                         tokens::KNOB_STD,
                         ModDestination::insert_drive(slot_idx),
                         m_drv,
@@ -147,7 +145,6 @@ fn build_insert_card(
                         move |p| &p.routing.inserts[slot_idx].mix,
                         "MIX",
                         false,
-                        accent,
                         tokens::KNOB_STD,
                         ModDestination::insert_mix(slot_idx),
                         mod_ui,

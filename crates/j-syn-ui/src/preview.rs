@@ -61,7 +61,7 @@ mod macos_gl {
         pub fn new() -> Result<Self, String> {
             unsafe {
                 let gl_lib = libc::dlopen(
-                    b"/System/Library/Frameworks/OpenGL.framework/OpenGL\0".as_ptr() as *const i8,
+                    c"/System/Library/Frameworks/OpenGL.framework/OpenGL".as_ptr(),
                     libc::RTLD_LAZY,
                 );
                 if gl_lib.is_null() {

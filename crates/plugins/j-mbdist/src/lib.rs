@@ -253,15 +253,18 @@ impl Plugin for JMbDistPlugin {
         ];
 
         for mut channel_samples in buffer.iter_samples() {
-            let in_l = *channel_samples.get_mut(0).unwrap();
-            let in_r = *channel_samples.get_mut(1).unwrap();
+            let mut ch = channel_samples.iter_mut();
+            let (Some(s_l), Some(s_r)) = (ch.next(), ch.next()) else {
+                continue;
+            };
+            let (in_l, in_r) = (*s_l, *s_r);
             let (out_l, out_r, act) = if enabled {
                 self.dsp.process(in_l, in_r, &bands, p)
             } else {
                 (in_l, in_r, 0.0)
             };
-            *channel_samples.get_mut(0).unwrap() = out_l;
-            *channel_samples.get_mut(1).unwrap() = out_r;
+            *s_l = out_l;
+            *s_r = out_r;
 
             self.scope_decim = self.scope_decim.wrapping_add(1);
             if self.scope_decim & 127 == 0 {

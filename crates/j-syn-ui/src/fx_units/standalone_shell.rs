@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use crate::controls::{
     bold_label, build_dropdown_trigger_labels, build_ui_scale_picker, GearIcon, ScrollDropdown,
 };
-use crate::scopes::fx_accent_rgb;
 use crate::shell::{
     build_tooltip_overlay, notify_baseview_resize_macos, UiKitEvent, UiShellState,
 };
@@ -241,7 +240,6 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
     FBody: Fn(&mut Context) + Send + Sync + 'static,
 {
     let (win_w, win_h) = tokens::standalone_fx_window_size(spec.fx_type);
-    let accent = fx_accent_rgb(spec.fx_type);
 
     let mut shell = UiShellState::new(initial_theme, initial_scale_pct);
     if persist_settings {
@@ -361,7 +359,6 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
                                     pick_enabled,
                                     "",
                                     "",
-                                    accent,
                                 )
                                 .width(Pixels(tokens::FX_UNIT_LED_W))
                                 .height(Pixels(tokens::FX_UNIT_ARROW_H))

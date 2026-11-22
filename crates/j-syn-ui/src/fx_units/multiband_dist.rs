@@ -10,8 +10,7 @@ use nih_plug_vizia::vizia::prelude::*;
 
 use crate::controls::{bold_label, build_enum_dropdown};
 use crate::scopes::{
-    fx_accent_rgb, FxSlotScopeSnapshot, FxSlotVisualizer, MultibandXoverDragOverlay,
-    MultibandXoverHost,
+    FxSlotScopeSnapshot, FxSlotVisualizer, MultibandXoverDragOverlay, MultibandXoverHost,
 };
 use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
@@ -106,7 +105,6 @@ fn build_mb_knob_cell<L, R, Params, U>(
     tab_host: Arc<dyn MultibandTabHost>,
     mod_targets: Option<([ModDestination; 16], Arc<dyn ModUiHost>, u8)>,
     global_defs: [f32; 4],
-    accent: (u8, u8, u8),
     knob_sz: f32,
 ) where
     L: Lens<Target = Arc<Params>> + Clone,
@@ -153,7 +151,6 @@ fn build_mb_knob_cell<L, R, Params, U>(
                             _ => unit_params.band_mix(p, band),
                         },
                         p_idx == 1,
-                        accent,
                         mod_cell,
                         Some(formatter),
                     )
@@ -168,7 +165,6 @@ fn build_mb_knob_cell<L, R, Params, U>(
                             _ => unit_params.mix(p),
                         },
                         p_idx == 2,
-                        accent,
                         mod_cell,
                         Some(formatter),
                     )
@@ -222,7 +218,6 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
 
     let scope_h = tokens::fx_unit_scope_height(FxType::MultibandDist);
     let global_defs = j_syn_dsp::FxSlotParams::default_params_for_type(FxType::MultibandDist);
-    let accent = fx_accent_rgb(FxType::MultibandDist);
 
     let lens_scope = params_lens.clone();
     let p_scope = params.clone();
@@ -420,7 +415,6 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                             move |p: &Arc<Params>| unit_params.band_enabled(p, band),
                             "",
                             "",
-                            accent,
                         )
                         .width(Pixels(tokens::FX_UNIT_LED_W))
                         .height(Pixels(tokens::FX_UNIT_ARROW_H))
@@ -466,7 +460,6 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                             tab_r.clone(),
                             mod_r.clone(),
                             global_defs,
-                            accent,
                             knob_sz,
                         );
                     }

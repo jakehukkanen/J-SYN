@@ -15,7 +15,7 @@ use super::mod_bar::{bottom_tab_tag, ModUiState};
 use super::osc_panel::osc_enabled_fn;
 use super::tokens;
 use super::widgets::LedToggleSwitch;
-use super::{BottomTab, UiData, AMBER_RGB, CORAL_RGB, GOLD_RGB};
+use super::{BottomTab, UiData};
 use crate::JSynPluginParams;
 
 pub(super) fn build_voice_tab(
@@ -34,13 +34,11 @@ pub(super) fn build_voice_tab(
             build_module_header(cx, "OSCILLATOR PAN & KEYTRACK", 18.0);
 
             const OSC_LABELS: [&str; 4] = ["OSC 1", "OSC 2", "OSC 3", "OSC 4"];
-            const OSC_ACCENTS: [(u8, u8, u8); 4] = [AMBER_RGB, GOLD_RGB, CORAL_RGB, AMBER_RGB];
 
             HStack::new(cx, move |cx| {
                 for idx in 0..4 {
                     let p_col = p_osc.clone();
                     let m_col = m_osc.clone();
-                    let accent = OSC_ACCENTS[idx];
                     VStack::new(cx, move |cx| {
                         bold_label(cx, OSC_LABELS[idx], "module-title")
                             .width(Stretch(1.0))
@@ -53,7 +51,6 @@ pub(super) fn build_voice_tab(
                             move |p| &p.oscs[idx].pan,
                             "PAN",
                             true,
-                            accent,
                             tokens::KNOB_STD,
                             ModDestination::osc_pan(idx),
                             m_col,
@@ -68,7 +65,6 @@ pub(super) fn build_voice_tab(
                             move |p| &p.oscs[idx].keytrack,
                             "KT",
                             "KT",
-                            accent,
                         )
                         .width(Pixels(tokens::VOICE_KT_W))
                         .height(Pixels(tokens::CONTROL_H))
@@ -142,7 +138,6 @@ pub(super) fn build_voice_tab(
                         |p| &p.mpe_enabled,
                         "MPE",
                         "MPE",
-                        AMBER_RGB,
                     )
                     .width(Stretch(1.0))
                     .height(Pixels(tokens::CONTROL_H));
@@ -168,7 +163,6 @@ pub(super) fn build_voice_tab(
                     |p| &p.glide_ms,
                     "GLIDE",
                     false,
-                    GOLD_RGB,
                     tokens::KNOB_STD,
                     ModDestination::GlideMs,
                     mod_ui,
@@ -181,7 +175,6 @@ pub(super) fn build_voice_tab(
                     |p| &p.filters[0].keytrack,
                     "F1 KT",
                     false,
-                    AMBER_RGB,
                     tokens::KNOB_STD,
                     tokens::VOICE_FLT_KT_CELL_W,
                 );
@@ -192,7 +185,6 @@ pub(super) fn build_voice_tab(
                     |p| &p.filters[1].keytrack,
                     "F2 KT",
                     false,
-                    CORAL_RGB,
                     tokens::KNOB_STD,
                     tokens::VOICE_FLT_KT_CELL_W,
                 );

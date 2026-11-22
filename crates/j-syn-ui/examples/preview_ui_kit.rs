@@ -146,7 +146,7 @@ fn main() -> Result<(), String> {
                             .height(Pixels(14.0))
                             .width(Stretch(1.0))
                             .child_space(Stretch(1.0));
-                        RotaryKnob::new(cx, DemoData::params, |p| &p.mix, false, (245, 179, 73))
+                        RotaryKnob::new(cx, DemoData::params, |p| &p.mix, false)
                             .width(Pixels(tokens::KNOB_OSC))
                             .height(Pixels(tokens::KNOB_OSC))
                             .left(Stretch(1.0))
@@ -160,7 +160,7 @@ fn main() -> Result<(), String> {
                             .height(Pixels(14.0))
                             .width(Stretch(1.0))
                             .child_space(Stretch(1.0));
-                        RotaryKnob::new(cx, DemoData::params, |p| &p.pan, true, (245, 179, 73))
+                        RotaryKnob::new(cx, DemoData::params, |p| &p.pan, true)
                             .width(Pixels(tokens::KNOB_OSC))
                             .height(Pixels(tokens::KNOB_OSC))
                             .left(Stretch(1.0))
@@ -175,7 +175,7 @@ fn main() -> Result<(), String> {
                             .height(Pixels(14.0))
                             .width(Stretch(1.0))
                             .child_space(Stretch(1.0));
-                        RotaryKnob::new(cx, DemoData::params, |p| &p.width, false, (245, 179, 73))
+                        RotaryKnob::new(cx, DemoData::params, |p| &p.width, false)
                             .enabled_by(p_dim, |_| false)
                             .width(Pixels(tokens::KNOB_OSC))
                             .height(Pixels(tokens::KNOB_OSC))
@@ -203,7 +203,6 @@ fn main() -> Result<(), String> {
                             |p| &p.enabled,
                             "",
                             "",
-                            (108, 214, 255),
                         )
                         .width(Pixels(tokens::FX_UNIT_LED_W))
                         .height(Pixels(tokens::FX_UNIT_ARROW_H));
@@ -245,7 +244,7 @@ fn main() -> Result<(), String> {
                                 ..FxSlotScopeSnapshot::default()
                             }
                         },
-                        tokens::KNOB_FX_UNIT,
+                        tokens::KNOB_FX_UNIT_2X2,
                     );
                 })
                 .class("hardware-module")

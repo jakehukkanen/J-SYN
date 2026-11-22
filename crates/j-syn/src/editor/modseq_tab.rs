@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use j_syn_dsp::mod_matrix::{ModDestination, ModMatrixSource};
+use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{ModSeqStep, MAX_MODSEQ_STEPS};
 use nih_plug::prelude::{FloatParam, GuiContext, Param};
 use nih_plug_vizia::vizia::prelude::*;
@@ -18,7 +18,7 @@ use super::modseq_canvases::{
     AdsrPreviewScope, LfoPresetBar, ModSeqCurveCanvas, ModSeqPaletteGrid,
 };
 use super::tokens;
-use super::{BottomTab, UiData, UiEvent, CORAL_RGB, GOLD_RGB};
+use super::{BottomTab, UiData, UiEvent};
 use crate::{
     JSynPluginParams, ModSeqModeParam, ModSeqPlayParam, ModSeqRetrigParam, ModSeqSyncParam,
 };
@@ -57,22 +57,6 @@ const RETRIG_ITEMS: &[(&str, ModSeqRetrigParam)] = &[
     ("Poly", ModSeqRetrigParam::PolyVoice),
     ("Global", ModSeqRetrigParam::MonoGlobal),
 ];
-
-pub(super) fn subtab_accent(sub: ModSeqSubTab) -> (u8, u8, u8) {
-    let src = match sub {
-        ModSeqSubTab::MSeq(0) => ModMatrixSource::ModSeq1,
-        ModSeqSubTab::MSeq(1) => ModMatrixSource::ModSeq2,
-        ModSeqSubTab::MSeq(2) => ModMatrixSource::ModSeq3,
-        ModSeqSubTab::MSeq(_) => ModMatrixSource::ModSeq4,
-        ModSeqSubTab::Env(0) => ModMatrixSource::Env1,
-        ModSeqSubTab::Env(1) => ModMatrixSource::Env2,
-        ModSeqSubTab::Env(2) => ModMatrixSource::Env3,
-        ModSeqSubTab::Env(_) => ModMatrixSource::Env4,
-    };
-    src.color_rgb()
-}
-
-/// Interactive `femtovg` Performer/MSEG curve canvas with real-time playhead.
 
 fn build_labeled_dropdown<E, P, FMap>(
     cx: &mut Context,
@@ -316,7 +300,6 @@ pub(super) fn build_modseq_tab(
                                 let p_ctrl = p_bot;
                                 let g_ctrl = g_bot;
                                 let u_ctrl = u_bot;
-                                let accent = subtab_accent(ModSeqSubTab::MSeq(seq_idx));
                                 HStack::new(cx, move |cx| {
                                     VStack::new(cx, {
                                         let p = p_ctrl.clone();
@@ -455,7 +438,6 @@ pub(super) fn build_modseq_tab(
                                         move |pr| &pr.modseqs[seq_idx].rate,
                                         "RATE",
                                         false,
-                                        accent,
                                         tokens::KNOB_STD,
                                         46.0,
                                         ModDestination::modseq_rate(seq_idx),
@@ -482,7 +464,6 @@ pub(super) fn build_modseq_tab(
                                         move |pr| &pr.modseqs[seq_idx].smooth,
                                         "SMOOTH",
                                         false,
-                                        CORAL_RGB,
                                         tokens::KNOB_STD,
                                         44.0,
                                     );
@@ -510,14 +491,12 @@ pub(super) fn build_modseq_tab(
                             .height(Stretch(1.0));
 
                         HStack::new(cx, move |cx| {
-                            let accent = subtab_accent(ModSeqSubTab::Env(env_idx));
                             build_knob_cell_with_readout(
                                 cx,
                                 UiData::params,
                                 atk_fn,
                                 "ATTACK",
                                 false,
-                                accent,
                                 tokens::KNOB_FLT,
                                 84.0,
                             );
@@ -527,7 +506,6 @@ pub(super) fn build_modseq_tab(
                                 dec_fn,
                                 "DECAY",
                                 false,
-                                accent,
                                 tokens::KNOB_FLT,
                                 84.0,
                             );
@@ -537,7 +515,6 @@ pub(super) fn build_modseq_tab(
                                 sus_fn,
                                 "SUSTAIN",
                                 false,
-                                GOLD_RGB,
                                 tokens::KNOB_FLT,
                                 84.0,
                             );
@@ -547,7 +524,6 @@ pub(super) fn build_modseq_tab(
                                 rel_fn,
                                 "RELEASE",
                                 false,
-                                CORAL_RGB,
                                 tokens::KNOB_FLT,
                                 84.0,
                             );

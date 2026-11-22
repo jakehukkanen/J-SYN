@@ -9,7 +9,7 @@ use nih_plug::prelude::{BoolParam, FloatParam, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
 
 use crate::controls::bold_label;
-use crate::scopes::{fx_accent_rgb, FxSlotScopeSnapshot, FxSlotVisualizer};
+use crate::scopes::{FxSlotScopeSnapshot, FxSlotVisualizer};
 use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
 
@@ -49,7 +49,6 @@ pub fn build_limiter_fx_unit_body<L, R, Params, U, FScope>(
     let scope_h = tokens::fx_unit_scope_height(FxType::Limiter);
     let main_defs = j_syn_dsp::FxSlotParams::default_params_for_type(FxType::Limiter);
     let sub_defs = j_syn_dsp::FxSlotParams::default_eq_params_for_type(FxType::Limiter);
-    let accent = fx_accent_rgb(FxType::Limiter);
 
     let lens_scope = params_lens.clone();
     let p_scope = params.clone();
@@ -155,7 +154,6 @@ pub fn build_limiter_fx_unit_body<L, R, Params, U, FScope>(
                     is_sub,
                     [false; 4],
                     defs,
-                    accent,
                     knob_sz,
                     params_lens.clone(),
                     params.clone(),

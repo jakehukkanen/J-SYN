@@ -897,8 +897,8 @@ impl FxBusState {
                 };
 
                 let stack_count = (slot.stack as usize).clamp(1, MAX_FX_STACK);
-                for stage_idx in 0..stack_count {
-                    let (nl, nr, act) = self.stages[slot_idx][stage_idx].process_type(
+                for stage in self.stages[slot_idx].iter_mut().take(stack_count) {
+                    let (nl, nr, act) = stage.process_type(
                         slot,
                         l,
                         r,
@@ -1036,11 +1036,11 @@ impl SubBusProcessor {
             return (out_l, out_r);
         }
         if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 256 {
-            if let Some(tel) = telemetry {
-                if self.idle_samples == 257 {
-                    tel.sub_scope.clear();
-                    self.scope_accum = (0.0, 0.0, 0.0, 0);
-                }
+            if self.idle_samples == 257
+                && let Some(tel) = telemetry
+            {
+                tel.sub_scope.clear();
+                self.scope_accum = (0.0, 0.0, 0.0, 0);
             }
             return (0.0, 0.0);
         }

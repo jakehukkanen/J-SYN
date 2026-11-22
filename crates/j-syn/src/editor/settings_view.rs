@@ -14,7 +14,7 @@ use super::controls::{
     bold_label, build_bool_dropdown, build_dropdown_trigger_labels, build_module_header,
 };
 use super::widgets::LedToggleSwitch;
-use super::{UiData, UiEvent, UiKitEvent, UiShellState, AMBER_RGB, CORAL_RGB, GOLD_RGB};
+use super::{UiData, UiEvent, UiKitEvent, UiShellState, AMBER_RGB};
 
 const GEAR_MIN: f32 = 0.10;
 const GEAR_MAX: f32 = 0.60;
@@ -239,7 +239,6 @@ pub(super) fn build_settings_view(
                         |p| &p.dc_blocker,
                         "DC BLOCKER",
                         "DC BLOCKER",
-                        (82, 200, 128),
                     )
                     .width(Pixels(142.0))
                     .height(Pixels(26.0))
@@ -267,7 +266,6 @@ pub(super) fn build_settings_view(
                         |p| &p.master_limiter,
                         "SAFETY LIMITER",
                         "SAFETY LIMITER",
-                        CORAL_RGB,
                     )
                     .width(Pixels(142.0))
                     .height(Pixels(26.0))
@@ -295,7 +293,6 @@ pub(super) fn build_settings_view(
                         |p| &p.modseq_swing,
                         "MODSEQ SWING",
                         "MODSEQ SWING",
-                        GOLD_RGB,
                     )
                     .width(Pixels(142.0))
                     .height(Pixels(26.0))

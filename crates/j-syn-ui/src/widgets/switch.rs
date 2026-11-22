@@ -12,8 +12,6 @@ use crate::theme;
 /// Skeuomorphic illuminated hardware push-button / LED switch.
 pub struct LedToggleSwitch {
     param_base: ParamWidgetBase,
-    #[allow(dead_code)]
-    accent_rgb: (u8, u8, u8),
     centered_led: bool,
     hovered: bool,
     on_cmd_click: Option<Box<dyn Fn(&mut EventContext) + Send + Sync>>,
@@ -42,7 +40,6 @@ impl LedToggleSwitch {
         params_to_param: FMap,
         off_label: &'static str,
         on_label: &'static str,
-        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
     ) -> Handle<'a, Self>
     where
         L: Lens<Target = Params> + Clone,
@@ -54,7 +51,6 @@ impl LedToggleSwitch {
         let centered_led = off_label.is_empty() && on_label.is_empty();
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
-            accent_rgb,
             centered_led,
             hovered: false,
             on_cmd_click: None,

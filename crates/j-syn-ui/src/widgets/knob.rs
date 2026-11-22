@@ -28,8 +28,6 @@ pub struct RotaryKnob {
     scrolled_lines: f32,
     hovered: bool,
     bipolar: bool,
-    #[allow(dead_code)]
-    accent_rgb: (u8, u8, u8),
     mod_binding: Option<ModTargetBinding>,
     value_formatter: Option<ValueFormatter>,
     enabled_check: Option<EnabledCheck>,
@@ -88,7 +86,6 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
     ) -> Handle<'a, Self>
     where
         L: Lens<Target = Params> + Clone,
@@ -96,7 +93,7 @@ impl RotaryKnob {
         P: Param + 'static,
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
-        Self::build_inner(cx, params, params_to_param, bipolar, accent_rgb, None, None)
+        Self::build_inner(cx, params, params_to_param, bipolar, None, None)
     }
 
     pub fn new_with_formatter<'a, L, Params, P, FMap>(
@@ -104,7 +101,6 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        accent_rgb: (u8, u8, u8),
         value_formatter: ValueFormatter,
     ) -> Handle<'a, Self>
     where
@@ -118,7 +114,6 @@ impl RotaryKnob {
             params,
             params_to_param,
             bipolar,
-            accent_rgb,
             None,
             Some(value_formatter),
         )
@@ -129,7 +124,6 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
         dest: ModDestination,
         mod_ui: Arc<dyn ModUiHost>,
         tab_tag: u8,
@@ -145,7 +139,6 @@ impl RotaryKnob {
             params,
             params_to_param,
             bipolar,
-            accent_rgb,
             Some(ModTargetBinding {
                 dest,
                 mod_ui,
@@ -161,7 +154,6 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
         dest: ModDestination,
         mod_ui: Arc<dyn ModUiHost>,
         tab_tag: u8,
@@ -178,7 +170,6 @@ impl RotaryKnob {
             params,
             params_to_param,
             bipolar,
-            accent_rgb,
             Some(ModTargetBinding {
                 dest,
                 mod_ui,
@@ -188,13 +179,11 @@ impl RotaryKnob {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn new_with_opt_mod_formatter<'a, L, Params, P, FMap>(
         cx: &'a mut Context,
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        accent_rgb: (u8, u8, u8),
         mod_target: Option<(ModDestination, Arc<dyn ModUiHost>, u8)>,
         value_formatter: Option<ValueFormatter>,
     ) -> Handle<'a, Self>
@@ -209,7 +198,6 @@ impl RotaryKnob {
             params,
             params_to_param,
             bipolar,
-            accent_rgb,
             mod_target.map(|(dest, mod_ui, tab_tag)| ModTargetBinding {
                 dest,
                 mod_ui,
@@ -224,7 +212,6 @@ impl RotaryKnob {
         params: L,
         params_to_param: FMap,
         bipolar: bool,
-        #[allow(dead_code)] accent_rgb: (u8, u8, u8),
         mod_binding: Option<ModTargetBinding>,
         value_formatter: Option<ValueFormatter>,
     ) -> Handle<'a, Self>
@@ -243,7 +230,6 @@ impl RotaryKnob {
             scrolled_lines: 0.0,
             hovered: false,
             bipolar,
-            accent_rgb,
             mod_binding,
             value_formatter,
             enabled_check: None,

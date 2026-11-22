@@ -10,7 +10,7 @@ use super::controls::{build_enum_dropdown, build_flex_knob_cell_mod_dim};
 use super::mod_bar::ModUiState;
 use super::tokens;
 use super::widgets::LedToggleSwitch;
-use super::{AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData};
+use super::UiData;
 use crate::{JSynPluginParams, NoiseTypeParam};
 
 const NOISE_TYPE_ITEMS: &[(&str, NoiseTypeParam)] = &[
@@ -41,7 +41,6 @@ pub(super) fn build_noise_panel(
                 |p| &p.noise.enabled,
                 "NOISE",
                 "NOISE",
-                CORAL_RGB,
             )
             .width(Pixels(tokens::NOISE_LED_W))
             .height(Pixels(tokens::HEADER_STRIP_H));
@@ -67,7 +66,6 @@ pub(super) fn build_noise_panel(
                 |p| &p.noise.color,
                 "COLOR",
                 true,
-                AMBER_RGB,
                 tokens::KNOB_OSC,
                 ModDestination::NoiseColor,
                 mod_ui.clone(),
@@ -82,7 +80,6 @@ pub(super) fn build_noise_panel(
                 |p| &p.noise.stereo,
                 "STEREO",
                 false,
-                GOLD_RGB,
                 tokens::KNOB_OSC,
                 ModDestination::NoiseStereo,
                 mod_ui.clone(),
@@ -97,7 +94,6 @@ pub(super) fn build_noise_panel(
                 |p| &p.noise.level,
                 "LEVEL",
                 false,
-                CORAL_RGB,
                 tokens::KNOB_OSC,
                 ModDestination::NoiseLevel,
                 mod_ui,
