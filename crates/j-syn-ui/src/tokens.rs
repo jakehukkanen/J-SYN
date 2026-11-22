@@ -114,8 +114,15 @@ pub const fn fx_unit_scope_height(fx_type: FxType) -> f32 {
 pub const fn standalone_fx_window_size(fx_type: FxType) -> (u32, u32) {
     let scope_h = fx_unit_scope_height(fx_type) as u32;
     let w = (STANDALONE_FX_CARD_W + STANDALONE_FX_PAD * 2.0) as u32;
+    let extra_h = match fx_type {
+        // Band tab bar (18 + 4) + context/mode strip (18 + 4) + second knob row (40 + 4)
+        FxType::MultibandDist => {
+            ((PILL_H + SPACE_SM) as u32) * 2 + ((FX_UNIT_KNOB_ROW_H + SPACE_SM) as u32)
+        }
+        _ => 0,
+    };
     // Header bar (34) + chassis top/bottom padding (20) + card padding (12) + card header (18)
-    // + 2 gaps (8) + scope + knob row (42) + bottom margin
+    // + 2 gaps (8) + scope + knob row (40) + extra_h + bottom margin
     let h = (STANDALONE_FX_HEADER_H as u32)
         + 20
         + (CARD_PAD as u32 * 2)
@@ -123,6 +130,7 @@ pub const fn standalone_fx_window_size(fx_type: FxType) -> (u32, u32) {
         + (SPACE_SM as u32 * 2)
         + scope_h
         + (FX_UNIT_KNOB_ROW_H as u32)
+        + extra_h
         + 4;
     (w, h)
 }

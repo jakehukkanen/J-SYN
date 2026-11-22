@@ -14,6 +14,7 @@ fn main() -> Result<(), String> {
     let mut theme_name = "Studio Amber".to_string();
     let mut scale_pct: u32 = 100;
     let mut initial_tab: u8 = 0;
+    let mut card_width_override: Option<u32> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -37,6 +38,11 @@ fn main() -> Result<(), String> {
                     initial_tab = t.parse().unwrap_or(0);
                 }
             }
+            "--card-width" => {
+                if let Some(cw) = args.next() {
+                    card_width_override = cw.parse().ok();
+                }
+            }
             _ => {}
         }
     }
@@ -48,7 +54,10 @@ fn main() -> Result<(), String> {
         plugin.scope_ring.push(env * 0.85, env, 0.55);
     }
 
-    let (w, h) = mbdist_window_size();
+    let (default_w, h) = mbdist_window_size();
+    let w = card_width_override
+        .map(|cw| cw + (j_syn_ui::tokens::STANDALONE_FX_PAD as u32) * 2)
+        .unwrap_or(default_w);
     let scale = (scale_pct as f64) / 100.0;
     let pal = theme::find_theme_by_name(&theme_name);
     let params = plugin.params.clone();
