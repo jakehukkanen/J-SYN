@@ -3,10 +3,11 @@
 use std::sync::Arc;
 
 use j_syn_dsp::{
-    DirectDest, FactoryWavetable, FilterBusDest, FilterMode, FilterParams, FilterRouting,
-    FilterSlope, InsertMode, InsertParams, InsertPosition, ModOrder, ModSource, ModType,
-    NoiseParams, NoiseType, OscParams, OscPitchMode, RoutingParams, WarpMode,
+    DirectDest, FactoryWavetable, FilterBusDest, FilterParams, FilterRouting, FilterSlope,
+    InsertMode, InsertParams, InsertPosition, ModOrder, ModSource, ModType, NoiseParams, NoiseType,
+    OscParams, OscPitchMode, RoutingParams, WarpMode,
 };
+pub use j_syn_ui::fx_units::FilterModeParam;
 use nih_plug::prelude::*;
 
 use super::{bipolar_percentage_param, percentage_param};
@@ -142,62 +143,6 @@ impl From<NoiseTypeParam> for NoiseType {
             NoiseTypeParam::White => NoiseType::White,
             NoiseTypeParam::Pink => NoiseType::Pink,
             NoiseTypeParam::Brown => NoiseType::Brown,
-        }
-    }
-}
-
-#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FilterModeParam {
-    #[name = "LP"]
-    Lp,
-    #[name = "BP"]
-    Bp,
-    #[name = "HP"]
-    Hp,
-    #[name = "Scream"]
-    Scream,
-    #[name = "Daft"]
-    Daft,
-    #[name = "Comb"]
-    Comb,
-    #[name = "HP + Peak"]
-    HpPeak,
-    #[name = "HP + Notch"]
-    HpNotch,
-    #[name = "LP + Notch"]
-    LpNotch,
-    #[name = "LP + Peak"]
-    LpPeak,
-    #[name = "Notch"]
-    Notch,
-    #[name = "Peak"]
-    Peak,
-    #[name = "Bandreject"]
-    Bandreject,
-    #[name = "Peak + Peak"]
-    PeakPeak,
-    #[name = "Notch + Notch"]
-    NotchNotch,
-}
-
-impl From<FilterModeParam> for FilterMode {
-    fn from(val: FilterModeParam) -> Self {
-        match val {
-            FilterModeParam::Lp => FilterMode::Lp,
-            FilterModeParam::Bp => FilterMode::Bp,
-            FilterModeParam::Hp => FilterMode::Hp,
-            FilterModeParam::Scream => FilterMode::Scream,
-            FilterModeParam::Daft => FilterMode::Daft,
-            FilterModeParam::Comb => FilterMode::Comb,
-            FilterModeParam::HpPeak => FilterMode::HpPeak,
-            FilterModeParam::HpNotch => FilterMode::HpNotch,
-            FilterModeParam::LpNotch => FilterMode::LpNotch,
-            FilterModeParam::LpPeak => FilterMode::LpPeak,
-            FilterModeParam::Notch => FilterMode::Notch,
-            FilterModeParam::Peak => FilterMode::Peak,
-            FilterModeParam::Bandreject => FilterMode::Bandreject,
-            FilterModeParam::PeakPeak => FilterMode::PeakPeak,
-            FilterModeParam::NotchNotch => FilterMode::NotchNotch,
         }
     }
 }

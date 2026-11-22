@@ -2572,15 +2572,15 @@ fn fx_tube_resonator_tune_filter_dirty_lfo_and_idle() {
         .sum();
     assert!(flt_diff > 1.0, "Filter On vs Off must noticeably shape tail");
 
-    // Verify Dirty (EngineMode::Vintage2007) vs Clean (EngineMode::Hq) LFO behavior
+    // Verify Dirty (tube_res_dirty_lfo = true) vs Clean (tube_res_dirty_lfo = false) LFO behavior
     let mut dirty_p = base_params.clone();
-    dirty_p.engine_mode = EngineMode::Vintage2007;
+    dirty_p.buses[0].slots[0].tube_res_dirty_lfo = true;
     dirty_p.buses[0].slots[0].eq_params[0] = 1.0; // LFO AMT 100%
     dirty_p.buses[0].slots[0].eq_params[1] = 0.85; // fast LFO
     dirty_p.buses[0].slots[0].eq_params[2] = 0.6; // longer feedback decay
 
     let mut clean_p = dirty_p.clone();
-    clean_p.engine_mode = EngineMode::Hq;
+    clean_p.buses[0].slots[0].tube_res_dirty_lfo = false;
 
     let out_dirty = run_burst(&dirty_p);
     let out_clean = run_burst(&clean_p);
@@ -2591,7 +2591,7 @@ fn fx_tube_resonator_tune_filter_dirty_lfo_and_idle() {
         .sum();
     assert!(
         lfo_mode_diff > 0.01,
-        "Dirty vs Clean engine mode must produce distinct Pitch LFO modulation (diff={lfo_mode_diff})"
+        "Dirty vs Clean LFO must produce distinct Pitch LFO modulation (diff={lfo_mode_diff})"
     );
 
     // Scope response evaluator should return bounded finite values

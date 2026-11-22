@@ -2154,6 +2154,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "j-delay"
+version = "0.2.0"
+dependencies = [
+ "j-syn-dsp",
+ "j-syn-ui",
+ "nih_plug",
+ "nih_plug_vizia",
+]
+
+[[package]]
 name = "j-dispersion"
 version = "0.2.0"
 dependencies = [
@@ -2174,7 +2184,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "j-filter"
+version = "0.2.0"
+dependencies = [
+ "j-syn-dsp",
+ "j-syn-ui",
+ "nih_plug",
+ "nih_plug_vizia",
+]
+
+[[package]]
 name = "j-flanger"
+version = "0.2.0"
+dependencies = [
+ "j-syn-dsp",
+ "j-syn-ui",
+ "nih_plug",
+ "nih_plug_vizia",
+]
+
+[[package]]
+name = "j-limiter"
 version = "0.2.0"
 dependencies = [
  "j-syn-dsp",
@@ -2262,6 +2292,16 @@ dependencies = [
  "objc",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "j-tuberes"
+version = "0.2.0"
+dependencies = [
+ "j-syn-dsp",
+ "j-syn-ui",
+ "nih_plug",
+ "nih_plug_vizia",
 ]
 
 [[package]]

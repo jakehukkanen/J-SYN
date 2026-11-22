@@ -33,7 +33,8 @@ pub use self::diopser::{
     diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, DIOPSER_STAGE_COUNTS,
 };
 pub use self::limiter::{
-    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms,
+    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_lookahead_samples,
+    limiter_release_ms,
 };
 pub use self::modulation::{
     evaluate_flanger_scope_response, flanger_delay_ms, flanger_feedback, flanger_phase_deg,
@@ -228,6 +229,8 @@ pub struct FxSlotParams {
     pub diopser_stages: u8,
     /// Enable the pre-resonator softening bandpass filter in `TUBE RES.` (default `true`).
     pub tube_res_filter_enabled: bool,
+    /// Enable 32-sample stepped ("Dirty") Pitch LFO in `TUBE RES.` (default `true`).
+    pub tube_res_dirty_lfo: bool,
     /// Invert left channel phase in `UTILITY` (default `false`).
     pub utility_inv_l: bool,
     /// Invert right channel phase in `UTILITY` (default `false`).
@@ -254,6 +257,7 @@ impl Default for FxSlotParams {
             filter_slope: FxFilterSlope::Db12,
             diopser_stages: 2,
             tube_res_filter_enabled: true,
+            tube_res_dirty_lfo: true,
             utility_inv_l: false,
             utility_inv_r: false,
             limiter_true_peak: false,
@@ -323,6 +327,8 @@ impl FxSlotParams {
             FxType::TubeResonator => [0.50, 0.426_25, 0.299_22, 1.00],
             // Limiter ADV: Release ~80 ms (0.53), Knee 0% (0.0), Link 100% (1.0), Punch 100% (1.0)
             FxType::Limiter => [0.53, 0.00, 1.00, 1.00],
+            // Filter: Freq 2 ~4.1 kHz (0.72) for multi-filter modes
+            FxType::Filter => [0.72, 1.0, 0.50, 0.50],
             _ => [0.0, 1.0, 0.50, 0.50],
         }
     }
@@ -340,6 +346,7 @@ impl FxSlotParams {
             filter_slope: FxFilterSlope::Db12,
             diopser_stages: 2,
             tube_res_filter_enabled: true,
+            tube_res_dirty_lfo: true,
             utility_inv_l: false,
             utility_inv_r: false,
             limiter_true_peak: false,
@@ -516,24 +523,24 @@ pub(crate) fn butterworth_allpass_coeffs(sample_rate: f64, freq_hz: f64) -> Biqu
 }
 
 /// Full-parity multimode stereo Filter FX reusing per-voice ZDF SVF + Comb + ADAA Scream engine.
-struct FxFilterStereo {
+pub struct FxFilterStereo {
     state: FilterState,
     sample_rate: f32,
 }
 
 impl FxFilterStereo {
-    fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         Self {
             state: FilterState::new(2_500.0),
             sample_rate: sample_rate.max(1_000.0),
         }
     }
 
-    fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1_000.0);
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.state.reset();
     }
 
@@ -542,6 +549,7 @@ impl FxFilterStereo {
         mode: FilterMode,
         slope: FxFilterSlope,
         p: [f32; 4],
+        freq2_norm: f32,
     ) -> FilterParams {
         let fc = cutoff_norm_to_hz(p[0]);
         let eff_slope = if mode.has_fixed_12db_slope() {
@@ -552,10 +560,7 @@ impl FxFilterStereo {
         let aux = match mode {
             FilterMode::Scream => p[2].clamp(0.0, 1.0),
             FilterMode::Comb => 0.35,
-            m if m.is_multi() => {
-                let freq2 = (fc * 1.65).clamp(20.0, 20_000.0);
-                (freq2 / 20.0).log(1000.0).clamp(0.0, 1.0)
-            }
+            m if m.is_multi() => freq2_norm.clamp(0.0, 1.0),
             _ => p[3].clamp(0.0, 1.0),
         };
         let drive = if mode == FilterMode::Scream {
@@ -576,15 +581,16 @@ impl FxFilterStereo {
     }
 
     #[inline]
-    fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,
         mode: FilterMode,
         slope: FxFilterSlope,
         p: [f32; 4],
+        freq2_norm: f32,
     ) -> (f32, f32, f32) {
-        let fp = Self::filter_params(mode, slope, p);
+        let fp = Self::filter_params(mode, slope, p, freq2_norm);
         let mix = p[3].clamp(0.0, 1.0);
         let (wl, wr) = self.state.process_stereo(
             in_l,
@@ -610,9 +616,10 @@ pub fn filter_response_db_from_slot(
     mode: FilterMode,
     slope: FxFilterSlope,
     p: [f32; 4],
+    freq2_norm: f32,
     freq_hz: f32,
 ) -> f32 {
-    let fp = FxFilterStereo::filter_params(mode, slope, p);
+    let fp = FxFilterStereo::filter_params(mode, slope, p, freq2_norm);
     let mix = p[3].clamp(0.0, 1.0);
     let wet_db = evaluate_filter_response_db(&fp, freq_hz);
     if (mode == FilterMode::Scream || mode == FilterMode::Comb || mode.is_multi()) && mix < 0.999 {
@@ -706,7 +713,7 @@ impl StereoFxStage {
         eq: [f32; 4],
         eff_bands: &[MbDistBandParams; 3],
         tempo_bpm: f32,
-        engine_mode: EngineMode,
+        _engine_mode: EngineMode,
     ) -> (f32, f32, f32) {
         match slot.fx_type {
             FxType::Off => (in_l, in_r, 0.0),
@@ -716,7 +723,10 @@ impl StereoFxStage {
             FxType::Delay => self.delay.process(in_l, in_r, p, eq, tempo_bpm),
             FxType::Reverb => self.reverb.process(in_l, in_r, p, eq),
             FxType::JSatClipper => self.clipper.process(in_l, in_r, p, slot.clipper_pcm),
-            FxType::Filter => self.filter.process(in_l, in_r, slot.filter_mode, slot.filter_slope, p),
+            FxType::Filter => {
+                self.filter
+                    .process(in_l, in_r, slot.filter_mode, slot.filter_slope, p, eq[0])
+            }
             FxType::Phaser => self.phaser.process(in_l, in_r, p),
             FxType::Diopser => self.diopser.process(in_l, in_r, p, slot.diopser_stages as usize),
             FxType::TubeResonator => self.tube_res.process(
@@ -725,7 +735,7 @@ impl StereoFxStage {
                 p,
                 eq,
                 slot.tube_res_filter_enabled,
-                engine_mode == EngineMode::Vintage2007,
+                slot.tube_res_dirty_lfo,
             ),
             FxType::Utility => self.utility.process(
                 in_l,
@@ -1142,8 +1152,9 @@ impl FxRackState {
         mode: FilterMode,
         slope: FxFilterSlope,
         p: [f32; 4],
+        freq2_norm: f32,
     ) -> FilterParams {
-        FxFilterStereo::filter_params(mode, slope, p)
+        FxFilterStereo::filter_params(mode, slope, p, freq2_norm)
     }
 
     #[inline]

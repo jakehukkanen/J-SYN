@@ -184,7 +184,12 @@ pub fn paint_filter_scope(
 ) {
     let enabled = snap.enabled;
     let f = ScopeFrame::begin(canvas, bounds, dpx, 4.0, 3.0, enabled, pal);
-    let fp = FxRackState::filter_params_from_fx(snap.filter_mode, snap.filter_slope, snap.eff_p);
+    let fp = FxRackState::filter_params_from_fx(
+        snap.filter_mode,
+        snap.filter_slope,
+        snap.eff_p,
+        snap.eff_eq[0],
+    );
 
     const DB_MIN: f32 = -24.0;
     const DB_MAX: f32 = 18.0;
@@ -217,7 +222,13 @@ pub fn paint_filter_scope(
         fx_accent_rgb(FxType::Filter),
         pal,
         |freq_hz| {
-            filter_response_db_from_slot(snap.filter_mode, snap.filter_slope, snap.eff_p, freq_hz)
+            filter_response_db_from_slot(
+                snap.filter_mode,
+                snap.filter_slope,
+                snap.eff_p,
+                snap.eff_eq[0],
+                freq_hz,
+            )
         },
     );
 

@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::ModDestination;
+use j_syn_ui::fx_units::FX_FILTER_MODE_ITEMS;
 use nih_plug::prelude::{GuiContext, Param};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
@@ -41,24 +42,6 @@ fn filter_enabled_fn(filter_idx: usize) -> fn(&JSynPluginParams) -> bool {
         filter1_enabled
     }
 }
-
-pub(super) const FILTER_MODE_ITEMS: &[(&str, FilterModeParam)] = &[
-    ("LP", FilterModeParam::Lp),
-    ("BP", FilterModeParam::Bp),
-    ("HP", FilterModeParam::Hp),
-    ("Notch", FilterModeParam::Notch),
-    ("Bandreject", FilterModeParam::Bandreject),
-    ("Peak", FilterModeParam::Peak),
-    ("Scream", FilterModeParam::Scream),
-    ("Daft", FilterModeParam::Daft),
-    ("Comb", FilterModeParam::Comb),
-    ("HP + Peak", FilterModeParam::HpPeak),
-    ("HP + Notch", FilterModeParam::HpNotch),
-    ("LP + Notch", FilterModeParam::LpNotch),
-    ("LP + Peak", FilterModeParam::LpPeak),
-    ("Peak + Peak", FilterModeParam::PeakPeak),
-    ("Notch + Notch", FilterModeParam::NotchNotch),
-];
 
 const FILTER_SLOPE_ITEMS: &[(&str, FilterSlopeParam)] = &[
     ("6 dB", FilterSlopeParam::Db6),
@@ -378,7 +361,7 @@ pub(super) fn build_filter_panel(
                     params.clone(),
                     gui_context.clone(),
                     move |p| &p.filters[filter_idx].mode,
-                    FILTER_MODE_ITEMS,
+                    FX_FILTER_MODE_ITEMS,
                 )
                 .width(Stretch(1.0))
                 .height(Pixels(tokens::HEADER_STRIP_H));

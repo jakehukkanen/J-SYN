@@ -56,7 +56,14 @@ Reference checklist for extracting or redesigning any `J-SYN` FX Unit in `crates
 
 ---
 
-## 6. Verification Gate
+## 6. Shared `nih_plug::Enum` Parameters (`crates/j-syn-ui/src/fx_units/params.rs`)
+- `j-syn-dsp` intentionally has **zero `nih_plug` dependency**, while `j-syn-ui` depends on `nih_plug` and is shared by both `crates/j-syn/` and `crates/plugins/j-*/`.
+- Consolidate all shared `nih_plug::Enum` parameter types, DSP `From` conversions, and dropdown item tables (`DistortionModeParam`, `DiopserStagesParam`, `FilterModeParam`, `FxFilterSlopeParam`) in `crates/j-syn-ui/src/fx_units/params.rs` (re-exported via `j_syn_ui::fx_units::*`).
+- `crates/j-syn/src/params/` re-exports these enums verbatim so `J-SYN` presets remain 100% binary/JSON compatible while sharing a single source of truth with standalone FX plugins.
+
+---
+
+## 7. Verification Gate
 1. Render headless PNG previews and inspect visually for zero clipping, alignment, and constant tab height:
    - `cargo run --offline -p j-<fx> --example preview_j_<fx> -- --out target/previews/j-<fx>-100.png`
    - `cargo run --offline -p j-syn --example preview_j_syn -- --out target/previews/j-syn-<fx>-100.png`

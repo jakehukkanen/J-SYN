@@ -23,6 +23,14 @@ pub fn limiter_lookahead_ms(norm: f32) -> f32 {
     norm.clamp(0.0, 1.0) * MAX_LOOKAHEAD_MS
 }
 
+/// Computes integer lookahead delay in samples for PDC reporting and `LimiterStereo`.
+#[inline]
+pub fn limiter_lookahead_samples(sample_rate: f32, lookahead_norm: f32) -> u32 {
+    let ms = limiter_lookahead_ms(lookahead_norm);
+    ((ms * 0.001 * sample_rate.max(1_000.0)).round() as usize)
+        .min(MAX_LOOKAHEAD_SAMPLES - 1) as u32
+}
+
 /// Maps normalized `0.0..=1.0` to Limiter release base time `10.0..=500.0 ms`.
 #[inline]
 pub fn limiter_release_ms(norm: f32) -> f32 {
@@ -89,7 +97,7 @@ impl RingMaxDeque {
 }
 
 /// Zero-allocation hybrid Lookahead S-Curve + Zero-Lookahead Transient-Clipping Limiter.
-pub(crate) struct LimiterStereo {
+pub struct LimiterStereo {
     delay_l: [f32; MAX_LOOKAHEAD_SAMPLES],
     delay_r: [f32; MAX_LOOKAHEAD_SAMPLES],
     dry_l: [f32; MAX_LOOKAHEAD_SAMPLES],
@@ -111,7 +119,7 @@ pub(crate) struct LimiterStereo {
 }
 
 impl LimiterStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         Self {
             delay_l: [0.0; MAX_LOOKAHEAD_SAMPLES],
             delay_r: [0.0; MAX_LOOKAHEAD_SAMPLES],
@@ -134,11 +142,11 @@ impl LimiterStereo {
         }
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1_000.0);
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.delay_l.fill(0.0);
         self.delay_r.fill(0.0);
         self.dry_l.fill(0.0);
@@ -161,7 +169,7 @@ impl LimiterStereo {
     }
 
     #[inline]
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,
@@ -188,8 +196,7 @@ impl LimiterStereo {
         let driven_l = in_l * gain_lin;
         let driven_r = in_r * gain_lin;
 
-        let lookahead_samples = ((lookahead_ms * 0.001 * self.sample_rate).round() as usize)
-            .min(MAX_LOOKAHEAD_SAMPLES - 1);
+        let lookahead_samples = limiter_lookahead_samples(self.sample_rate, p[2]) as usize;
 
         self.delay_l[self.write_idx] = driven_l;
         self.delay_r[self.write_idx] = driven_r;
