@@ -44,9 +44,9 @@ Reference checklist for extracting or redesigning any `J-SYN` FX Unit in `crates
   - Knob centers land at `66.5 px` and `133.5 px` inside the `200 px` card (**equidistant `66.5 / 67.0 / 66.5 px`**).
 - On the `2×2` `VStack`:
   - `.row_between(Pixels(tokens::SPACE_MD))` (`6.0 px`)
-  - `.top(Pixels(tokens::FX_UNIT_2X2_TOP_PAD))` (`3.0 px`)
-  - `.bottom(Pixels(tokens::FX_UNIT_2X2_BOTTOM_PAD))` (`20.0 px`)
-  - Balances vertical spacing around Row 1 and Row 2 knobs (`~24 px` top, middle, and bottom).
+  - `.top(Pixels(tokens::FX_UNIT_2X2_TOP_PAD))` (`10.0 px`)
+  - `.bottom(Pixels(tokens::FX_UNIT_2X2_BOTTOM_PAD))` (`6.0 px`)
+  - Enforces visual vertical equidistance (`~17 px` each) between the bottom of the scope/tab/dropdown and Row 1 labels, between Row 1 knobs and Row 2 labels, and between Row 2 knobs and the bottom of the FX card.
 
 ---
 

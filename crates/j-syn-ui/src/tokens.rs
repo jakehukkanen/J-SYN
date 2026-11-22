@@ -86,8 +86,8 @@ pub const FX_UNIT_OVERLAY_PILL_W: f32 = 30.0;
 pub const FX_UNIT_KNOB_ROW_H: f32 = 40.0;
 pub const FX_UNIT_KNOB_ROW_2X2_H: f32 = 64.0;
 pub const FX_UNIT_2X2_INSET_X: f32 = 27.0;
-pub const FX_UNIT_2X2_TOP_PAD: f32 = 3.0;
-pub const FX_UNIT_2X2_BOTTOM_PAD: f32 = 20.0;
+pub const FX_UNIT_2X2_TOP_PAD: f32 = 10.0;
+pub const FX_UNIT_2X2_BOTTOM_PAD: f32 = 6.0;
 
 // Standalone single-FX plugin shell metrics (built around FX_UNIT_W)
 pub const STANDALONE_FX_PAD: f32 = 12.0;
@@ -143,15 +143,15 @@ pub const fn standalone_fx_window_size(fx_type: FxType) -> (u32, u32) {
         + FX_UNIT_2X2_BOTTOM_PAD
         - FX_UNIT_KNOB_ROW_H) as u32;
     let extra_h = match fx_type {
-        // Plain 4-knob 2x2 grid (157 - 40 = 117)
+        // Plain 4-knob 2x2 grid (150 - 40 = 110)
         FxType::Utility | FxType::JSatClipper | FxType::Ott | FxType::Phaser => grid_2x2_delta,
-        // 4-knob 2x2 grid + 20 px context dropdown strip (20 + 4 + 117 = 141)
+        // 4-knob 2x2 grid + 20 px context dropdown strip (20 + 4 + 110 = 134)
         FxType::Distortion | FxType::Diopser => ((CONTROL_H + SPACE_SM) as u32) + grid_2x2_delta,
-        // 8-knob 2-tab 2x2 grid + 18 px tab bar (18 + 4 + 117 = 139)
+        // 8-knob 2-tab 2x2 grid + 18 px tab bar (18 + 4 + 110 = 132)
         FxType::Chorus | FxType::Reverb | FxType::Flanger => {
             ((PILL_H + SPACE_SM) as u32) + grid_2x2_delta
         }
-        // Band tab bar (18 + 4) + context/mode strip (20 + 4) + 2x2 knob grid delta (157 - 40 = 117)
+        // Band tab bar (18 + 4) + context/mode strip (20 + 4) + 2x2 knob grid delta (150 - 40 = 110)
         FxType::MultibandDist => {
             ((PILL_H + SPACE_SM) as u32) + ((CONTROL_H + SPACE_SM) as u32) + grid_2x2_delta
         }
