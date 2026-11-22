@@ -720,7 +720,9 @@ led-toggle:checked:hover .switch-label {
 .hardware-module.module-disabled .inline-pill.stk-pill {
   background-color: #1c1814;
   border-color: #39312a;
-}.dropdown-disabled dropdown,
+}
+
+.dropdown-disabled dropdown,
 .dropdown-disabled dropdown:hover {
   background-color: #1c1814;
   border-color: #39312a;

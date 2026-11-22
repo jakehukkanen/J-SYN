@@ -11,7 +11,7 @@ use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
 
 use crate::controls::{bold_label, build_enum_dropdown, build_prefixed_enum_dropdown};
-use crate::scopes::{fx_accent_rgb, FxSlotScopeSnapshot, FxSlotVisualizer};
+use crate::scopes::{FxSlotScopeSnapshot, FxSlotVisualizer};
 use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
 use crate::widgets::{KnobDimExt, RotaryKnob, ValueFormatter};
@@ -30,7 +30,6 @@ pub(crate) fn build_2x2_knob_grid<L, Params, FEnabled, FPick>(
     is_subtab: bool,
     bipolar_mask: [bool; 4],
     defs: [f32; 4],
-    _accent: (u8, u8, u8),
     knob_sz: f32,
     params_lens: L,
     params: Arc<Params>,
@@ -129,7 +128,6 @@ pub fn build_clipper_fx_unit_body<L, Params, U, FScope>(
 {
     let scope_h = tokens::fx_unit_scope_height(FxType::JSatClipper);
     let defs = j_syn_dsp::FxSlotParams::default_params_for_type(FxType::JSatClipper);
-    let accent = fx_accent_rgb(FxType::JSatClipper);
 
     let lens_scope = params_lens.clone();
     let p_scope = params.clone();
@@ -168,7 +166,6 @@ pub fn build_clipper_fx_unit_body<L, Params, U, FScope>(
             false,
             [false; 4],
             defs,
-            accent,
             knob_sz,
             params_lens,
             params,
@@ -208,7 +205,6 @@ pub fn build_four_knob_fx_unit_body<L, Params, U, FScope>(
 {
     let scope_h = tokens::fx_unit_scope_height(fx_type);
     let defs = j_syn_dsp::FxSlotParams::default_params_for_type(fx_type);
-    let accent = fx_accent_rgb(fx_type);
 
     VStack::new(cx, move |cx| {
         FxSlotVisualizer::new(cx, scope_provider)
@@ -222,7 +218,6 @@ pub fn build_four_knob_fx_unit_body<L, Params, U, FScope>(
             false,
             bipolar_mask,
             defs,
-            accent,
             knob_sz,
             params_lens,
             params,
@@ -262,7 +257,6 @@ pub fn build_distortion_fx_unit_body<L, Params, U, FScope>(
 {
     let scope_h = tokens::fx_unit_scope_height(FxType::Distortion);
     let defs = j_syn_dsp::FxSlotParams::default_params_for_type(FxType::Distortion);
-    let accent = fx_accent_rgb(FxType::Distortion);
 
     VStack::new(cx, move |cx| {
         FxSlotVisualizer::new(cx, scope_provider)
@@ -287,7 +281,6 @@ pub fn build_distortion_fx_unit_body<L, Params, U, FScope>(
             false,
             [true, false, true, false],
             defs,
-            accent,
             knob_sz,
             params_lens,
             params,
@@ -327,7 +320,6 @@ pub fn build_diopser_fx_unit_body<L, Params, U, FScope>(
 {
     let scope_h = tokens::fx_unit_scope_height(FxType::Diopser);
     let defs = j_syn_dsp::FxSlotParams::default_params_for_type(FxType::Diopser);
-    let accent = fx_accent_rgb(FxType::Diopser);
 
     VStack::new(cx, move |cx| {
         FxSlotVisualizer::new(cx, scope_provider)
@@ -353,7 +345,6 @@ pub fn build_diopser_fx_unit_body<L, Params, U, FScope>(
             false,
             [false; 4],
             defs,
-            accent,
             knob_sz,
             params_lens,
             params,
@@ -406,7 +397,6 @@ pub fn build_tabbed_fx_unit_body<L, R, Params, U, FScope>(
     let scope_h = tokens::fx_unit_scope_height(fx_type);
     let main_defs = j_syn_dsp::FxSlotParams::default_params_for_type(fx_type);
     let sub_defs = j_syn_dsp::FxSlotParams::default_eq_params_for_type(fx_type);
-    let accent = fx_accent_rgb(fx_type);
 
     let rev_tabs = ui_rev_lens.clone();
     let rev_grid = ui_rev_lens;
@@ -492,7 +482,6 @@ pub fn build_tabbed_fx_unit_body<L, R, Params, U, FScope>(
                     is_sub,
                     bipolar,
                     defs,
-                    accent,
                     knob_sz,
                     params_lens.clone(),
                     params.clone(),
