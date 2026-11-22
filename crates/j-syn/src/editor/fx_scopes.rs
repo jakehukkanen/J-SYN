@@ -79,11 +79,15 @@ pub(crate) fn slot_scope_snapshot(
         mb_tab: mod_ui.fx_mb_tab(bus_idx, slot_idx),
         mb_bands: std::array::from_fn(|b| {
             let mb = &slot.mb_bands[b];
+            let base = 4 + b * 4;
+            let drv_off = tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, base));
+            let lvl_off =
+                tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, base + 2));
             MbBandScopeSnapshot {
                 enabled: mb.enabled.value(),
                 solo: mb.solo.value(),
-                drive: mb.drive.value().clamp(0.0, 1.0),
-                level: mb.level.value(),
+                drive: (mb.drive.value() + drv_off).clamp(0.0, 1.0),
+                level: (mb.level.value() + lvl_off).clamp(0.0, 1.0),
             }
         }),
         pre,

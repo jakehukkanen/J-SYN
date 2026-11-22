@@ -438,7 +438,6 @@ pub fn build_utility_fx_unit_body<L, Params, U, FScope>(
             })
             .col_between(Pixels(tokens::SPACE_SM))
             .position_type(PositionType::SelfDirected)
-            .z_index(10)
             .width(Stretch(1.0))
             .height(Pixels(tokens::FX_UNIT_OVERLAY_PILL_H))
             .top(Pixels(tokens::SPACE_SM))

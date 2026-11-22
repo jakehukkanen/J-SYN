@@ -700,6 +700,7 @@ impl StereoFxStage {
         in_r: f32,
         p: [f32; 4],
         eq: [f32; 4],
+        eff_bands: &[MbDistBandParams; 3],
         tempo_bpm: f32,
         engine_mode: EngineMode,
     ) -> (f32, f32, f32) {
@@ -739,7 +740,7 @@ impl StereoFxStage {
             FxType::MultibandDist => self.mb_dist.process(
                 in_l,
                 in_r,
-                &slot.mb_bands,
+                eff_bands,
                 p,
             ),
             FxType::Flanger => self.flanger.process(in_l, in_r, p, eq),
@@ -839,6 +840,48 @@ impl FxBusState {
                     eff_eq[p] = (slot.eq_params[p] + eq_mod).clamp(0.0, 1.0);
                 }
 
+                let eff_bands = if slot.fx_type == FxType::MultibandDist {
+                    let mut bands = slot.mb_bands;
+                    for (b, band) in bands.iter_mut().enumerate() {
+                        let base = 4 + b * 4;
+                        band.drive = (band.drive
+                            + mod_offsets[ModDestination::fx_bus_slot_param(
+                                self.bus_idx,
+                                slot_idx,
+                                base,
+                            )
+                            .index()])
+                        .clamp(0.0, 1.0);
+                        band.bias = (band.bias
+                            + mod_offsets[ModDestination::fx_bus_slot_param(
+                                self.bus_idx,
+                                slot_idx,
+                                base + 1,
+                            )
+                            .index()])
+                        .clamp(0.0, 1.0);
+                        band.level = (band.level
+                            + mod_offsets[ModDestination::fx_bus_slot_param(
+                                self.bus_idx,
+                                slot_idx,
+                                base + 2,
+                            )
+                            .index()])
+                        .clamp(0.0, 1.0);
+                        band.mix = (band.mix
+                            + mod_offsets[ModDestination::fx_bus_slot_param(
+                                self.bus_idx,
+                                slot_idx,
+                                base + 3,
+                            )
+                            .index()])
+                        .clamp(0.0, 1.0);
+                    }
+                    bands
+                } else {
+                    slot.mb_bands
+                };
+
                 let stack_count = (slot.stack as usize).clamp(1, MAX_FX_STACK);
                 for stage_idx in 0..stack_count {
                     let (nl, nr, act) = self.stages[slot_idx][stage_idx].process_type(
@@ -847,6 +890,7 @@ impl FxBusState {
                         r,
                         eff,
                         eff_eq,
+                        &eff_bands,
                         tempo_bpm,
                         engine_mode,
                     );

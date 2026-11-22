@@ -752,7 +752,6 @@ fn build_fx_scope_zstack(
                 })
                 .col_between(Pixels(4.0))
                 .position_type(PositionType::SelfDirected)
-                .z_index(10)
                 .width(Stretch(1.0))
                 .height(Pixels(17.0))
                 .top(Pixels(4.0))
@@ -1145,12 +1144,8 @@ fn build_fx_unit_card(
                             &p.fx_bus_slots(self.bus_idx)[self.slot_idx].utility_inv_r
                         }
                     }
-                    let mod_dests = [
-                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 0),
-                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 1),
-                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 2),
-                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 3),
-                    ];
+                    let mod_dests: [ModDestination; 4] =
+                        std::array::from_fn(|k| ModDestination::fx_bus_slot_param(bus_idx, slot_idx, k));
                     let p_scope = p_unit.clone();
                     let m_scope = m_unit.clone();
                     build_utility_fx_unit_body(
@@ -1250,12 +1245,8 @@ fn build_fx_unit_card(
                             self.mod_ui.set_fx_mb_tab(self.bus_idx, self.slot_idx, tab);
                         }
                     }
-                    let mod_dests = [
-                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 0),
-                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 1),
-                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 2),
-                        ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 3),
-                    ];
+                    let mod_dests: [ModDestination; 16] =
+                        std::array::from_fn(|k| ModDestination::fx_bus_slot_param(bus_idx, slot_idx, k));
                     let p_scope = p_unit.clone();
                     let m_scope = m_unit.clone();
                     let tab_host = Arc::new(JSynMbTabHost {

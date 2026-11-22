@@ -173,7 +173,7 @@ fn build_mb_knob_cell<L, R, Params, U>(
     params: Arc<Params>,
     unit_params: U,
     tab_host: Arc<dyn MultibandTabHost>,
-    mod_target: Option<(ModDestination, Arc<dyn ModUiHost>, u8)>,
+    mod_targets: Option<([ModDestination; 16], Arc<dyn ModUiHost>, u8)>,
     global_defs: [f32; 4],
     accent: (u8, u8, u8),
     knob_sz: f32,
@@ -200,7 +200,10 @@ fn build_mb_knob_cell<L, R, Params, U>(
             };
             let lens_cell = params_lens.clone();
             let p_cell = params.clone();
-            let mod_cell = mod_target.clone();
+            let mod_cell = mod_targets.as_ref().map(|(dests, host, tag)| {
+                let dest_idx = (mb_tab as usize).min(3) * 4 + p_idx;
+                (dests[dest_idx], host.clone(), *tag)
+            });
 
             VStack::new(cx, move |cx| {
                 bold_label(cx, title, "knob-title")
@@ -209,7 +212,7 @@ fn build_mb_knob_cell<L, R, Params, U>(
                     .child_space(Stretch(1.0));
 
                 let knob = if let Some(band) = mb_band {
-                    RotaryKnob::new_with_formatter(
+                    RotaryKnob::new_with_opt_mod_formatter(
                         cx,
                         lens_cell,
                         move |p: &Arc<Params>| match p_idx {
@@ -220,7 +223,8 @@ fn build_mb_knob_cell<L, R, Params, U>(
                         },
                         p_idx == 1,
                         accent,
-                        formatter,
+                        mod_cell,
+                        Some(formatter),
                     )
                 } else {
                     RotaryKnob::new_with_opt_mod_formatter(
@@ -272,7 +276,7 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
     gui_context: Arc<dyn GuiContext>,
     unit_params: U,
     tab_host: Arc<dyn MultibandTabHost>,
-    mod_targets: Option<([ModDestination; 4], Arc<dyn ModUiHost>, u8)>,
+    mod_targets: Option<([ModDestination; 16], Arc<dyn ModUiHost>, u8)>,
     scope_provider: FScope,
     knob_sz: f32,
 ) where
@@ -321,7 +325,6 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                 }),
             )
             .position_type(PositionType::SelfDirected)
-            .z_index(5)
             .top(Pixels(tokens::FX_UNIT_OVERLAY_PILL_H + tokens::SPACE_SM + 1.0))
             .left(Pixels(0.0))
             .right(Pixels(0.0))
@@ -412,7 +415,6 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                 }
             })
             .position_type(PositionType::SelfDirected)
-            .z_index(10)
             .width(Stretch(1.0))
             .height(Pixels(tokens::FX_UNIT_OVERLAY_PILL_H))
             .top(Pixels(tokens::SPACE_SM))
@@ -523,9 +525,6 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                 HStack::new(cx, move |cx| {
                     for col in 0..2 {
                         let p_idx = row * 2 + col;
-                        let mod_t = mod_r
-                            .as_ref()
-                            .map(|(dests, host, tag)| (dests[p_idx], host.clone(), *tag));
                         build_mb_knob_cell(
                             cx,
                             p_idx,
@@ -534,7 +533,7 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                             p_r.clone(),
                             unit_params,
                             tab_r.clone(),
-                            mod_t,
+                            mod_r.clone(),
                             global_defs,
                             accent,
                             knob_sz,
