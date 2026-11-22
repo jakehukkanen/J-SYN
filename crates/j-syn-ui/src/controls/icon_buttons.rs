@@ -258,6 +258,88 @@ impl View for CrossButton {
     }
 }
 
+/// Self-contained minimize (`−`) / maximize (`□`) toggle button drawing both its rounded box and
+/// centered window-control glyph from `cx.bounds()` in one pass.
+pub struct CollapseButton {
+    action: Option<Box<dyn Fn(&mut EventContext)>>,
+    collapsed_fn: Box<dyn Fn(&mut DrawContext) -> bool>,
+}
+
+impl CollapseButton {
+    pub fn reactive<'a, A, L, F>(
+        cx: &'a mut Context,
+        action: A,
+        lens: L,
+        collapsed_fn: F,
+    ) -> Handle<'a, Self>
+    where
+        A: 'static + Fn(&mut EventContext),
+        L: Lens,
+        <L as Lens>::Target: Data,
+        F: 'static + Fn(&mut DrawContext) -> bool,
+    {
+        Self {
+            action: Some(Box::new(action)),
+            collapsed_fn: Box::new(collapsed_fn),
+        }
+        .build(cx, |_| {})
+        .role(Role::Button)
+        .default_action_verb(DefaultActionVerb::Click)
+        .cursor(CursorIcon::Hand)
+        .navigable(true)
+        .bind(lens, |mut handle, _| handle.needs_redraw())
+    }
+}
+
+impl View for CollapseButton {
+    fn element(&self) -> Option<&'static str> {
+        Some("collapse-button")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        handle_icon_button_event(&self.action, cx, event);
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let b = cx.bounds();
+        if b.w <= 1.0 || b.h <= 1.0 {
+            return;
+        }
+        paint_button_box(cx, canvas);
+
+        let dpx = cx.scale_factor();
+        let cx_pt = (b.x + b.w * 0.5).round();
+        let cy_pt = (b.y + b.h * 0.5).round();
+        let color = resolve_glyph_color(cx);
+
+        if (self.collapsed_fn)(cx) {
+            // Minimized -> hollow box (□) to maximize.
+            let half = (b.w.min(b.h) * 0.20).round().max(2.5 * dpx);
+            let mut rect = vg::Path::new();
+            rect.rect(
+                cx_pt - half + 0.5,
+                cy_pt - half + 0.5,
+                half * 2.0 - 1.0,
+                half * 2.0 - 1.0,
+            );
+            let mut paint = vg::Paint::color(color);
+            paint.set_line_width((1.35 * dpx).max(1.2));
+            paint.set_line_join(vg::LineJoin::Miter);
+            canvas.stroke_path(&rect, &paint);
+        } else {
+            // Expanded -> horizontal minus bar (−) to minimize.
+            let half = (b.w.min(b.h) * 0.22).round().max(3.0 * dpx);
+            let mut line = vg::Path::new();
+            line.move_to(cx_pt - half, cy_pt + 0.5);
+            line.line_to(cx_pt + half, cy_pt + 0.5);
+            let mut paint = vg::Paint::color(color);
+            paint.set_line_width((1.5 * dpx).max(1.3));
+            paint.set_line_cap(vg::LineCap::Round);
+            canvas.stroke_path(&line, &paint);
+        }
+    }
+}
+
 /// Compact triangle caret view for dropdown triggers and folder disclosure rows.
 pub struct VectorArrow {
     dir: ArrowDir,

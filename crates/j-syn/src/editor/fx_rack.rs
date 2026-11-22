@@ -21,7 +21,7 @@ use nih_plug_vizia::widgets::util::ModifiersExt;
 
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_flex_knob_cell_mod, build_inline_pill_cell,
-    ArrowButton, ArrowDir, ScrollDropdown,
+    ArrowButton, ArrowDir, CollapseButton, ScrollDropdown,
 };
 use super::fx_scopes::slot_scope_snapshot;
 use super::mod_bar::ModUiState;
@@ -396,6 +396,114 @@ fn toggle_slot_collapse_if_active(
     }
 }
 
+/// Scoped row container that intercepts `Cmd/Ctrl + Left-Click` only within its own bounds to
+/// toggle FX card minimize/maximize without leaking globally across the window.
+struct FxHeaderCmdClickZone {
+    bus_idx: usize,
+    slot_idx: usize,
+    params: Arc<JSynPluginParams>,
+    mod_ui: Arc<ModUiState>,
+    direct_only: bool,
+}
+
+impl FxHeaderCmdClickZone {
+    fn new<'a, F>(
+        cx: &'a mut Context,
+        bus_idx: usize,
+        slot_idx: usize,
+        params: Arc<JSynPluginParams>,
+        mod_ui: Arc<ModUiState>,
+        direct_only: bool,
+        content: F,
+    ) -> Handle<'a, Self>
+    where
+        F: FnOnce(&mut Context),
+    {
+        Self {
+            bus_idx,
+            slot_idx,
+            params,
+            mod_ui,
+            direct_only,
+        }
+        .build(cx, content)
+        .layout_type(LayoutType::Row)
+    }
+}
+
+impl View for FxHeaderCmdClickZone {
+    fn element(&self) -> Option<&'static str> {
+        Some("fx-header-cmd-click-zone")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| {
+            let cmd_or_ctrl =
+                cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL);
+            if !cmd_or_ctrl {
+                return;
+            }
+            if self.direct_only && meta.target != cx.current() {
+                return;
+            }
+            let b = cx.bounds();
+            let mx = cx.mouse().cursorx;
+            let my = cx.mouse().cursory;
+            if mx < b.x || mx > b.x + b.w || my < b.y || my > b.y + b.h {
+                return;
+            }
+            match window_event {
+                WindowEvent::MouseDown(MouseButton::Left)
+                | WindowEvent::MouseDoubleClick(MouseButton::Left) => {
+                    toggle_slot_collapse_if_active(
+                        cx,
+                        &self.params,
+                        &self.mod_ui,
+                        self.bus_idx,
+                        self.slot_idx,
+                    );
+                    meta.consume();
+                }
+                WindowEvent::Press { .. } | WindowEvent::PressDown { .. }
+                    if !self.direct_only =>
+                {
+                    meta.consume();
+                }
+                _ => {}
+            }
+        });
+    }
+}
+
+/// Scoped column container inside each FX lane `ScrollView` that observes unconsumed `MouseScroll`
+/// events bubbling up to `ScrollView` and arms the `250 ms` / `≥ 2 px` pointer scroll-wheel guard.
+struct FxLaneScrollGuard;
+
+impl FxLaneScrollGuard {
+    fn new<'a, F>(cx: &'a mut Context, content: F) -> Handle<'a, Self>
+    where
+        F: FnOnce(&mut Context),
+    {
+        Self.build(cx, content).layout_type(LayoutType::Column)
+    }
+}
+
+impl View for FxLaneScrollGuard {
+    fn element(&self) -> Option<&'static str> {
+        Some("fx-lane-scroll-guard")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, _meta| {
+            if let WindowEvent::MouseScroll(_, sy) = window_event {
+                if *sy != 0.0 {
+                    notify_scroll_lane_wheeled(cx.mouse().cursorx, cx.mouse().cursory);
+                }
+            }
+        });
+    }
+}
+
 fn build_fx_type_dropdown(
     cx: &mut Context,
     bus_idx: usize,
@@ -447,32 +555,17 @@ fn build_fx_type_dropdown(
                     );
                     let p_cmd = p_trig.clone();
                     let m_cmd = m_trig.clone();
-                    HStack::new(cx, move |cx| {
-                        cx.add_listener(move |_view: &mut HStack, cx, event| {
-                            event.map(|window_event, meta| {
-                                let cmd_or_ctrl = cx.modifiers().command()
-                                    || cx.modifiers().contains(Modifiers::CTRL);
-                                if !cmd_or_ctrl {
-                                    return;
-                                }
-                                match window_event {
-                                    WindowEvent::MouseDown(MouseButton::Left)
-                                    | WindowEvent::MouseDoubleClick(MouseButton::Left) => {
-                                        toggle_slot_collapse_if_active(
-                                            cx, &p_cmd, &m_cmd, bus_idx, slot_idx,
-                                        );
-                                        meta.consume();
-                                    }
-                                    WindowEvent::Press { .. }
-                                    | WindowEvent::PressDown { .. } => {
-                                        meta.consume();
-                                    }
-                                    _ => {}
-                                }
-                            });
-                        });
-                        build_dropdown_trigger_labels(cx, text_lens);
-                    })
+                    FxHeaderCmdClickZone::new(
+                        cx,
+                        bus_idx,
+                        slot_idx,
+                        p_cmd,
+                        m_cmd,
+                        false,
+                        move |cx| {
+                            build_dropdown_trigger_labels(cx, text_lens);
+                        },
+                    )
                     .width(Stretch(1.0))
                     .height(Stretch(1.0))
                     .child_top(Pixels(0.0))
@@ -516,26 +609,14 @@ fn build_fx_slot_header(
     ZStack::new(cx, move |cx| {
         let p_hdr_cmd = params.clone();
         let m_hdr_cmd = mod_ui.clone();
-        HStack::new(cx, move |cx| {
-            cx.add_listener(move |_view: &mut HStack, cx, event| {
-                event.map(|window_event, meta| {
-                    if matches!(
-                        window_event,
-                        WindowEvent::MouseDown(MouseButton::Left)
-                            | WindowEvent::MouseDoubleClick(MouseButton::Left)
-                    ) && (cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL))
-                    {
-                        toggle_slot_collapse_if_active(
-                            cx,
-                            &p_hdr_cmd,
-                            &m_hdr_cmd,
-                            bus_idx,
-                            slot_idx,
-                        );
-                        meta.consume();
-                    }
-                });
-            });
+        FxHeaderCmdClickZone::new(
+            cx,
+            bus_idx,
+            slot_idx,
+            p_hdr_cmd,
+            m_hdr_cmd,
+            true,
+            move |cx| {
 
             let p_led_cmd = params.clone();
             let m_led_cmd = mod_ui.clone();
@@ -629,9 +710,9 @@ fn build_fx_slot_header(
 
             let p_col_press = params.clone();
             let m_col_press = mod_ui.clone();
-            let p_col_dir = params.clone();
-            let m_col_dir = mod_ui;
-            ArrowButton::reactive(
+            let p_col_state = params.clone();
+            let m_col_state = mod_ui;
+            CollapseButton::reactive(
                 cx,
                 move |cx| {
                     toggle_slot_collapse_if_active(
@@ -644,13 +725,9 @@ fn build_fx_slot_header(
                 },
                 UiData::mod_ui_rev,
                 move |_| {
-                    let is_off = p_col_dir.fx_bus_slots(bus_idx)[slot_idx].fx_type.value()
+                    let is_off = p_col_state.fx_bus_slots(bus_idx)[slot_idx].fx_type.value()
                         == FxTypeParam::Off;
-                    if is_off || m_col_dir.fx_collapsed(bus_idx, slot_idx) {
-                        ArrowDir::Right
-                    } else {
-                        ArrowDir::Down
-                    }
+                    is_off || m_col_state.fx_collapsed(bus_idx, slot_idx)
                 },
             )
             .class("fx-move-btn")
@@ -1442,19 +1519,7 @@ pub(crate) fn build_three_lane_fx_rack(
                 );
 
                 ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
-                    VStack::new(cx, move |cx| {
-                        cx.add_listener(|_view: &mut VStack, cx, event| {
-                            event.map(|window_event, _meta| {
-                                if let WindowEvent::MouseScroll(_, sy) = window_event {
-                                    if *sy != 0.0 {
-                                        notify_scroll_lane_wheeled(
-                                            cx.mouse().cursorx,
-                                            cx.mouse().cursory,
-                                        );
-                                    }
-                                }
-                            });
-                        });
+                    FxLaneScrollGuard::new(cx, move |cx| {
                         for slot_idx in 0..8 {
                             build_fx_unit_card(
                                 cx,
