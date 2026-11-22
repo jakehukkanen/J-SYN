@@ -2,6 +2,7 @@
 
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
+use nih_plug_vizia::widgets::util::ModifiersExt;
 
 use crate::theme;
 
@@ -142,7 +143,25 @@ fn handle_icon_button_event(
 /// from the exact same `cx.bounds()` rect in one pass.
 pub struct ArrowButton {
     action: Option<Box<dyn Fn(&mut EventContext)>>,
+    cmd_action: Option<Box<dyn Fn(&mut EventContext)>>,
+    suppress_next_press: bool,
     dir_fn: Box<dyn Fn(&mut DrawContext) -> ArrowDir>,
+}
+
+pub trait ArrowButtonExt {
+    /// Intercepts `Cmd/Ctrl + Left-Click` to run `cb` instead of the button's normal press action.
+    fn on_cmd_click<F>(self, cb: F) -> Self
+    where
+        F: 'static + Fn(&mut EventContext);
+}
+
+impl ArrowButtonExt for Handle<'_, ArrowButton> {
+    fn on_cmd_click<F>(self, cb: F) -> Self
+    where
+        F: 'static + Fn(&mut EventContext),
+    {
+        self.modify(move |btn| btn.cmd_action = Some(Box::new(cb)))
+    }
 }
 
 impl ArrowButton {
@@ -152,6 +171,8 @@ impl ArrowButton {
     {
         Self {
             action: Some(Box::new(action)),
+            cmd_action: None,
+            suppress_next_press: false,
             dir_fn: Box::new(move |_| dir),
         }
         .build(cx, |_| {})
@@ -175,6 +196,8 @@ impl ArrowButton {
     {
         Self {
             action: Some(Box::new(action)),
+            cmd_action: None,
+            suppress_next_press: false,
             dir_fn: Box::new(dir_fn),
         }
         .build(cx, |_| {})
@@ -192,6 +215,40 @@ impl View for ArrowButton {
     }
 
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        if self.cmd_action.is_some() {
+            let mut handled = false;
+            event.map(|window_event, meta| {
+                let cmd_or_ctrl =
+                    cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL);
+                match window_event {
+                    WindowEvent::MouseDown(MouseButton::Left)
+                    | WindowEvent::MouseDoubleClick(MouseButton::Left) => {
+                        if cmd_or_ctrl {
+                            self.suppress_next_press = true;
+                            if let Some(ref cb) = self.cmd_action {
+                                cb(cx);
+                            }
+                            meta.consume();
+                            handled = true;
+                        } else {
+                            self.suppress_next_press = false;
+                        }
+                    }
+                    WindowEvent::PressDown { .. }
+                    | WindowEvent::Press { .. }
+                    | WindowEvent::MouseUp(MouseButton::Left)
+                        if cmd_or_ctrl || self.suppress_next_press =>
+                    {
+                        meta.consume();
+                        handled = true;
+                    }
+                    _ => {}
+                }
+            });
+            if handled {
+                return;
+            }
+        }
         handle_icon_button_event(&self.action, cx, event);
     }
 

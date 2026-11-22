@@ -21,7 +21,7 @@ use nih_plug_vizia::widgets::util::ModifiersExt;
 
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_flex_knob_cell_mod, build_inline_pill_cell,
-    ArrowButton, ArrowDir, CollapseButton, ScrollDropdown,
+    ArrowButton, ArrowButtonExt, ArrowDir, CollapseButton, PopupScrollCapture, ScrollDropdown,
 };
 use super::fx_scopes::slot_scope_snapshot;
 use super::mod_bar::ModUiState;
@@ -404,6 +404,7 @@ struct FxHeaderCmdClickZone {
     params: Arc<JSynPluginParams>,
     mod_ui: Arc<ModUiState>,
     direct_only: bool,
+    suppress_next_release: bool,
 }
 
 impl FxHeaderCmdClickZone {
@@ -425,6 +426,7 @@ impl FxHeaderCmdClickZone {
             params,
             mod_ui,
             direct_only,
+            suppress_next_release: false,
         }
         .build(cx, content)
         .layout_type(LayoutType::Row)
@@ -440,33 +442,39 @@ impl View for FxHeaderCmdClickZone {
         event.map(|window_event, meta| {
             let cmd_or_ctrl =
                 cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL);
-            if !cmd_or_ctrl {
-                return;
-            }
             if self.direct_only && meta.target != cx.current() {
                 return;
             }
             let b = cx.bounds();
             let mx = cx.mouse().cursorx;
             let my = cx.mouse().cursory;
-            if mx < b.x || mx > b.x + b.w || my < b.y || my > b.y + b.h {
-                return;
-            }
+            let in_bounds = mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h;
             match window_event {
                 WindowEvent::MouseDown(MouseButton::Left)
                 | WindowEvent::MouseDoubleClick(MouseButton::Left) => {
-                    toggle_slot_collapse_if_active(
-                        cx,
-                        &self.params,
-                        &self.mod_ui,
-                        self.bus_idx,
-                        self.slot_idx,
-                    );
-                    meta.consume();
+                    if cmd_or_ctrl && in_bounds {
+                        self.suppress_next_release = true;
+                        toggle_slot_collapse_if_active(
+                            cx,
+                            &self.params,
+                            &self.mod_ui,
+                            self.bus_idx,
+                            self.slot_idx,
+                        );
+                        if !self.direct_only {
+                            cx.emit(PopupEvent::Close);
+                        }
+                        meta.consume();
+                    } else {
+                        self.suppress_next_release = false;
+                    }
                 }
-                WindowEvent::Press { .. } | WindowEvent::PressDown { .. }
-                    if !self.direct_only =>
+                WindowEvent::MouseUp(MouseButton::Left)
+                | WindowEvent::Press { .. }
+                | WindowEvent::PressDown { .. }
+                    if !self.direct_only && (cmd_or_ctrl || self.suppress_next_release) =>
                 {
+                    cx.emit(PopupEvent::Close);
                     meta.consume();
                 }
                 _ => {}
@@ -573,22 +581,24 @@ fn build_fx_type_dropdown(
                     .overflow(Overflow::Hidden)
                 },
                 move |cx| {
-                    for &(label, val) in FX_TYPE_ITEMS {
-                        let p_ref = params.clone();
-                        let gui_ctx = gui_context.clone();
-                        let m_ref = mod_ui.clone();
-                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                            set_fx_slot_type_with_defaults(
-                                &p_ref,
-                                &gui_ctx,
-                                &m_ref,
-                                bus_idx,
-                                slot_idx,
-                                val,
-                            );
-                            cx.emit(PopupEvent::Close);
-                        });
-                    }
+                    PopupScrollCapture::new(cx, |cx| {
+                        for &(label, val) in FX_TYPE_ITEMS {
+                            let p_ref = params.clone();
+                            let gui_ctx = gui_context.clone();
+                            let m_ref = mod_ui.clone();
+                            bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                                set_fx_slot_type_with_defaults(
+                                    &p_ref,
+                                    &gui_ctx,
+                                    &m_ref,
+                                    bus_idx,
+                                    slot_idx,
+                                    val,
+                                );
+                                cx.emit(PopupEvent::Close);
+                            });
+                        }
+                    });
                 },
             )
         },
@@ -662,6 +672,8 @@ fn build_fx_slot_header(
             let p_up = params.clone();
             let g_up = gui_context.clone();
             let m_up = mod_ui.clone();
+            let p_up_cmd = params.clone();
+            let m_up_cmd = mod_ui.clone();
             ArrowButton::new(
                 cx,
                 move |cx| {
@@ -672,6 +684,9 @@ fn build_fx_slot_header(
                 },
                 ArrowDir::Up,
             )
+            .on_cmd_click(move |cx| {
+                toggle_slot_collapse_if_active(cx, &p_up_cmd, &m_up_cmd, bus_idx, slot_idx);
+            })
             .class("fx-move-btn")
             .class("fx-move-label")
             .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 0))
@@ -683,6 +698,8 @@ fn build_fx_slot_header(
             let p_dn = params.clone();
             let g_dn = gui_context;
             let m_dn = mod_ui.clone();
+            let p_dn_cmd = params.clone();
+            let m_dn_cmd = mod_ui.clone();
             ArrowButton::new(
                 cx,
                 move |cx| {
@@ -700,6 +717,9 @@ fn build_fx_slot_header(
                 },
                 ArrowDir::Down,
             )
+            .on_cmd_click(move |cx| {
+                toggle_slot_collapse_if_active(cx, &p_dn_cmd, &m_dn_cmd, bus_idx, slot_idx);
+            })
             .class("fx-move-btn")
             .class("fx-move-label")
             .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 7))

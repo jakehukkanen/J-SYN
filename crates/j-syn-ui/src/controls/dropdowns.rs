@@ -166,6 +166,41 @@ impl View for ScrollDropdown {
     }
 }
 
+/// Wraps dropdown popup list contents so `WindowEvent::MouseScroll` is handled by any inner
+/// `ScrollView` first and then consumed before bubbling out to an enclosing FX lane `ScrollView`.
+pub struct PopupScrollCapture;
+
+impl PopupScrollCapture {
+    pub fn new<'a, F>(cx: &'a mut Context, content: F) -> Handle<'a, Self>
+    where
+        F: FnOnce(&mut Context),
+    {
+        Self.build(cx, content)
+            .layout_type(LayoutType::Column)
+            .width(Stretch(1.0))
+            .height(Auto)
+    }
+}
+
+impl View for PopupScrollCapture {
+    fn element(&self) -> Option<&'static str> {
+        Some("popup-scroll-capture")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| {
+            if let WindowEvent::MouseScroll(_, _) = window_event {
+                let b = cx.bounds();
+                let mx = cx.mouse().cursorx;
+                let my = cx.mouse().cursory;
+                if mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h {
+                    meta.consume();
+                }
+            }
+        });
+    }
+}
+
 type EnumLabelOverride<Params> =
     Arc<dyn Fn(&Arc<Params>) -> Option<&'static str> + Send + Sync>;
 
@@ -261,43 +296,47 @@ where
                     .overflow(Overflow::Hidden)
                 },
                 move |cx| {
-                    if items.len() > 7 {
-                        let p_scroll = params.clone();
-                        let g_scroll = gui_context.clone();
-                        ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
-                            VStack::new(cx, move |cx| {
-                                for &(label, val) in items {
-                                    let p_ref = p_scroll.clone();
-                                    let gui_ctx = g_scroll.clone();
-                                    bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                                        let setter = ParamSetter::new(gui_ctx.as_ref());
-                                        let param = params_to_param(&p_ref);
-                                        setter.begin_set_parameter(param);
-                                        setter.set_parameter(param, val);
-                                        setter.end_set_parameter(param);
-                                        cx.emit(UiKitEvent::ModUiChanged);
-                                        cx.emit(PopupEvent::Close);
-                                    });
-                                }
+                    PopupScrollCapture::new(cx, |cx| {
+                        if items.len() > 7 {
+                            let p_scroll = params.clone();
+                            let g_scroll = gui_context.clone();
+                            ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+                                VStack::new(cx, move |cx| {
+                                    for &(label, val) in items {
+                                        let p_ref = p_scroll.clone();
+                                        let gui_ctx = g_scroll.clone();
+                                        bold_label(cx, label, "dropdown-item").on_press(
+                                            move |cx| {
+                                                let setter = ParamSetter::new(gui_ctx.as_ref());
+                                                let param = params_to_param(&p_ref);
+                                                setter.begin_set_parameter(param);
+                                                setter.set_parameter(param, val);
+                                                setter.end_set_parameter(param);
+                                                cx.emit(UiKitEvent::ModUiChanged);
+                                                cx.emit(PopupEvent::Close);
+                                            },
+                                        );
+                                    }
+                                })
+                                .class("dropdown-scroll-content");
                             })
-                            .class("dropdown-scroll-content");
-                        })
-                        .class("dropdown-scroll-compact");
-                    } else {
-                        for &(label, val) in items {
-                            let p_ref = params.clone();
-                            let gui_ctx = gui_context.clone();
-                            bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                                let setter = ParamSetter::new(gui_ctx.as_ref());
-                                let param = params_to_param(&p_ref);
-                                setter.begin_set_parameter(param);
-                                setter.set_parameter(param, val);
-                                setter.end_set_parameter(param);
-                                cx.emit(UiKitEvent::ModUiChanged);
-                                cx.emit(PopupEvent::Close);
-                            });
+                            .class("dropdown-scroll-compact");
+                        } else {
+                            for &(label, val) in items {
+                                let p_ref = params.clone();
+                                let gui_ctx = gui_context.clone();
+                                bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                                    let setter = ParamSetter::new(gui_ctx.as_ref());
+                                    let param = params_to_param(&p_ref);
+                                    setter.begin_set_parameter(param);
+                                    setter.set_parameter(param, val);
+                                    setter.end_set_parameter(param);
+                                    cx.emit(UiKitEvent::ModUiChanged);
+                                    cx.emit(PopupEvent::Close);
+                                });
+                            }
                         }
-                    }
+                    });
                 },
             );
             if let Some(ov) = ov_dd_disabled {

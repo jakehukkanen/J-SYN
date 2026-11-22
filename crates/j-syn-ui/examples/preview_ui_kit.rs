@@ -201,8 +201,8 @@ fn main() -> Result<(), String> {
                             cx,
                             DemoData::params,
                             |p| &p.enabled,
-                            "OFF",
-                            "ON",
+                            "",
+                            "",
                             (108, 214, 255),
                         )
                         .width(Pixels(tokens::FX_UNIT_LED_W))

@@ -418,8 +418,8 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                             cx,
                             lens_row.clone(),
                             move |p: &Arc<Params>| unit_params.band_enabled(p, band),
-                            "OFF",
-                            "ON",
+                            "",
+                            "",
                             accent,
                         )
                         .width(Pixels(tokens::FX_UNIT_LED_W))
