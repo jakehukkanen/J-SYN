@@ -8,7 +8,8 @@ use j_syn_dsp::fx::multiband_dist::MultiBandDistStereo;
 use j_syn_dsp::mod_matrix::FxScopeRing;
 use j_syn_dsp::{
     mb_band_level_db, mb_out_gain_db, mb_xover_high_hz, mb_xover_low_hz, MbDistBandParams,
-    MB_BAND_LEVEL_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
+    MAX_FX_STACK, MB_BAND_LEVEL_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM,
+    MB_XOVER_LOW_DEFAULT_NORM,
 };
 use j_syn_ui::fx_units::{format_hz, DistortionModeParam};
 use nih_plug::prelude::*;
@@ -99,6 +100,9 @@ pub struct JMbDistParams {
     #[id = "en"]
     pub enabled: BoolParam,
 
+    #[id = "stk"]
+    pub stack: IntParam,
+
     #[id = "lo_xov"]
     pub low_xover: FloatParam,
 
@@ -137,6 +141,7 @@ impl Default for JMbDistParams {
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
+            stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: MAX_FX_STACK as i32 }),
             low_xover: FloatParam::new(
                 "Low Crossover",
                 MB_XOVER_LOW_DEFAULT_NORM,
@@ -164,7 +169,7 @@ impl Default for JMbDistParams {
 
 pub struct JMbDistPlugin {
     pub params: Arc<JMbDistParams>,
-    dsp: MultiBandDistStereo,
+    dsp: Box<[MultiBandDistStereo; MAX_FX_STACK]>,
     pub scope_ring: Arc<FxScopeRing>,
     scope_decim: u32,
 }
@@ -173,7 +178,7 @@ impl Default for JMbDistPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(JMbDistParams::default()),
-            dsp: MultiBandDistStereo::new(44_100.0),
+            dsp: Box::new(std::array::from_fn(|_| MultiBandDistStereo::new(44_100.0))),
             scope_ring: Arc::new(FxScopeRing::default()),
             scope_decim: 0,
         }
@@ -217,14 +222,18 @@ impl Plugin for JMbDistPlugin {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        self.dsp.set_sample_rate(buffer_config.sample_rate);
-        self.dsp.reset();
+        for stage in self.dsp.iter_mut() {
+            stage.set_sample_rate(buffer_config.sample_rate);
+            stage.reset();
+        }
         self.scope_decim = 0;
         true
     }
 
     fn reset(&mut self) {
-        self.dsp.reset();
+        for stage in self.dsp.iter_mut() {
+            stage.reset();
+        }
         self.scope_decim = 0;
     }
 
@@ -240,6 +249,7 @@ impl Plugin for JMbDistPlugin {
         }
 
         let enabled = self.params.enabled.value();
+        let stack_count = (self.params.stack.value() as usize).clamp(1, MAX_FX_STACK);
         let p = [
             self.params.low_xover.value(),
             self.params.high_xover.value(),
@@ -259,7 +269,16 @@ impl Plugin for JMbDistPlugin {
             };
             let (in_l, in_r) = (*s_l, *s_r);
             let (out_l, out_r, act) = if enabled {
-                self.dsp.process(in_l, in_r, &bands, p)
+                let mut cur_l = in_l;
+                let mut cur_r = in_r;
+                let mut max_act = 0.0_f32;
+                for stage in self.dsp.iter_mut().take(stack_count) {
+                    let (nl, nr, s_act) = stage.process(cur_l, cur_r, &bands, p);
+                    cur_l = nl;
+                    cur_r = nr;
+                    max_act = max_act.max(s_act);
+                }
+                (cur_l, cur_r, max_act)
             } else {
                 (in_l, in_r, 0.0)
             };
@@ -316,8 +335,8 @@ mod tests {
                 "Duplicate nih-plug parameter ID detected: '{id}'"
             );
         }
-        // 5 top-level + 3 * 7 per-band = 26 parameters
-        assert_eq!(seen.len(), 26);
+        // 6 top-level + 3 * 7 per-band = 27 parameters
+        assert_eq!(seen.len(), 27);
     }
 
     #[test]
@@ -342,7 +361,7 @@ mod tests {
 
         // Idle silence stays exact zero with zero allocations
         for _ in 0..512 {
-            let (l, r, act) = plugin.dsp.process(0.0, 0.0, &bands, p);
+            let (l, r, act) = plugin.dsp[0].process(0.0, 0.0, &bands, p);
             assert_eq!(l, 0.0);
             assert_eq!(r, 0.0);
             assert_eq!(act, 0.0);

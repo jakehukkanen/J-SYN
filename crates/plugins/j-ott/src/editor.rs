@@ -20,7 +20,6 @@ use crate::JOttParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-OTT",
     card_title: "OTT",
-    card_subtitle: "3-BAND UP/DOWN",
     fx_type: FxType::Ott,
 };
 
@@ -64,6 +63,7 @@ pub fn build_ott_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        Some(|p| &p.stack),
         initial_theme,
         initial_scale_pct,
         persist_settings,
@@ -85,6 +85,7 @@ pub fn build_ott_ui(
                     FxSlotScopeSnapshot {
                         enabled: p_scope.enabled.value(),
                         fx_type: FxType::Ott,
+                        stack: p_scope.stack.value().clamp(1, 4) as u8,
                         eff_p: [
                             p_scope.depth.value(),
                             p_scope.time.value(),

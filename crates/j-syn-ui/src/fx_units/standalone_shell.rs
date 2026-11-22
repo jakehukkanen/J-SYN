@@ -8,13 +8,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use j_syn_dsp::FxType;
-use nih_plug::prelude::{BoolParam, Editor, GuiContext};
+use nih_plug::prelude::{BoolParam, Editor, GuiContext, IntParam};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
 use serde::{Deserialize, Serialize};
 
 use crate::controls::{
-    bold_label, build_dropdown_trigger_labels, build_ui_scale_picker, GearIcon, ScrollDropdown,
+    bold_label, build_dropdown_trigger_labels, build_inline_pill_cell, build_ui_scale_picker,
+    GearIcon, ScrollDropdown,
 };
 use crate::shell::{
     build_tooltip_overlay, notify_baseview_resize_macos, UiKitEvent, UiShellState,
@@ -115,7 +116,6 @@ impl<Params: Send + Sync + 'static> Model for StandaloneFxUiData<Params> {
 pub struct StandaloneFxHeaderSpec {
     pub header_title: &'static str,
     pub card_title: &'static str,
-    pub card_subtitle: &'static str,
     pub fx_type: FxType,
 }
 
@@ -230,6 +230,7 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
     spec: StandaloneFxHeaderSpec,
     params: Arc<Params>,
     pick_enabled: FEnabled,
+    pick_stack: Option<fn(&Arc<Params>) -> &IntParam>,
     initial_theme: ThemePalette,
     initial_scale_pct: u32,
     persist_settings: bool,
@@ -371,11 +372,21 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
                                     .child_top(Stretch(1.0))
                                     .child_bottom(Stretch(1.0));
 
-                                bold_label(cx, spec.card_subtitle, "mini-label")
-                                    .width(Auto)
-                                    .height(Stretch(1.0))
-                                    .child_top(Stretch(1.0))
-                                    .child_bottom(Stretch(1.0));
+                                if let Some(pick_stk) = pick_stack {
+                                    HStack::new(cx, move |cx| {
+                                        build_inline_pill_cell(
+                                            cx,
+                                            StandaloneFxUiData::<Params>::params,
+                                            pick_stk,
+                                            "STK",
+                                            4,
+                                            1.0,
+                                        )
+                                        .class("stk-pill");
+                                    })
+                                    .width(Pixels(tokens::FX_UNIT_STACK_W))
+                                    .height(Pixels(tokens::FX_UNIT_HEADER_H));
+                                }
                             })
                             .col_between(Pixels(tokens::SPACE_MD))
                             .height(Pixels(tokens::FX_UNIT_HEADER_H))

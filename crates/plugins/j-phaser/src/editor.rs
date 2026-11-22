@@ -20,7 +20,6 @@ use crate::JPhaserParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-PHASER",
     card_title: "PHASER",
-    card_subtitle: "6-STAGE AP",
     fx_type: FxType::Phaser,
 };
 
@@ -64,6 +63,7 @@ pub fn build_phaser_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        Some(|p| &p.stack),
         initial_theme,
         initial_scale_pct,
         persist_settings,
@@ -94,6 +94,7 @@ pub fn build_phaser_ui(
                         pre,
                         post,
                         activity: act,
+                        stack: p_scope.stack.value().clamp(1, 4) as u8,
                         ..FxSlotScopeSnapshot::default()
                     }
                 },

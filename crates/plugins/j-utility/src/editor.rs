@@ -20,7 +20,6 @@ use crate::JUtilityParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-UTILITY",
     card_title: "UTILITY",
-    card_subtitle: "M/S • GAIN • Ø",
     fx_type: FxType::Utility,
 };
 
@@ -75,6 +74,7 @@ pub fn build_utility_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        Some(|p| &p.stack),
         initial_theme,
         initial_scale_pct,
         persist_settings,
@@ -103,6 +103,7 @@ pub fn build_utility_ui(
                         ],
                         utility_inv_l: p_scope.inv_l.value(),
                         utility_inv_r: p_scope.inv_r.value(),
+                        stack: p_scope.stack.value().clamp(1, 4) as u8,
                         pre,
                         post,
                         activity: act,

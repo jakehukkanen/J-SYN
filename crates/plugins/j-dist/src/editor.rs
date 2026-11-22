@@ -21,7 +21,6 @@ use crate::JDistParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-DIST",
     card_title: "DISTORTION",
-    card_subtitle: "4X OS",
     fx_type: FxType::Distortion,
 };
 
@@ -68,6 +67,7 @@ pub fn build_dist_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        Some(|p| &p.stack),
         initial_theme,
         initial_scale_pct,
         persist_settings,
@@ -88,6 +88,7 @@ pub fn build_dist_ui(
                     FxSlotScopeSnapshot {
                         enabled: p_scope.enabled.value(),
                         fx_type: FxType::Distortion,
+                        stack: p_scope.stack.value().clamp(1, 4) as u8,
                         eff_p: [
                             p_scope.bias.value(),
                             p_scope.drive.value(),
