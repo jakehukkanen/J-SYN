@@ -3,12 +3,12 @@
 
 use j_syn_dsp::fx::FxType;
 
-pub const WINDOW_W: u32 = 1760;
-pub const WINDOW_H: u32 = 840;
+pub const WINDOW_W: u32 = 1568;
+pub const WINDOW_H: u32 = 882;
 pub const HEADER_H: f32 = 46.0;
 
 pub const LEFT_WING_W: f32 = 352.0;
-pub const RIGHT_WING_W: f32 = 834.0;
+pub const RIGHT_WING_W: f32 = 642.0;
 
 pub const SPACE_XS: f32 = 2.0;
 pub const SPACE_SM: f32 = 4.0;
@@ -74,10 +74,11 @@ pub const FX_LANE_ROUTE_COL_W: f32 = 76.0;
 pub const FX_LANE_KNOBS_W: f32 = 92.0;
 pub const FX_LANE_SCROLL_GUTTER: f32 = 10.0;
 pub const FX_UNIT_HEADER_H: f32 = 20.0;
-pub const FX_UNIT_LED_W: f32 = 34.0;
+pub const FX_UNIT_LED_W: f32 = 18.0;
 pub const FX_UNIT_STACK_W: f32 = 38.0;
 pub const FX_UNIT_ARROW_W: f32 = 13.0;
 pub const FX_UNIT_ARROW_H: f32 = 18.0;
+pub const FX_UNIT_COLLAPSE_W: f32 = 16.0;
 pub const FX_UNIT_SCOPE_COMPACT_H: f32 = 44.0;
 pub const FX_UNIT_SCOPE_H: f32 = 58.0;
 pub const FX_UNIT_SCOPE_TALL_H: f32 = 80.0;

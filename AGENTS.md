@@ -20,7 +20,7 @@
 - `crates/j-syn/src/lib.rs` & `crates/j-syn/src/params/`: `nih-plug` VST3/CLAP plugin wrapper (`lib.rs`) + split parameter definitions (`params/mod.rs` `PersistedArcSwap`/`JSynPluginParams`, `params/osc.rs`, `params/fx.rs`, `params/mod_params.rs`).
 - `crates/j-syn/src/presets.rs`: Local `JSynConfig` persistence, recursive folder scanning, patch JSON save/load (with legacy aliasing), and custom `.wav` wavetable loading.
 - `crates/j-syn/src/theme.css`: Base Vizia stylesheet mapped dynamically by `editor/theme.rs`.
-- `crates/j-syn/src/editor/`: Modular Vizia GUI (`1760 × 840` 3-Wing Widescreen Chassis: `Left Wing` Oscillators/Noise, `Center Wing` Dual Filters + Center Modulation Stage + Dual Inserts + `2×4` Macro/Source Dock, `Right Wing` 3-Lane Scrollable FX Rack):
+- `crates/j-syn/src/editor/`: Modular Vizia GUI (`1568 × 882` exact `16:9` 3-Wing Widescreen Chassis: `Left Wing` Oscillators/Noise, `Center Wing` Dual Filters + Center Modulation Stage + Dual Inserts + `2×4` Macro/Source Dock, `Right Wing` `642 px` 3-Lane Scrollable FX Rack with `200 px` FX Units):
   - `tokens.rs`: Single source of truth for design tokens (window/wing dimensions, knob/pill/header/scope heights, `FX_UNIT_*`, `fx_unit_scope_height`).
   - `mod.rs`: Top-level UI state (`UiData`, `MainViewMode` `Main`/`Matrix`/`Settings`, `BottomTab`, `CenterStageTab`, `UiEvent`, `ModContextMenuState`), `GearIcon`, macOS `baseview` resize notification, global tooltip & context-menu overlays, and 3-wing chassis assembly.
   - `voice_tab.rs`, `routing_tab.rs`, `macros_tab.rs`, `modseq_canvases.rs`, `modseq_tab.rs`, `matrix_tab.rs`, `settings_view.rs`, `theme.rs`, `scope.rs`, `osc_panel.rs`, `noise_panel.rs`, `filter_panel.rs`, `insert_panel.rs`, `fx_scopes.rs`, `fx_rack.rs`, `mod_bar.rs`.

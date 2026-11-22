@@ -2,6 +2,7 @@
 
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
+use nih_plug_vizia::widgets::util::ModifiersExt;
 
 use crate::theme;
 
@@ -142,7 +143,25 @@ fn handle_icon_button_event(
 /// from the exact same `cx.bounds()` rect in one pass.
 pub struct ArrowButton {
     action: Option<Box<dyn Fn(&mut EventContext)>>,
+    cmd_action: Option<Box<dyn Fn(&mut EventContext)>>,
+    suppress_next_press: bool,
     dir_fn: Box<dyn Fn(&mut DrawContext) -> ArrowDir>,
+}
+
+pub trait ArrowButtonExt {
+    /// Intercepts `Cmd/Ctrl + Left-Click` to run `cb` instead of the button's normal press action.
+    fn on_cmd_click<F>(self, cb: F) -> Self
+    where
+        F: 'static + Fn(&mut EventContext);
+}
+
+impl ArrowButtonExt for Handle<'_, ArrowButton> {
+    fn on_cmd_click<F>(self, cb: F) -> Self
+    where
+        F: 'static + Fn(&mut EventContext),
+    {
+        self.modify(move |btn| btn.cmd_action = Some(Box::new(cb)))
+    }
 }
 
 impl ArrowButton {
@@ -152,6 +171,8 @@ impl ArrowButton {
     {
         Self {
             action: Some(Box::new(action)),
+            cmd_action: None,
+            suppress_next_press: false,
             dir_fn: Box::new(move |_| dir),
         }
         .build(cx, |_| {})
@@ -175,6 +196,8 @@ impl ArrowButton {
     {
         Self {
             action: Some(Box::new(action)),
+            cmd_action: None,
+            suppress_next_press: false,
             dir_fn: Box::new(dir_fn),
         }
         .build(cx, |_| {})
@@ -192,6 +215,40 @@ impl View for ArrowButton {
     }
 
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        if self.cmd_action.is_some() {
+            let mut handled = false;
+            event.map(|window_event, meta| {
+                let cmd_or_ctrl =
+                    cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL);
+                match window_event {
+                    WindowEvent::MouseDown(MouseButton::Left)
+                    | WindowEvent::MouseDoubleClick(MouseButton::Left) => {
+                        if cmd_or_ctrl {
+                            self.suppress_next_press = true;
+                            if let Some(ref cb) = self.cmd_action {
+                                cb(cx);
+                            }
+                            meta.consume();
+                            handled = true;
+                        } else {
+                            self.suppress_next_press = false;
+                        }
+                    }
+                    WindowEvent::PressDown { .. }
+                    | WindowEvent::Press { .. }
+                    | WindowEvent::MouseUp(MouseButton::Left)
+                        if cmd_or_ctrl || self.suppress_next_press =>
+                    {
+                        meta.consume();
+                        handled = true;
+                    }
+                    _ => {}
+                }
+            });
+            if handled {
+                return;
+            }
+        }
         handle_icon_button_event(&self.action, cx, event);
     }
 
@@ -255,6 +312,88 @@ impl View for CrossButton {
         paint.set_line_width((1.5 * cx.scale_factor()).max(1.3));
         paint.set_line_cap(vg::LineCap::Round);
         canvas.stroke_path(&cross, &paint);
+    }
+}
+
+/// Self-contained minimize (`−`) / maximize (`□`) toggle button drawing both its rounded box and
+/// centered window-control glyph from `cx.bounds()` in one pass.
+pub struct CollapseButton {
+    action: Option<Box<dyn Fn(&mut EventContext)>>,
+    collapsed_fn: Box<dyn Fn(&mut DrawContext) -> bool>,
+}
+
+impl CollapseButton {
+    pub fn reactive<'a, A, L, F>(
+        cx: &'a mut Context,
+        action: A,
+        lens: L,
+        collapsed_fn: F,
+    ) -> Handle<'a, Self>
+    where
+        A: 'static + Fn(&mut EventContext),
+        L: Lens,
+        <L as Lens>::Target: Data,
+        F: 'static + Fn(&mut DrawContext) -> bool,
+    {
+        Self {
+            action: Some(Box::new(action)),
+            collapsed_fn: Box::new(collapsed_fn),
+        }
+        .build(cx, |_| {})
+        .role(Role::Button)
+        .default_action_verb(DefaultActionVerb::Click)
+        .cursor(CursorIcon::Hand)
+        .navigable(true)
+        .bind(lens, |mut handle, _| handle.needs_redraw())
+    }
+}
+
+impl View for CollapseButton {
+    fn element(&self) -> Option<&'static str> {
+        Some("collapse-button")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        handle_icon_button_event(&self.action, cx, event);
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let b = cx.bounds();
+        if b.w <= 1.0 || b.h <= 1.0 {
+            return;
+        }
+        paint_button_box(cx, canvas);
+
+        let dpx = cx.scale_factor();
+        let cx_pt = (b.x + b.w * 0.5).round();
+        let cy_pt = (b.y + b.h * 0.5).round();
+        let color = resolve_glyph_color(cx);
+
+        if (self.collapsed_fn)(cx) {
+            // Minimized -> hollow box (□) to maximize.
+            let half = (b.w.min(b.h) * 0.20).round().max(2.5 * dpx);
+            let mut rect = vg::Path::new();
+            rect.rect(
+                cx_pt - half + 0.5,
+                cy_pt - half + 0.5,
+                half * 2.0 - 1.0,
+                half * 2.0 - 1.0,
+            );
+            let mut paint = vg::Paint::color(color);
+            paint.set_line_width((1.35 * dpx).max(1.2));
+            paint.set_line_join(vg::LineJoin::Miter);
+            canvas.stroke_path(&rect, &paint);
+        } else {
+            // Expanded -> horizontal minus bar (−) to minimize.
+            let half = (b.w.min(b.h) * 0.22).round().max(3.0 * dpx);
+            let mut line = vg::Path::new();
+            line.move_to(cx_pt - half, cy_pt + 0.5);
+            line.line_to(cx_pt + half, cy_pt + 0.5);
+            let mut paint = vg::Paint::color(color);
+            paint.set_line_width((1.5 * dpx).max(1.3));
+            paint.set_line_cap(vg::LineCap::Round);
+            canvas.stroke_path(&line, &paint);
+        }
     }
 }
 

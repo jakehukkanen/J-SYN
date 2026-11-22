@@ -359,11 +359,11 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
                                     cx,
                                     StandaloneFxUiData::<Params>::params,
                                     pick_enabled,
-                                    "OFF",
-                                    "ON",
+                                    "",
+                                    "",
                                     accent,
                                 )
-                                .width(Pixels(tokens::FX_UNIT_LED_W + 4.0))
+                                .width(Pixels(tokens::FX_UNIT_LED_W))
                                 .height(Pixels(tokens::FX_UNIT_ARROW_H))
                                 .top(Stretch(1.0))
                                 .bottom(Stretch(1.0));

@@ -533,6 +533,9 @@ impl View for RotaryKnob {
                 }
             }
             WindowEvent::MouseScroll(_scroll_x, scroll_y) => {
+                if super::is_scroll_wheel_guarded(cx.mouse().cursorx, cx.mouse().cursory) {
+                    return;
+                }
                 self.scrolled_lines += scroll_y;
                 if self.scrolled_lines.abs() >= 0.5 {
                     let finer = cx.modifiers().shift();

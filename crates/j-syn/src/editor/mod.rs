@@ -2,7 +2,7 @@
 //!
 //! Maintainability and readability for both humans and AI are top priorities in this layout:
 //! - [`mod@self`] holds top-level UI state (`UiData`, `BottomTab`, `CenterStageTab`, `UiEvent`),
-//!   macOS `baseview` resize notification, and the 3-Wing `1760 × 840` layout builders
+//!   macOS `baseview` resize notification, and the 3-Wing `1568 × 882` layout builders
 //!   (`create`, `build_header_bar`, `build_left_wing`, `build_center_wing`, `build_right_wing`).
 //! - [`controls`] centralizes shared label typography, dropdowns, readouts, knob/pill cells, and
 //!   module chrome (`bold_label`, `build_dropdown_trigger_labels`, `build_param_readout_box`, etc.).
