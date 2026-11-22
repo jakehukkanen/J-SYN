@@ -100,7 +100,7 @@ impl OttBandComp {
 }
 
 /// 3-band OTT compressor (88.3 Hz & 2500 Hz LR4 phase-coherent crossover).
-pub(crate) struct OttStereo {
+pub struct OttStereo {
     low_split: [Lr4BandFilter; 2],
     high_split: [Lr4BandFilter; 2],
     low_ap: [Biquad; 2],
@@ -110,7 +110,7 @@ pub(crate) struct OttStereo {
 }
 
 impl OttStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         let mut s = Self {
             low_split: [Lr4BandFilter::default(); 2],
             high_split: [Lr4BandFilter::default(); 2],
@@ -127,7 +127,7 @@ impl OttStereo {
         s
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let sr = sample_rate.max(1_000.0) as f64;
         self.sample_rate = sr as f32;
         let ap_high = butterworth_allpass_coeffs(sr, 2500.0);
@@ -138,7 +138,7 @@ impl OttStereo {
         }
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         for ch in 0..2 {
             self.low_split[ch].reset();
             self.high_split[ch].reset();
@@ -151,7 +151,7 @@ impl OttStereo {
     }
 
     #[inline]
-    pub(crate) fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+    pub fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
         if track_idle(&mut self.idle_samples, in_l, in_r)
             && self.idle_samples > 256
             && self.bands[0].env < 1e-6
@@ -233,7 +233,7 @@ impl DistortionCore {
         s
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1_000.0);
         let os_rate = self.sample_rate as f64 * 4.0;
         let low_coeffs = BiquadCoeffs::low_shelf_linear(os_rate, 200.0, 0.7, 1.8);
@@ -315,7 +315,7 @@ impl DistortionCore {
 
 /// 4x oversampled stereo master distortion (`Tube`, `Mech`, `Sine`, `Crush`, `Classic A/B/C`,
 /// `Diode A/B`, `Linear/Sine Fold`, `Hard Clip`, `Half/Full Rect`).
-pub(crate) struct DistortionStereo {
+pub struct DistortionStereo {
     core: DistortionCore,
     tone_lp_l: f32,
     tone_lp_r: f32,
@@ -324,7 +324,7 @@ pub(crate) struct DistortionStereo {
 }
 
 impl DistortionStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         let mut s = Self {
             core: DistortionCore::new(sample_rate),
             tone_lp_l: 0.0,
@@ -336,12 +336,12 @@ impl DistortionStereo {
         s
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1_000.0);
         self.core.set_sample_rate(sample_rate);
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.core.reset();
         self.tone_lp_l = 0.0;
         self.tone_lp_r = 0.0;
@@ -349,7 +349,7 @@ impl DistortionStereo {
     }
 
     #[inline]
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,
@@ -396,14 +396,14 @@ impl DistortionStereo {
 }
 
 /// 4x oversampled J-SAT Clipper (`TanhAdaa2` soft-knee + digital hard ceiling).
-pub(crate) struct JSatClipperStereo {
+pub struct JSatClipperStereo {
     oversamplers: [Oversampler4x; 2],
     adaa: [TanhAdaa2; 2],
     idle_samples: u32,
 }
 
 impl JSatClipperStereo {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             oversamplers: [Oversampler4x::new(); 2],
             adaa: [TanhAdaa2::default(); 2],
@@ -411,7 +411,9 @@ impl JSatClipperStereo {
         }
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn set_sample_rate(&mut self, _sample_rate: f32) {}
+
+    pub fn reset(&mut self) {
         for ch in 0..2 {
             self.oversamplers[ch].reset();
             self.adaa[ch].reset();
@@ -420,7 +422,7 @@ impl JSatClipperStereo {
     }
 
     #[inline]
-    pub(crate) fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+    pub fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4], pcm_clip: bool) -> (f32, f32, f32) {
         if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 128 {
             return (0.0, 0.0, 0.0);
         }
@@ -451,6 +453,18 @@ impl JSatClipperStereo {
                     hard + (soft - hard) * knee
                 }
             });
+        }
+
+        if pcm_clip {
+            for sample in &mut ch_out {
+                let hard = sample.clamp(-ceil_lin, ceil_lin);
+                *sample = if knee <= 1e-4 {
+                    hard
+                } else {
+                    let soft = (((*sample as f64) * inv_ceil).tanh() * (ceil_lin as f64)) as f32;
+                    hard + (soft - hard) * knee
+                };
+            }
         }
 
         let post_peak = ch_out[0].abs().max(ch_out[1].abs());

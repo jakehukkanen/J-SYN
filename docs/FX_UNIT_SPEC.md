@@ -11,9 +11,8 @@ Reference checklist for extracting or redesigning any `J-SYN` FX Unit in `crates
   - `FX_UNIT_HEADER_H = 20.0 px` (matches `CONTROL_H` so dropdown labels never clip).
   - `FX_UNIT_ARROW_H = 18.0 px` (`LedToggleSwitch` and `ArrowButton`s centered with `.top(Stretch(1.0)).bottom(Stretch(1.0))`).
 - **Standalone Header Bar (`224 px` window, `6 px` horizontal padding):**
-  - Title: `bold_label(cx, "J-<FX>", "header-title").font_size(11.5)`
-  - Theme picker: `.width(Pixels(88.0))`
-  - UI scale picker: `.width(Pixels(48.0))`
+  - Left: `[Brand Pill]` + `bold_label(cx, "J-<FX>", "header-title").font_size(11.5)` (fits full names like `J-DISPERSION` cleanly).
+  - Right: `22 × 22 px` cogwheel button (`GearIcon`) toggling an in-card **Settings** view (`THEME` + `UI SCALE` backed by shared `standalone-fx.json`, synced on window reopen).
 - **Scope Height (`fx_unit_scope_height`):**
   - Compact (`Utility`, `JSatClipper`, `Distortion`): `FX_UNIT_SCOPE_COMPACT_H = 44.0 px`
   - Medium (`Chorus`, `Flanger`, `Phaser`, `Delay`, `OTT`, `Diopser`): `FX_UNIT_SCOPE_H = 58.0 px`
@@ -44,9 +43,9 @@ Reference checklist for extracting or redesigning any `J-SYN` FX Unit in `crates
   - Knob centers land at `66.5 px` and `133.5 px` inside the `200 px` card (**equidistant `66.5 / 67.0 / 66.5 px`**).
 - On the `2×2` `VStack`:
   - `.row_between(Pixels(tokens::SPACE_MD))` (`6.0 px`)
-  - `.top(Pixels(tokens::FX_UNIT_2X2_TOP_PAD))` (`3.0 px`)
-  - `.bottom(Pixels(tokens::FX_UNIT_2X2_BOTTOM_PAD))` (`20.0 px`)
-  - Balances vertical spacing around Row 1 and Row 2 knobs (`~24 px` top, middle, and bottom).
+  - `.top(Pixels(tokens::FX_UNIT_2X2_TOP_PAD))` (`10.0 px`)
+  - `.bottom(Pixels(tokens::FX_UNIT_2X2_BOTTOM_PAD))` (`6.0 px`)
+  - Enforces visual vertical equidistance (`~17 px` each) between the bottom of the scope/tab/dropdown and Row 1 labels, between Row 1 knobs and Row 2 labels, and between Row 2 knobs and the bottom of the FX card.
 
 ---
 

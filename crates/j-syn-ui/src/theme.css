@@ -406,6 +406,12 @@ dropdown popup {
   max-height: 340px;
 }
 
+.dropdown-scroll-compact {
+  width: 1s;
+  height: auto;
+  max-height: 156px;
+}
+
 .dropdown-scroll-content {
   width: 1s;
   height: auto;
@@ -1275,6 +1281,27 @@ scrollview:checked > scrollbar:active .thumb {
 
 .fx-mb-side-btn.fx-subtab-active .fx-subtab-lbl {
   color: #ffd382;
+}
+
+.fx-mb-side-btn.fx-subtab-active:hover {
+  background-color: #5e4933;
+  border-color: #ffd382;
+}
+
+.fx-mb-side-btn gear-icon {
+  color: #a99582;
+}
+
+.fx-mb-side-btn:hover gear-icon {
+  color: #fff6e6;
+}
+
+.fx-mb-side-btn.fx-subtab-active gear-icon {
+  color: #ffd382;
+}
+
+.fx-mb-side-btn.fx-subtab-active:hover gear-icon {
+  color: #fff8ee;
 }
 
 .routing-pill-active dropdown {

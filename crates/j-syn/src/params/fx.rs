@@ -5,7 +5,7 @@ use std::sync::Arc;
 use j_syn_dsp::{
     FxBusTopology, FxFilterSlope, MbDistBandParams, SubBusParams, MB_BAND_LEVEL_DEFAULT_NORM,
 };
-pub use j_syn_ui::fx_units::DistortionModeParam;
+pub use j_syn_ui::fx_units::{DiopserStagesParam, DistortionModeParam};
 use nih_plug::prelude::*;
 
 use super::{bipolar_percentage_param, fx_level_param, FilterModeParam};
@@ -254,33 +254,6 @@ impl From<FxBusTopology> for FxBusTopologyParam {
     }
 }
 
-#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiopserStagesParam {
-    #[name = "8"]
-    S8,
-    #[name = "16"]
-    S16,
-    #[name = "32"]
-    S32,
-    #[name = "64"]
-    S64,
-    #[name = "128"]
-    S128,
-}
-
-impl DiopserStagesParam {
-    #[inline]
-    pub const fn to_index(self) -> u8 {
-        match self {
-            Self::S8 => 0,
-            Self::S16 => 1,
-            Self::S32 => 2,
-            Self::S64 => 3,
-            Self::S128 => 4,
-        }
-    }
-}
-
 #[derive(Params)]
 pub struct FxMbBandPluginParams {
     #[id = "mb_en"]
@@ -378,6 +351,8 @@ pub struct FxSlotPluginParams {
     pub utility_inv_r: BoolParam,
     #[id = "fx_lim_tp"]
     pub limiter_true_peak: BoolParam,
+    #[id = "fx_clip_pcm"]
+    pub clipper_pcm: BoolParam,
     #[id = "fx_dist_m"]
     pub distortion_mode: EnumParam<DistortionModeParam>,
     #[nested(array, group = "MB Bands")]
@@ -413,6 +388,7 @@ impl FxSlotPluginParams {
             utility_inv_l: BoolParam::new("Utility Inv L", init.utility_inv_l),
             utility_inv_r: BoolParam::new("Utility Inv R", init.utility_inv_r),
             limiter_true_peak: BoolParam::new("Limiter True Peak", init.limiter_true_peak),
+            clipper_pcm: BoolParam::new("Clipper PCM", init.clipper_pcm),
             distortion_mode: EnumParam::new("Distortion Mode", DistortionModeParam::Tube),
             mb_bands: std::array::from_fn(|b| Box::new(FxMbBandPluginParams::new_band(b))),
         }
@@ -463,6 +439,7 @@ impl FxSlotPluginParams {
             utility_inv_l: self.utility_inv_l.value(),
             utility_inv_r: self.utility_inv_r.value(),
             limiter_true_peak: self.limiter_true_peak.value(),
+            clipper_pcm: self.clipper_pcm.value(),
             distortion_mode: self.distortion_mode.value().into(),
             mb_bands: [
                 self.mb_bands[0].to_dsp(),

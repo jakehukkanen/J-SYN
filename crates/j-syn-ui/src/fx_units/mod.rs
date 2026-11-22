@@ -20,12 +20,24 @@ use crate::controls::bold_label;
 use crate::scopes::{fx_accent_rgb, FxSlotScopeSnapshot, FxSlotVisualizer};
 use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
-use crate::widgets::{KnobDimExt, RotaryKnob, ValueFormatter};
 
 pub mod multiband_dist;
+pub mod simple_units;
+pub mod standalone_shell;
+
 pub use multiband_dist::{
     build_multiband_dist_fx_unit_body, DistortionModeParam, MultibandDistUnitParams,
     MultibandTabHost, MB_DIST_MODE_ITEMS,
+};
+pub use simple_units::{
+    build_clipper_fx_unit_body, build_diopser_fx_unit_body, build_distortion_fx_unit_body,
+    build_four_knob_fx_unit_body, build_tabbed_fx_unit_body, ClipperUnitParams,
+    DiopserStagesParam, DiopserUnitParams, DistortionUnitParams, EightKnobUnitParams,
+    FourKnobUnitParams, FxSubTabHost, DIOPSER_STAGE_ITEMS,
+};
+pub use standalone_shell::{
+    build_standalone_fx_shell, create_standalone_fx_editor, standalone_default_state,
+    StandaloneFxConfig, StandaloneFxHeaderSpec, StandaloneFxUiData, StandaloneShellEvent,
 };
 
 #[inline]
@@ -353,7 +365,7 @@ pub trait UtilityUnitParams<Params: 'static>: Copy + Send + Sync + 'static {
     fn inv_r<'a>(&self, p: &'a Params) -> &'a BoolParam;
 }
 
-fn build_overlay_bool_pill<L, Params, FPick>(
+pub(crate) fn build_overlay_bool_pill<L, Params, FPick>(
     cx: &mut Context,
     params_lens: L,
     params: Arc<Params>,
@@ -447,56 +459,26 @@ pub fn build_utility_fx_unit_body<L, Params, U, FScope>(
         .width(Stretch(1.0))
         .height(Pixels(scope_h));
 
-        // 4-knob footer: WIDTH, PAN, GAIN, MIX
-        HStack::new(cx, move |cx| {
-            for p_idx in 0..4 {
-                let title = fx_slot_param_label(FxType::Utility, false, false, 0, p_idx);
-                let formatter: ValueFormatter = Arc::new(move |norm: f32, _off: Option<f32>| {
-                    format_fx_slot_param_value(FxType::Utility, false, 0, p_idx, norm)
-                });
-                let p_dim = params.clone();
-                let lens_k = params_lens.clone();
-                let mod_t = mod_targets
-                    .as_ref()
-                    .map(|(dests, host, tag)| (dests[p_idx], host.clone(), *tag));
-                let bipolar = matches!(p_idx, 1 | 2);
-
-                VStack::new(cx, move |cx| {
-                    bold_label(cx, title, "knob-title")
-                        .width(Stretch(1.0))
-                        .height(Pixels(tokens::KNOB_TITLE_COMPACT_H))
-                        .child_space(Stretch(1.0));
-
-                    RotaryKnob::new_with_opt_mod_formatter(
-                        cx,
-                        lens_k,
-                        move |p: &Arc<Params>| match p_idx {
-                            0 => unit_params.width(p),
-                            1 => unit_params.pan(p),
-                            2 => unit_params.gain(p),
-                            _ => unit_params.mix(p),
-                        },
-                        bipolar,
-                        accent,
-                        mod_t,
-                        Some(formatter),
-                    )
-                    .default_norm(Some(defs[p_idx]))
-                    .enabled_by(p_dim, move |p| unit_params.enabled(p).value())
-                    .width(Pixels(knob_sz))
-                    .height(Pixels(knob_sz))
-                    .left(Stretch(1.0))
-                    .right(Stretch(1.0));
-                })
-                .class("knob-cell")
-                .width(Stretch(1.0))
-                .height(Auto)
-                .row_between(Pixels(1.0));
-            }
-        })
-        .col_between(Pixels(3.0))
-        .width(Stretch(1.0))
-        .height(Auto);
+        // 2×2 knob grid: WIDTH, PAN, GAIN, MIX
+        simple_units::build_2x2_knob_grid(
+            cx,
+            FxType::Utility,
+            false,
+            [false, true, true, false],
+            defs,
+            accent,
+            knob_sz,
+            params_lens,
+            params,
+            move |p| unit_params.enabled(p),
+            move |p, idx| match idx {
+                0 => unit_params.width(p),
+                1 => unit_params.pan(p),
+                2 => unit_params.gain(p),
+                _ => unit_params.mix(p),
+            },
+            mod_targets,
+        );
     })
     .row_between(Pixels(tokens::SPACE_SM))
     .width(Stretch(1.0))
