@@ -124,6 +124,10 @@ pub fn fx_slot_param_label(
                 2 => "LOW CUT",
                 _ => "TONE",
             },
+            FxType::Filter => match param_idx {
+                0 => "FREQ 2",
+                _ => "--",
+            },
             _ => "--",
         };
     }
@@ -265,6 +269,9 @@ pub fn format_fx_slot_param_value(
                 2 => format_hz(fx_low_cut_hz(n)),
                 _ => format_hz(fx_high_cut_hz(n)),
             };
+        }
+        if fx_ty == FxType::Filter {
+            return format_hz(cutoff_norm_to_hz(n));
         }
         return match param_idx {
             0 => format_hz(fx_low_cut_hz(n)),

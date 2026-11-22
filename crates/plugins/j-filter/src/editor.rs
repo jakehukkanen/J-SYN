@@ -54,6 +54,9 @@ impl FilterUnitParams<JFilterParams> for StandaloneFilterParams {
             _ => &p.mix,
         }
     }
+    fn freq2<'a>(&self, p: &'a JFilterParams) -> &'a FloatParam {
+        &p.freq2
+    }
 }
 
 pub fn build_filter_ui(
@@ -97,6 +100,7 @@ pub fn build_filter_ui(
                             p_scope.drive.value(),
                             p_scope.mix.value(),
                         ],
+                        eff_eq: [p_scope.freq2.value(), 0.0, 0.0, 0.0],
                         filter_mode: p_scope.mode.value().into(),
                         filter_slope: p_scope.slope.value().into(),
                         pre,

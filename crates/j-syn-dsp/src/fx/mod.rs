@@ -327,6 +327,8 @@ impl FxSlotParams {
             FxType::TubeResonator => [0.50, 0.426_25, 0.299_22, 1.00],
             // Limiter ADV: Release ~80 ms (0.53), Knee 0% (0.0), Link 100% (1.0), Punch 100% (1.0)
             FxType::Limiter => [0.53, 0.00, 1.00, 1.00],
+            // Filter: Freq 2 ~4.1 kHz (0.72) for multi-filter modes
+            FxType::Filter => [0.72, 1.0, 0.50, 0.50],
             _ => [0.0, 1.0, 0.50, 0.50],
         }
     }
@@ -547,6 +549,7 @@ impl FxFilterStereo {
         mode: FilterMode,
         slope: FxFilterSlope,
         p: [f32; 4],
+        freq2_norm: f32,
     ) -> FilterParams {
         let fc = cutoff_norm_to_hz(p[0]);
         let eff_slope = if mode.has_fixed_12db_slope() {
@@ -557,10 +560,7 @@ impl FxFilterStereo {
         let aux = match mode {
             FilterMode::Scream => p[2].clamp(0.0, 1.0),
             FilterMode::Comb => 0.35,
-            m if m.is_multi() => {
-                let freq2 = (fc * 1.65).clamp(20.0, 20_000.0);
-                (freq2 / 20.0).log(1000.0).clamp(0.0, 1.0)
-            }
+            m if m.is_multi() => freq2_norm.clamp(0.0, 1.0),
             _ => p[3].clamp(0.0, 1.0),
         };
         let drive = if mode == FilterMode::Scream {
@@ -588,8 +588,9 @@ impl FxFilterStereo {
         mode: FilterMode,
         slope: FxFilterSlope,
         p: [f32; 4],
+        freq2_norm: f32,
     ) -> (f32, f32, f32) {
-        let fp = Self::filter_params(mode, slope, p);
+        let fp = Self::filter_params(mode, slope, p, freq2_norm);
         let mix = p[3].clamp(0.0, 1.0);
         let (wl, wr) = self.state.process_stereo(
             in_l,
@@ -615,9 +616,10 @@ pub fn filter_response_db_from_slot(
     mode: FilterMode,
     slope: FxFilterSlope,
     p: [f32; 4],
+    freq2_norm: f32,
     freq_hz: f32,
 ) -> f32 {
-    let fp = FxFilterStereo::filter_params(mode, slope, p);
+    let fp = FxFilterStereo::filter_params(mode, slope, p, freq2_norm);
     let mix = p[3].clamp(0.0, 1.0);
     let wet_db = evaluate_filter_response_db(&fp, freq_hz);
     if (mode == FilterMode::Scream || mode == FilterMode::Comb || mode.is_multi()) && mix < 0.999 {
@@ -721,7 +723,10 @@ impl StereoFxStage {
             FxType::Delay => self.delay.process(in_l, in_r, p, eq, tempo_bpm),
             FxType::Reverb => self.reverb.process(in_l, in_r, p, eq),
             FxType::JSatClipper => self.clipper.process(in_l, in_r, p, slot.clipper_pcm),
-            FxType::Filter => self.filter.process(in_l, in_r, slot.filter_mode, slot.filter_slope, p),
+            FxType::Filter => {
+                self.filter
+                    .process(in_l, in_r, slot.filter_mode, slot.filter_slope, p, eq[0])
+            }
             FxType::Phaser => self.phaser.process(in_l, in_r, p),
             FxType::Diopser => self.diopser.process(in_l, in_r, p, slot.diopser_stages as usize),
             FxType::TubeResonator => self.tube_res.process(
@@ -1147,8 +1152,9 @@ impl FxRackState {
         mode: FilterMode,
         slope: FxFilterSlope,
         p: [f32; 4],
+        freq2_norm: f32,
     ) -> FilterParams {
-        FxFilterStereo::filter_params(mode, slope, p)
+        FxFilterStereo::filter_params(mode, slope, p, freq2_norm)
     }
 
     #[inline]

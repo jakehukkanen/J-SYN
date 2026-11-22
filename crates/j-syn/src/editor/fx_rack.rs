@@ -1040,8 +1040,11 @@ fn build_fx_unit_card(
                         fn param<'a>(&self, p: &'a JSynPluginParams, idx: usize) -> &'a FloatParam {
                             p.fx_bus_slots(self.bus_idx)[self.slot_idx].param_at(idx)
                         }
+                        fn freq2<'a>(&self, p: &'a JSynPluginParams) -> &'a FloatParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].p5
+                        }
                     }
-                    let mod_dests: [ModDestination; 4] =
+                    let mod_dests: [ModDestination; 5] =
                         std::array::from_fn(|k| ModDestination::fx_bus_slot_param(bus_idx, slot_idx, k));
                     let p_scope = p_unit.clone();
                     let m_scope = m_unit.clone();

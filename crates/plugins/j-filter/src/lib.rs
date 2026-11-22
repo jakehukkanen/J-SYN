@@ -40,14 +40,20 @@ pub struct JFilterParams {
 
     #[id = "mix"]
     pub mix: FloatParam,
+
+    #[id = "freq2"]
+    pub freq2: FloatParam,
 }
 
 impl Default for JFilterParams {
     fn default() -> Self {
         let defs = FxSlotParams::default_params_for_type(FxType::Filter);
+        let eq_defs = FxSlotParams::default_eq_params_for_type(FxType::Filter);
         let fmt = |idx: usize| {
             Arc::new(move |v: f32| format_fx_slot_param_value(FxType::Filter, false, 0, idx, v))
         };
+        let fmt_freq2 =
+            Arc::new(|v: f32| format_fx_slot_param_value(FxType::Filter, true, 0, 0, v));
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
@@ -65,6 +71,8 @@ impl Default for JFilterParams {
                 .with_value_to_string(fmt(2)),
             mix: FloatParam::new("Mix", defs[3], FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(fmt(3)),
+            freq2: FloatParam::new("Freq 2", eq_defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
+                .with_value_to_string(fmt_freq2),
         }
     }
 }
@@ -153,12 +161,13 @@ impl Plugin for JFilterPlugin {
             self.params.drive.value(),
             self.params.mix.value(),
         ];
+        let freq2 = self.params.freq2.value();
 
         for mut channel_samples in buffer.iter_samples() {
             let in_l = *channel_samples.get_mut(0).unwrap();
             let in_r = *channel_samples.get_mut(1).unwrap();
             let (out_l, out_r, act) = if enabled {
-                self.dsp.process(in_l, in_r, mode, slope, p)
+                self.dsp.process(in_l, in_r, mode, slope, p, freq2)
             } else {
                 (in_l, in_r, 0.0)
             };
@@ -211,7 +220,7 @@ mod tests {
         for (id, _, _) in params.param_map() {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
-        assert_eq!(seen.len(), 7);
+        assert_eq!(seen.len(), 8);
     }
 
     #[test]
@@ -223,6 +232,7 @@ mod tests {
         assert_eq!(restored.serialize_fields().len(), serialized.len());
 
         let p = FxSlotParams::default_params_for_type(FxType::Filter);
+        let eq = FxSlotParams::default_eq_params_for_type(FxType::Filter);
         for _ in 0..512 {
             let (l, r, act) = plugin.dsp.process(
                 0.0,
@@ -230,6 +240,7 @@ mod tests {
                 j_syn_dsp::FilterMode::Lp,
                 j_syn_dsp::FxFilterSlope::Db12,
                 p,
+                eq[0],
             );
             assert_eq!(l, 0.0);
             assert_eq!(r, 0.0);
