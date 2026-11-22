@@ -192,7 +192,6 @@ fn build_settings_card_body(cx: &mut Context) {
                 |cx| bold_label(cx, "DONE", "fx-subtab-lbl").hoverable(false),
             )
             .class("fx-mb-side-btn")
-            .class("fx-subtab-active")
             .width(Pixels(44.0))
             .height(Pixels(tokens::FX_UNIT_ARROW_H))
             .top(Stretch(1.0))
@@ -225,13 +224,6 @@ fn build_settings_card_body(cx: &mut Context) {
             .row_between(Pixels(tokens::SPACE_XS))
             .width(Stretch(1.0))
             .height(Auto);
-
-            Element::new(cx).height(Stretch(1.0));
-
-            bold_label(cx, "SHARED ACROSS ALL J-FX", "mini-label")
-                .width(Stretch(1.0))
-                .height(Auto)
-                .child_space(Stretch(1.0));
         })
         .row_between(Pixels(tokens::SPACE_LG))
         .top(Pixels(tokens::SPACE_MD))
