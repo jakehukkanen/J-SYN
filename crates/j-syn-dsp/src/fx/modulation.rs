@@ -208,7 +208,7 @@ impl EqStageStereo {
 }
 
 /// Stereo Chorus / Dimension (`MAIN` = `RATE, DEPTH, DIM, MIX`, `EQ` = `LOW CUT, HIGH CUT, SPREAD, FEEDBK`).
-pub(crate) struct ChorusStereo {
+pub struct ChorusStereo {
     buf_l: Box<[f32]>,
     buf_r: Box<[f32]>,
     fb_l: f32,
@@ -222,7 +222,7 @@ pub(crate) struct ChorusStereo {
 }
 
 impl ChorusStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         let sr = sample_rate.max(1_000.0);
         Self {
             buf_l: vec![0.0; CHORUS_BUF_LEN].into_boxed_slice(),
@@ -238,13 +238,13 @@ impl ChorusStereo {
         }
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let sr = sample_rate.max(1_000.0);
         self.sample_rate = sr;
         self.eq.set_sample_rate(sr);
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         if self.dirty {
             self.buf_l.fill(0.0);
             self.buf_r.fill(0.0);
@@ -259,7 +259,7 @@ impl ChorusStereo {
     }
 
     #[inline]
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,
@@ -322,7 +322,7 @@ impl ChorusStereo {
 }
 
 /// 6-stage stereo all-pass Phaser with quadrature LFO sweep and soft-limited resonant feedback.
-pub(crate) struct PhaserStereo {
+pub struct PhaserStereo {
     ap_z: [[f32; PHASER_STAGES]; 2],
     fb_state: [f32; 2],
     lfo_phase: f32,
@@ -331,7 +331,7 @@ pub(crate) struct PhaserStereo {
 }
 
 impl PhaserStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         Self {
             ap_z: [[0.0; PHASER_STAGES]; 2],
             fb_state: [0.0; 2],
@@ -341,11 +341,11 @@ impl PhaserStereo {
         }
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1_000.0);
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.ap_z = [[0.0; PHASER_STAGES]; 2];
         self.fb_state = [0.0; 2];
         self.lfo_phase = 0.0;
@@ -360,7 +360,7 @@ impl PhaserStereo {
     }
 
     #[inline]
-    pub(crate) fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+    pub fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
         if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 4096 {
             self.ap_z = [[0.0; PHASER_STAGES]; 2];
             self.fb_state = [0.0; 2];
@@ -433,13 +433,13 @@ impl DelayStereo {
         }
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let sr = sample_rate.max(1_000.0);
         self.sample_rate = sr;
         self.eq.set_sample_rate(sr);
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         if self.dirty {
             self.buf_l.fill(0.0);
             self.buf_r.fill(0.0);
@@ -533,7 +533,7 @@ impl DelayStereo {
 }
 
 /// Stereo algorithmic Reverb (`MAIN` = `SIZE, DECAY, DAMP, MIX`, `EQ` = `LOW CUT, HIGH CUT, PRE-DLY, WIDTH`).
-pub(crate) struct ReverbStereo {
+pub struct ReverbStereo {
     pre_buf_l: Box<[f32]>,
     pre_buf_r: Box<[f32]>,
     pre_write: usize,
@@ -554,7 +554,7 @@ pub(crate) struct ReverbStereo {
 }
 
 impl ReverbStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         let sr = sample_rate.max(1_000.0);
         Self {
             pre_buf_l: vec![0.0; REVERB_PREDELAY_LEN].into_boxed_slice(),
@@ -577,13 +577,13 @@ impl ReverbStereo {
         }
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let sr = sample_rate.max(1_000.0);
         self.sample_rate = sr;
         self.eq.set_sample_rate(sr);
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         if self.dirty {
             self.pre_buf_l.fill(0.0);
             self.pre_buf_r.fill(0.0);
@@ -637,7 +637,7 @@ impl ReverbStereo {
     }
 
     #[inline]
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,
@@ -733,7 +733,7 @@ impl ReverbStereo {
 
 /// High-precision cubic Hermite stereo Flanger (`MAIN` = `RATE, DEPTH, DELAY, MIX`,
 /// `MOD` = `FEEDBK, PHASE, LOW CUT, TONE`).
-pub(crate) struct FlangerStereo {
+pub struct FlangerStereo {
     buf_l: Box<[f32]>,
     buf_r: Box<[f32]>,
     fb_l: f32,
@@ -747,7 +747,7 @@ pub(crate) struct FlangerStereo {
 }
 
 impl FlangerStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         let sr = sample_rate.max(1_000.0);
         Self {
             buf_l: vec![0.0; MAX_FLANGE_SAMPLES].into_boxed_slice(),
@@ -763,13 +763,13 @@ impl FlangerStereo {
         }
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let sr = sample_rate.max(1_000.0);
         self.sample_rate = sr;
         self.eq.set_sample_rate(sr);
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         if self.dirty {
             self.buf_l.fill(0.0);
             self.buf_r.fill(0.0);
@@ -784,7 +784,7 @@ impl FlangerStereo {
     }
 
     #[inline]
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,

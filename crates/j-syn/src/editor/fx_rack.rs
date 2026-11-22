@@ -6,8 +6,11 @@ use std::sync::Arc;
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{FxBusTopology, FxType, MB_BAND_LEVEL_DEFAULT_NORM};
 use j_syn_ui::fx_units::{
-    build_multiband_dist_fx_unit_body, build_utility_fx_unit_body, format_fx_slot_param_value,
-    fx_slot_param_label, MultibandDistUnitParams, MultibandTabHost, UtilityUnitParams,
+    build_diopser_fx_unit_body, build_distortion_fx_unit_body, build_four_knob_fx_unit_body,
+    build_multiband_dist_fx_unit_body, build_tabbed_fx_unit_body, build_utility_fx_unit_body,
+    format_fx_slot_param_value, fx_slot_param_label, DiopserUnitParams, DistortionUnitParams,
+    EightKnobUnitParams, FourKnobUnitParams, FxSubTabHost, MultibandDistUnitParams,
+    MultibandTabHost, UtilityUnitParams,
 };
 use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
@@ -15,7 +18,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_enum_dropdown,
     build_enum_dropdown_with_override, build_flex_knob_cell_mod, build_inline_pill_cell,
-    build_prefixed_enum_dropdown, ArrowButton, ArrowDir, ScrollDropdown,
+    ArrowButton, ArrowDir, ScrollDropdown,
 };
 use super::fx_scopes::{fx_accent_rgb, slot_scope_snapshot, FxSlotVisualizer};
 use super::mod_bar::ModUiState;
@@ -67,31 +70,6 @@ const FX_FILTER_SLOPE_ITEMS: &[(&str, FxFilterSlopeParam)] = &[
     ("12", FxFilterSlopeParam::Db12),
     ("24", FxFilterSlopeParam::Db24),
     ("48", FxFilterSlopeParam::Db48),
-];
-
-const DIOPSER_STAGE_ITEMS: &[(&str, DiopserStagesParam)] = &[
-    ("8", DiopserStagesParam::S8),
-    ("16", DiopserStagesParam::S16),
-    ("32", DiopserStagesParam::S32),
-    ("64", DiopserStagesParam::S64),
-    ("128", DiopserStagesParam::S128),
-];
-
-const DISTORTION_MODE_ITEMS: &[(&str, DistortionModeParam)] = &[
-    ("Tube", DistortionModeParam::Tube),
-    ("Mech", DistortionModeParam::Mech),
-    ("Sine", DistortionModeParam::Sine),
-    ("Crush", DistortionModeParam::Crush),
-    ("Classic A", DistortionModeParam::ClassicA),
-    ("Classic B", DistortionModeParam::ClassicB),
-    ("Classic C", DistortionModeParam::ClassicC),
-    ("Diode A", DistortionModeParam::DiodeA),
-    ("Diode B", DistortionModeParam::DiodeB),
-    ("Linear Fold", DistortionModeParam::LinearFold),
-    ("Sine Fold", DistortionModeParam::SineFold),
-    ("Hard Clip", DistortionModeParam::HardClip),
-    ("Half Rect", DistortionModeParam::HalfRectify),
-    ("Full Rect", DistortionModeParam::FullRectify),
 ];
 
 #[inline]
@@ -584,18 +562,6 @@ fn build_fx_scope_zstack(
                         };
 
                     match fx_ty {
-                        FxTypeParam::Distortion => {
-                            build_enum_dropdown(
-                                cx,
-                                p_ov.clone(),
-                                g_ov.clone(),
-                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].distortion_mode,
-                                DISTORTION_MODE_ITEMS,
-                            )
-                            .class("fx-scope-dd")
-                            .width(Pixels(72.0))
-                            .height(Pixels(17.0));
-                        }
                         FxTypeParam::Filter => {
                             build_enum_dropdown(
                                 cx,
@@ -606,19 +572,6 @@ fn build_fx_scope_zstack(
                             )
                             .class("fx-scope-dd")
                             .width(Pixels(52.0))
-                            .height(Pixels(17.0));
-                        }
-                        FxTypeParam::Diopser => {
-                            build_prefixed_enum_dropdown(
-                                cx,
-                                p_ov.clone(),
-                                g_ov.clone(),
-                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].diopser_stages,
-                                DIOPSER_STAGE_ITEMS,
-                                "STG ",
-                            )
-                            .class("fx-scope-dd")
-                            .width(Pixels(56.0))
                             .height(Pixels(17.0));
                         }
                         FxTypeParam::TubeResonator => {
@@ -665,9 +618,6 @@ fn build_fx_scope_zstack(
                             .width(Pixels(38.0))
                             .height(Pixels(17.0));
                         }
-                        FxTypeParam::Utility => {
-                            add_util_inv_pill(cx, "Ø L", |s| &s.utility_inv_l);
-                        }
                         FxTypeParam::Limiter => {
                             add_util_inv_pill(cx, "TP", |s| &s.limiter_true_peak);
                         }
@@ -676,28 +626,22 @@ fn build_fx_scope_zstack(
 
                     Element::new(cx).width(Stretch(1.0)).hoverable(false);
 
-                    match fx_ty {
-                        FxTypeParam::Filter => {
-                            build_enum_dropdown_with_override(
-                                cx,
-                                p_ov.clone(),
-                                g_ov.clone(),
-                                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].filter_slope,
-                                FX_FILTER_SLOPE_ITEMS,
-                                move |p| {
-                                    let mode: j_syn_dsp::FilterMode =
-                                        p.fx_bus_slots(bus_idx)[slot_idx].filter_mode.value().into();
-                                    mode.has_fixed_12db_slope().then_some("12")
-                                },
-                            )
-                            .class("fx-scope-dd")
-                            .width(Pixels(36.0))
-                            .height(Pixels(17.0));
-                        }
-                        FxTypeParam::Utility => {
-                            add_util_inv_pill(cx, "Ø R", |s| &s.utility_inv_r);
-                        }
-                        _ => {}
+                    if fx_ty == FxTypeParam::Filter {
+                        build_enum_dropdown_with_override(
+                            cx,
+                            p_ov.clone(),
+                            g_ov.clone(),
+                            move |p| &p.fx_bus_slots(bus_idx)[slot_idx].filter_slope,
+                            FX_FILTER_SLOPE_ITEMS,
+                            move |p| {
+                                let mode: j_syn_dsp::FilterMode =
+                                    p.fx_bus_slots(bus_idx)[slot_idx].filter_mode.value().into();
+                                mode.has_fixed_12db_slope().then_some("12")
+                            },
+                        )
+                        .class("fx-scope-dd")
+                        .width(Pixels(36.0))
+                        .height(Pixels(17.0));
                     }
 
                     if let Some(sub_lbl) = FxType::from(fx_ty).subtab_label() {
@@ -1156,7 +1100,176 @@ fn build_fx_unit_card(
                         JSynUtilitySlotParams { bus_idx, slot_idx },
                         Some((mod_dests, m_unit, 0)),
                         move || slot_scope_snapshot(bus_idx, slot_idx, &p_scope, &m_scope),
-                        tokens::KNOB_FX_UNIT,
+                        tokens::KNOB_FX_UNIT_2X2,
+                    );
+                    return;
+                }
+                if matches!(
+                    fx_type,
+                    FxType::JSatClipper | FxType::Ott | FxType::Phaser
+                ) {
+                    #[derive(Clone, Copy)]
+                    struct JSynFourKnobSlotParams {
+                        bus_idx: usize,
+                        slot_idx: usize,
+                    }
+                    impl FourKnobUnitParams<JSynPluginParams> for JSynFourKnobSlotParams {
+                        fn enabled<'a>(&self, p: &'a JSynPluginParams) -> &'a BoolParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].enabled
+                        }
+                        fn param<'a>(&self, p: &'a JSynPluginParams, idx: usize) -> &'a FloatParam {
+                            p.fx_bus_slots(self.bus_idx)[self.slot_idx].param_at(idx)
+                        }
+                    }
+                    let mod_dests: [ModDestination; 4] =
+                        std::array::from_fn(|k| ModDestination::fx_bus_slot_param(bus_idx, slot_idx, k));
+                    let p_scope = p_unit.clone();
+                    let m_scope = m_unit.clone();
+                    let bipolar = if fx_type == FxType::Ott {
+                        [false, false, true, true]
+                    } else {
+                        [false; 4]
+                    };
+                    build_four_knob_fx_unit_body(
+                        cx,
+                        fx_type,
+                        bipolar,
+                        UiData::params,
+                        p_unit,
+                        JSynFourKnobSlotParams { bus_idx, slot_idx },
+                        Some((mod_dests, m_unit, 0)),
+                        move || slot_scope_snapshot(bus_idx, slot_idx, &p_scope, &m_scope),
+                        tokens::KNOB_FX_UNIT_2X2,
+                    );
+                    return;
+                }
+                if fx_type == FxType::Distortion {
+                    #[derive(Clone, Copy)]
+                    struct JSynDistortionSlotParams {
+                        bus_idx: usize,
+                        slot_idx: usize,
+                    }
+                    impl DistortionUnitParams<JSynPluginParams> for JSynDistortionSlotParams {
+                        fn enabled<'a>(&self, p: &'a JSynPluginParams) -> &'a BoolParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].enabled
+                        }
+                        fn mode<'a>(
+                            &self,
+                            p: &'a JSynPluginParams,
+                        ) -> &'a EnumParam<DistortionModeParam> {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].distortion_mode
+                        }
+                        fn param<'a>(&self, p: &'a JSynPluginParams, idx: usize) -> &'a FloatParam {
+                            p.fx_bus_slots(self.bus_idx)[self.slot_idx].param_at(idx)
+                        }
+                    }
+                    let mod_dests: [ModDestination; 4] =
+                        std::array::from_fn(|k| ModDestination::fx_bus_slot_param(bus_idx, slot_idx, k));
+                    let p_scope = p_unit.clone();
+                    let m_scope = m_unit.clone();
+                    build_distortion_fx_unit_body(
+                        cx,
+                        UiData::params,
+                        p_unit,
+                        g_unit,
+                        JSynDistortionSlotParams { bus_idx, slot_idx },
+                        Some((mod_dests, m_unit, 0)),
+                        move || slot_scope_snapshot(bus_idx, slot_idx, &p_scope, &m_scope),
+                        tokens::KNOB_FX_UNIT_2X2,
+                    );
+                    return;
+                }
+                if fx_type == FxType::Diopser {
+                    #[derive(Clone, Copy)]
+                    struct JSynDiopserSlotParams {
+                        bus_idx: usize,
+                        slot_idx: usize,
+                    }
+                    impl DiopserUnitParams<JSynPluginParams> for JSynDiopserSlotParams {
+                        fn enabled<'a>(&self, p: &'a JSynPluginParams) -> &'a BoolParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].enabled
+                        }
+                        fn stages<'a>(
+                            &self,
+                            p: &'a JSynPluginParams,
+                        ) -> &'a EnumParam<DiopserStagesParam> {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].diopser_stages
+                        }
+                        fn param<'a>(&self, p: &'a JSynPluginParams, idx: usize) -> &'a FloatParam {
+                            p.fx_bus_slots(self.bus_idx)[self.slot_idx].param_at(idx)
+                        }
+                    }
+                    let mod_dests: [ModDestination; 4] =
+                        std::array::from_fn(|k| ModDestination::fx_bus_slot_param(bus_idx, slot_idx, k));
+                    let p_scope = p_unit.clone();
+                    let m_scope = m_unit.clone();
+                    build_diopser_fx_unit_body(
+                        cx,
+                        UiData::params,
+                        p_unit,
+                        g_unit,
+                        JSynDiopserSlotParams { bus_idx, slot_idx },
+                        Some((mod_dests, m_unit, 0)),
+                        move || slot_scope_snapshot(bus_idx, slot_idx, &p_scope, &m_scope),
+                        tokens::KNOB_FX_UNIT_2X2,
+                    );
+                    return;
+                }
+                if matches!(fx_type, FxType::Chorus | FxType::Reverb | FxType::Flanger) {
+                    #[derive(Clone, Copy)]
+                    struct JSynEightKnobSlotParams {
+                        bus_idx: usize,
+                        slot_idx: usize,
+                    }
+                    impl EightKnobUnitParams<JSynPluginParams> for JSynEightKnobSlotParams {
+                        fn enabled<'a>(&self, p: &'a JSynPluginParams) -> &'a BoolParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].enabled
+                        }
+                        fn param<'a>(&self, p: &'a JSynPluginParams, idx: usize) -> &'a FloatParam {
+                            p.fx_bus_slots(self.bus_idx)[self.slot_idx].param_at(idx)
+                        }
+                    }
+                    struct JSynSubTabHost {
+                        bus_idx: usize,
+                        slot_idx: usize,
+                        mod_ui: Arc<ModUiState>,
+                    }
+                    impl FxSubTabHost for JSynSubTabHost {
+                        fn is_subtab(&self) -> bool {
+                            self.mod_ui.fx_eq_subtab(self.bus_idx, self.slot_idx)
+                        }
+                        fn set_subtab(&self, subtab: bool) {
+                            self.mod_ui
+                                .set_fx_eq_subtab(self.bus_idx, self.slot_idx, subtab);
+                        }
+                    }
+                    let mod_dests: [ModDestination; 8] =
+                        std::array::from_fn(|k| ModDestination::fx_bus_slot_param(bus_idx, slot_idx, k));
+                    let p_scope = p_unit.clone();
+                    let m_scope = m_unit.clone();
+                    let tab_host = Arc::new(JSynSubTabHost {
+                        bus_idx,
+                        slot_idx,
+                        mod_ui: m_unit.clone(),
+                    });
+                    let (sub_lbl, sub_bipolar) = if fx_type == FxType::Flanger {
+                        ("MOD", [true, false, false, false])
+                    } else {
+                        ("EQ", [false; 4])
+                    };
+                    build_tabbed_fx_unit_body(
+                        cx,
+                        fx_type,
+                        sub_lbl,
+                        sub_bipolar,
+                        UiData::params,
+                        UiData::mod_ui_rev,
+                        p_unit,
+                        JSynEightKnobSlotParams { bus_idx, slot_idx },
+                        tab_host,
+                        Some((mod_dests, m_unit, 0)),
+                        move || slot_scope_snapshot(bus_idx, slot_idx, &p_scope, &m_scope),
+                        tokens::KNOB_FX_UNIT_2X2,
                     );
                     return;
                 }
@@ -1303,7 +1416,19 @@ fn build_fx_unit_card(
         UiData::mod_ui_rev.map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
     )
     .width(UiData::params.map(move |p| {
-        if p.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() == FxTypeParam::MultibandDist {
+        if matches!(
+            p.fx_bus_slots(bus_idx)[slot_idx].fx_type.value(),
+            FxTypeParam::Utility
+                | FxTypeParam::JSatClipper
+                | FxTypeParam::Ott
+                | FxTypeParam::Phaser
+                | FxTypeParam::Distortion
+                | FxTypeParam::Diopser
+                | FxTypeParam::Chorus
+                | FxTypeParam::Reverb
+                | FxTypeParam::Flanger
+                | FxTypeParam::MultibandDist
+        ) {
             Pixels(tokens::FX_UNIT_W)
         } else {
             Stretch(1.0)

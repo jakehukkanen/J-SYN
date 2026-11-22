@@ -5,7 +5,7 @@ use std::sync::Arc;
 use j_syn_dsp::{
     FxBusTopology, FxFilterSlope, MbDistBandParams, SubBusParams, MB_BAND_LEVEL_DEFAULT_NORM,
 };
-pub use j_syn_ui::fx_units::DistortionModeParam;
+pub use j_syn_ui::fx_units::{DiopserStagesParam, DistortionModeParam};
 use nih_plug::prelude::*;
 
 use super::{bipolar_percentage_param, fx_level_param, FilterModeParam};
@@ -250,33 +250,6 @@ impl From<FxBusTopology> for FxBusTopologyParam {
             FxBusTopology::ABToC => Self::ABToC,
             FxBusTopology::AToC => Self::AToC,
             FxBusTopology::BToC => Self::BToC,
-        }
-    }
-}
-
-#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiopserStagesParam {
-    #[name = "8"]
-    S8,
-    #[name = "16"]
-    S16,
-    #[name = "32"]
-    S32,
-    #[name = "64"]
-    S64,
-    #[name = "128"]
-    S128,
-}
-
-impl DiopserStagesParam {
-    #[inline]
-    pub const fn to_index(self) -> u8 {
-        match self {
-            Self::S8 => 0,
-            Self::S16 => 1,
-            Self::S32 => 2,
-            Self::S64 => 3,
-            Self::S128 => 4,
         }
     }
 }

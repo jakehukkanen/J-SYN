@@ -45,30 +45,6 @@ where
     )
 }
 
-pub(crate) fn build_prefixed_enum_dropdown<'a, E, P, FMap>(
-    cx: &'a mut Context,
-    params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
-    params_to_param: FMap,
-    items: &'static [(&'static str, E)],
-    trigger_prefix: &'static str,
-) -> Handle<'a, ScrollDropdown>
-where
-    E: Enum + Copy + PartialEq + Send + Sync + 'static,
-    P: Param<Plain = E> + 'static,
-    FMap: Fn(&Arc<JSynPluginParams>) -> &P + Copy + Send + Sync + 'static,
-{
-    j_syn_ui::controls::build_prefixed_enum_dropdown(
-        cx,
-        UiData::params,
-        params,
-        gui_context,
-        params_to_param,
-        items,
-        trigger_prefix,
-    )
-}
-
 pub(crate) fn build_enum_dropdown_with_override<'a, E, P, FMap, FOverride>(
     cx: &'a mut Context,
     params: Arc<JSynPluginParams>,

@@ -1,0 +1,16 @@
+[package]
+name = "j-chorus"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "J-Chorus: Standalone zero-allocation stereo Dimension Chorus + EQ FX plugin (VST3 + CLAP)"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+j-syn-dsp = { path = "../../j-syn-dsp" }
+j-syn-ui = { path = "../../j-syn-ui" }
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs", "standalone"] }
+nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }

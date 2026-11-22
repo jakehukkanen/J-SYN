@@ -72,7 +72,7 @@ pub fn evaluate_diopser_ripple(p: [f32; 4], stages_idx: usize, stack: u8, freq_h
 use super::flush_denormal;
 
 /// Pre-allocated stereo cascaded 2nd-order allpass bank (`MAX_DIOPSER_STAGES = 128`).
-pub(crate) struct DiopserStereo {
+pub struct DiopserStereo {
     stages_l: Box<[Biquad; MAX_DIOPSER_STAGES]>,
     stages_r: Box<[Biquad; MAX_DIOPSER_STAGES]>,
     coeffs: Box<[BiquadCoeffs; MAX_DIOPSER_STAGES]>,
@@ -87,7 +87,7 @@ pub(crate) struct DiopserStereo {
 }
 
 impl DiopserStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         let sr = sample_rate.max(1_000.0);
         Self {
             stages_l: vec![Biquad::default(); MAX_DIOPSER_STAGES]
@@ -113,12 +113,12 @@ impl DiopserStereo {
         }
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1_000.0);
         self.last_sr = 0.0;
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         if self.dirty {
             for i in 0..MAX_DIOPSER_STAGES {
                 self.stages_l[i].reset();
@@ -162,7 +162,7 @@ impl DiopserStereo {
     }
 
     #[inline]
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,
