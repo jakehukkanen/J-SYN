@@ -54,6 +54,13 @@
   - One focused conversation for the `j-syn-ui` + `xtask` + preview-harness extraction (Issue #17).
   - Separate focused conversations for individual standalone FX plugins / FX unit UX redesigns (or small related batches), plus dedicated conversations for standalone DSP features in `j-syn-dsp`.
   - Rely on `AGENTS.md`, `tokens.rs`, and the target GitHub issue as the complete handoff spec for each new conversation.
+- **Plan-First & Handoff-Ready Specs (Individual FX Extraction & Layout Redesign):**
+  - Before beginning implementation on any standalone FX extraction (`crates/plugins/j-<fx>/`) or individual FX Unit layout redesign (`crates/j-syn-ui/src/fx_units/`), **always write out a complete, explicit implementation plan first** (resolving any open UX/layout ambiguities before editing code).
+  - Write the plan with enough concrete detail that a cheaper/faster model (e.g. Hydrogen) can execute the implementation directly without guesswork:
+    1. **Exact File List & Scope:** Every file to create or modify (`j-syn-dsp`, `j-syn-ui/src/fx_units/<fx>.rs`, `j-syn-ui/src/tokens.rs`, `j-syn/src/editor/fx_rack.rs`, `crates/plugins/j-<fx>/`, workspace `Cargo.toml`).
+    2. **DSP & Parameter Contract:** Exact DSP struct/methods to make `pub`, exact `#[id = "..."]` parameter IDs, defaults, ranges, formatters, VST3/CLAP IDs, and shared trait projection methods (`<Fx>UnitParams`).
+    3. **Layout & Pixel Math:** Exact Vizia container hierarchy (`ZStack` overlays, tab/context bars, knob grid), token references (`tokens::*`), existing CSS classes from `theme.css`, `standalone_fx_window_size` height math, constant-height behavior across tabs, and confirmation that the shared FX Unit body fits cleanly at `210–220 px` narrow width as well as `STANDALONE_FX_CARD_W` (`260 px`).
+    4. **Exact Verification Steps:** Headless PNG preview commands (standalone default width, narrow `210 px` card stress test, and `J-SYN` Right Wing rack view) for visual inspection, followed by `cargo test --offline --workspace` and `cargo xtask bundle-all --release --offline` with zero project warnings.
 
 ---
 
