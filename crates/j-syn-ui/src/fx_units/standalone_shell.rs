@@ -242,6 +242,7 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
 {
     let (win_w, win_h) = tokens::standalone_fx_window_size(spec.fx_type);
     let accent = fx_accent_rgb(spec.fx_type);
+    let _ = accent;
 
     let mut shell = UiShellState::new(initial_theme, initial_scale_pct);
     if persist_settings {
@@ -361,7 +362,6 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
                                     pick_enabled,
                                     "",
                                     "",
-                                    accent,
                                 )
                                 .width(Pixels(tokens::FX_UNIT_LED_W))
                                 .height(Pixels(tokens::FX_UNIT_ARROW_H))

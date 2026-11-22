@@ -39,7 +39,6 @@ pub fn build_rotary_knob_with_opt_mod<'a, L, Params, P, FMap>(
     params: L,
     params_to_param: FMap,
     bipolar: bool,
-    accent_rgb: (u8, u8, u8),
     mod_target: Option<(ModDestination, Arc<dyn ModUiHost>, u8)>,
 ) -> Handle<'a, RotaryKnob>
 where
@@ -50,9 +49,9 @@ where
 {
     match mod_target {
         Some((dest, mod_ui, tab_tag)) => {
-            RotaryKnob::new_with_mod(cx, params, params_to_param, bipolar, accent_rgb, dest, mod_ui, tab_tag)
+            RotaryKnob::new_with_mod(cx, params, params_to_param, bipolar, dest, mod_ui, tab_tag)
         }
-        None => RotaryKnob::new(cx, params, params_to_param, bipolar, accent_rgb),
+        None => RotaryKnob::new(cx, params, params_to_param, bipolar),
     }
 }
 
@@ -62,7 +61,6 @@ pub fn build_header_knob_cell<L, Params, P, FMap>(
     params_to_param: FMap,
     title: &'static str,
     bipolar: bool,
-    accent_rgb: (u8, u8, u8),
 ) where
     L: Lens<Target = Params> + Clone,
     Params: 'static,
@@ -70,7 +68,7 @@ pub fn build_header_knob_cell<L, Params, P, FMap>(
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
     HStack::new(cx, move |cx| {
-        RotaryKnob::new(cx, params, params_to_param, bipolar, accent_rgb)
+        RotaryKnob::new(cx, params, params_to_param, bipolar)
             .width(Pixels(tokens::KNOB_HEADER))
             .height(Pixels(tokens::KNOB_HEADER))
             .top(Stretch(1.0))
@@ -113,14 +111,12 @@ where
     .class("knob-readout-box")
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn build_knob_cell_with_readout<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
     title: &'static str,
     bipolar: bool,
-    accent_rgb: (u8, u8, u8),
     knob_sz: f32,
     cell_w: f32,
 ) where
@@ -140,7 +136,6 @@ pub fn build_knob_cell_with_readout<L, Params, P, FMap>(
             params.clone(),
             params_to_param,
             bipolar,
-            accent_rgb,
             None,
         )
         .width(Pixels(knob_sz))
@@ -160,14 +155,12 @@ pub fn build_knob_cell_with_readout<L, Params, P, FMap>(
     .row_between(Pixels(1.0));
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn build_knob_cell<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
     params_to_param: FMap,
     title: &'static str,
     bipolar: bool,
-    accent_rgb: (u8, u8, u8),
     knob_sz: f32,
     cell_w: f32,
 ) where
@@ -182,7 +175,7 @@ pub fn build_knob_cell<L, Params, P, FMap>(
             .height(Pixels(tokens::KNOB_TITLE_H))
             .child_space(Stretch(1.0));
 
-        build_rotary_knob_with_opt_mod(cx, params, params_to_param, bipolar, accent_rgb, None)
+        build_rotary_knob_with_opt_mod(cx, params, params_to_param, bipolar, None)
             .width(Pixels(knob_sz))
             .height(Pixels(knob_sz))
             .left(Stretch(1.0))
@@ -201,7 +194,6 @@ pub fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
     params_to_param: FMap,
     title: &'static str,
     bipolar: bool,
-    accent_rgb: (u8, u8, u8),
     knob_sz: f32,
     cell_w: f32,
     dest: ModDestination,
@@ -225,7 +217,6 @@ pub fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
             params,
             params_to_param,
             bipolar,
-            accent_rgb,
             dest,
             mod_ui,
             tab_tag,
@@ -249,7 +240,6 @@ pub fn build_flex_knob_cell_mod<L, Params, P, FMap>(
     params_to_param: FMap,
     title: &'static str,
     bipolar: bool,
-    accent_rgb: (u8, u8, u8),
     knob_sz: f32,
     dest: ModDestination,
     mod_ui: Arc<dyn ModUiHost>,
@@ -271,7 +261,6 @@ pub fn build_flex_knob_cell_mod<L, Params, P, FMap>(
             params,
             params_to_param,
             bipolar,
-            accent_rgb,
             dest,
             mod_ui,
             tab_tag,
@@ -294,7 +283,6 @@ pub fn build_flex_knob_cell_mod_dim<L, Params, DimParams, P, FMap, FDim>(
     params_to_param: FMap,
     title: &'static str,
     bipolar: bool,
-    accent_rgb: (u8, u8, u8),
     knob_sz: f32,
     dest: ModDestination,
     mod_ui: Arc<dyn ModUiHost>,
@@ -320,7 +308,6 @@ pub fn build_flex_knob_cell_mod_dim<L, Params, DimParams, P, FMap, FDim>(
             params,
             params_to_param,
             bipolar,
-            accent_rgb,
             dest,
             mod_ui,
             tab_tag,
@@ -344,7 +331,6 @@ pub fn build_flex_knob_cell_mod_dim_tooltip<L, Params, DimParams, P, FMap, FDim,
     params_to_param: FMap,
     title: &'static str,
     bipolar: bool,
-    accent_rgb: (u8, u8, u8),
     knob_sz: f32,
     dest: ModDestination,
     mod_ui: Arc<dyn ModUiHost>,
@@ -372,7 +358,6 @@ pub fn build_flex_knob_cell_mod_dim_tooltip<L, Params, DimParams, P, FMap, FDim,
             params,
             params_to_param,
             bipolar,
-            accent_rgb,
             dest,
             mod_ui,
             tab_tag,

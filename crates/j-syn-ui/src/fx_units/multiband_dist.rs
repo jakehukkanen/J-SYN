@@ -106,7 +106,7 @@ fn build_mb_knob_cell<L, R, Params, U>(
     tab_host: Arc<dyn MultibandTabHost>,
     mod_targets: Option<([ModDestination; 16], Arc<dyn ModUiHost>, u8)>,
     global_defs: [f32; 4],
-    accent: (u8, u8, u8),
+    _accent: (u8, u8, u8),
     knob_sz: f32,
 ) where
     L: Lens<Target = Arc<Params>> + Clone,
@@ -153,7 +153,6 @@ fn build_mb_knob_cell<L, R, Params, U>(
                             _ => unit_params.band_mix(p, band),
                         },
                         p_idx == 1,
-                        accent,
                         mod_cell,
                         Some(formatter),
                     )
@@ -168,7 +167,6 @@ fn build_mb_knob_cell<L, R, Params, U>(
                             _ => unit_params.mix(p),
                         },
                         p_idx == 2,
-                        accent,
                         mod_cell,
                         Some(formatter),
                     )
@@ -420,7 +418,6 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                             move |p: &Arc<Params>| unit_params.band_enabled(p, band),
                             "",
                             "",
-                            accent,
                         )
                         .width(Pixels(tokens::FX_UNIT_LED_W))
                         .height(Pixels(tokens::FX_UNIT_ARROW_H))

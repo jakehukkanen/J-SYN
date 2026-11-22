@@ -11,7 +11,7 @@ use nih_plug::prelude::{BoolParam, FloatParam, GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 
 use crate::controls::bold_label;
-use crate::scopes::{fx_accent_rgb, FxSlotScopeSnapshot, FxSlotVisualizer};
+use crate::scopes::{FxSlotScopeSnapshot, FxSlotVisualizer};
 use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
 use crate::widgets::{KnobDimExt, RotaryKnob, ValueFormatter};
@@ -53,7 +53,6 @@ pub fn build_tube_res_fx_unit_body<L, R, Params, U, FScope>(
     let scope_h = tokens::fx_unit_scope_height(FxType::TubeResonator);
     let main_defs = j_syn_dsp::FxSlotParams::default_params_for_type(FxType::TubeResonator);
     let sub_defs = j_syn_dsp::FxSlotParams::default_eq_params_for_type(FxType::TubeResonator);
-    let accent = fx_accent_rgb(FxType::TubeResonator);
 
     let lens_flt = params_lens.clone();
     let lens_dirty = params_lens.clone();
@@ -260,7 +259,6 @@ pub fn build_tube_res_fx_unit_body<L, R, Params, U, FScope>(
                                             unit_params.param(p.as_ref(), base + p_idx)
                                         },
                                         false,
-                                        accent,
                                         mod_cell,
                                         Some(formatter),
                                     )

@@ -13,7 +13,7 @@ use super::super::controls::{
     ArrowButtonExt, ArrowDir, CollapseButton, PopupScrollCapture, ScrollDropdown,
 };
 use super::super::mod_bar::ModUiState;
-use super::super::{tokens, UiData, UiEvent, AMBER_RGB};
+use super::super::{tokens, UiData, UiEvent};
 use super::slot_ops::{set_fx_slot_type_with_defaults, swap_fx_slots, FX_TYPE_ITEMS};
 use crate::{FxTypeParam, JSynPluginParams};
 
@@ -306,7 +306,6 @@ pub(super) fn build_fx_slot_header(
                 move |p| &p.fx_bus_slots(bus_idx)[slot_idx].enabled,
                 "",
                 "",
-                AMBER_RGB,
             )
             .on_cmd_click(move |cx| {
                 toggle_slot_collapse_if_active(cx, &p_led_cmd, &m_led_cmd, bus_idx, slot_idx);

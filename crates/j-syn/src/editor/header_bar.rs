@@ -11,7 +11,7 @@ use super::controls::{
 use super::fx_scopes;
 use super::mod_bar::ModUiState;
 use super::scope;
-use super::{tokens, MainViewMode, UiData, UiEvent, AMBER_RGB};
+use super::{tokens, MainViewMode, UiData, UiEvent};
 
 pub(super) fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     HStack::new(cx, move |cx| {
@@ -180,7 +180,6 @@ pub(super) fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 |p| &p.master_volume_db,
                 "MASTER",
                 false,
-                AMBER_RGB,
             );
 
             fx_scopes::MasterScope::new(

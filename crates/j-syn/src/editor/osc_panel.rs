@@ -53,7 +53,6 @@ pub(super) fn build_osc_panel(
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
-    accent: (u8, u8, u8),
 ) {
     const WARP_ITEMS: &[(&str, WarpModeParam)] = &[
         ("None", WarpModeParam::None),
@@ -102,7 +101,6 @@ pub(super) fn build_osc_panel(
                 move |p| &get_osc(p, osc_idx).enabled,
                 osc_label,
                 osc_label,
-                accent,
             )
             .width(Pixels(tokens::OSC_LED_W))
             .height(Pixels(tokens::HEADER_STRIP_H));
@@ -191,7 +189,6 @@ pub(super) fn build_osc_panel(
                     move |p| &get_osc(p, osc_idx).retrig,
                     "RETRIG",
                     "RETRIG",
-                    accent,
                 )
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
@@ -224,7 +221,6 @@ pub(super) fn build_osc_panel(
                             move |p| field(&p.oscs[osc_idx]),
                             title,
                             false,
-                            accent,
                             tokens::KNOB_OSC,
                             dest,
                             ui_k,

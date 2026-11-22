@@ -13,7 +13,7 @@ use super::controls::{
 };
 use super::mod_bar::{bottom_tab_tag, ModUiState};
 use super::tokens;
-use super::{BottomTab, AMBER_RGB, CORAL_RGB, GOLD_RGB, UiData};
+use super::{BottomTab, UiData};
 use crate::{DirectRouteParam, FilterBusParam, FilterRoutingParam, JSynPluginParams};
 
 pub(super) const FILTER_ROUTING_ITEMS: &[(&str, FilterRoutingParam)] = &[
@@ -41,7 +41,6 @@ pub(super) const FILTER_BUS_ITEMS: &[(&str, FilterBusParam)] = &[
 fn build_source_send_column<FB, FD>(
     cx: &mut Context,
     title: &'static str,
-    accent: (u8, u8, u8),
     dest: ModDestination,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
@@ -61,7 +60,6 @@ fn build_source_send_column<FB, FD>(
             bal_map,
             title,
             true,
-            accent,
             tokens::KNOB_COMPACT,
             dest,
             mod_ui.clone(),
@@ -119,7 +117,6 @@ pub(super) fn build_routing_tab(
                     build_source_send_column(
                         cx,
                         "OSC 1",
-                        AMBER_RGB,
                         ModDestination::Osc1FilterSend,
                         params.clone(),
                         gui_context.clone(),
@@ -131,7 +128,6 @@ pub(super) fn build_routing_tab(
                     build_source_send_column(
                         cx,
                         "OSC 2",
-                        GOLD_RGB,
                         ModDestination::Osc2FilterSend,
                         params.clone(),
                         gui_context.clone(),
@@ -143,7 +139,6 @@ pub(super) fn build_routing_tab(
                     build_source_send_column(
                         cx,
                         "OSC 3",
-                        CORAL_RGB,
                         ModDestination::Osc3FilterSend,
                         params.clone(),
                         gui_context.clone(),
@@ -155,7 +150,6 @@ pub(super) fn build_routing_tab(
                     build_source_send_column(
                         cx,
                         "OSC 4",
-                        AMBER_RGB,
                         ModDestination::Osc4FilterSend,
                         params.clone(),
                         gui_context.clone(),
@@ -167,7 +161,6 @@ pub(super) fn build_routing_tab(
                     build_source_send_column(
                         cx,
                         "NOISE",
-                        CORAL_RGB,
                         ModDestination::NoiseFilterSend,
                         params.clone(),
                         gui_context.clone(),
@@ -262,7 +255,6 @@ pub(super) fn build_routing_tab(
                     |p| &p.routing.filter_mix,
                     "F1/F2 MIX",
                     true,
-                    GOLD_RGB,
                     tokens::KNOB_STD,
                     ModDestination::FilterMix,
                     mod_ui.clone(),
@@ -275,7 +267,6 @@ pub(super) fn build_routing_tab(
                     |p| &p.routing.feedback_amount,
                     "FEEDBACK",
                     false,
-                    CORAL_RGB,
                     tokens::KNOB_STD,
                     ModDestination::FeedbackAmount,
                     mod_ui,

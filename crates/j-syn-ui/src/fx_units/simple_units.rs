@@ -30,7 +30,7 @@ pub(crate) fn build_2x2_knob_grid<L, Params, FEnabled, FPick>(
     is_subtab: bool,
     bipolar_mask: [bool; 4],
     defs: [f32; 4],
-    accent: (u8, u8, u8),
+    _accent: (u8, u8, u8),
     knob_sz: f32,
     params_lens: L,
     params: Arc<Params>,
@@ -72,7 +72,6 @@ pub(crate) fn build_2x2_knob_grid<L, Params, FEnabled, FPick>(
                             lens_k,
                             move |p: &Arc<Params>| pick_param(p.as_ref(), p_idx),
                             bipolar_mask[p_idx],
-                            accent,
                             mod_cell,
                             Some(formatter),
                         )

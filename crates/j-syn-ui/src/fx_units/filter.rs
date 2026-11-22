@@ -12,7 +12,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use crate::controls::{
     bold_label, build_enum_dropdown, build_enum_dropdown_with_override,
 };
-use crate::scopes::{fx_accent_rgb, FxSlotScopeSnapshot, FxSlotVisualizer};
+use crate::scopes::{FxSlotScopeSnapshot, FxSlotVisualizer};
 use crate::shell::ModUiHost;
 use crate::tokens;
 use crate::widgets::{KnobDimExt, RotaryKnob, ValueFormatter};
@@ -54,7 +54,6 @@ pub fn build_filter_fx_unit_body<L, Params, U, FScope>(
     let scope_h = tokens::fx_unit_scope_height(FxType::Filter);
     let defs = j_syn_dsp::FxSlotParams::default_params_for_type(FxType::Filter);
     let eq_defs = j_syn_dsp::FxSlotParams::default_eq_params_for_type(FxType::Filter);
-    let accent = fx_accent_rgb(FxType::Filter);
 
     let lens_mode = params_lens.clone();
     let lens_slope = params_lens.clone();
@@ -146,7 +145,6 @@ pub fn build_filter_fx_unit_body<L, Params, U, FScope>(
                                 }
                             },
                             false,
-                            accent,
                             mod_cell,
                             Some(formatter),
                         )
@@ -214,7 +212,6 @@ pub fn build_filter_fx_unit_body<L, Params, U, FScope>(
                             lens_k,
                             move |p: &Arc<Params>| unit_params.param(p.as_ref(), p_idx),
                             false,
-                            accent,
                             mod_cell,
                             Some(formatter),
                         )

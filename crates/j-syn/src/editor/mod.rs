@@ -66,7 +66,6 @@ pub const BASE_WIDTH: u32 = tokens::WINDOW_W;
 pub const BASE_HEIGHT: u32 = tokens::WINDOW_H;
 
 pub(super) const AMBER_RGB: (u8, u8, u8) = (245, 179, 73);
-pub(super) const GOLD_RGB: (u8, u8, u8) = (242, 203, 97);
 pub(super) const CORAL_RGB: (u8, u8, u8) = (235, 140, 85);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -564,12 +563,7 @@ fn build_left_wing(
     mod_ui: Arc<ModUiState>,
 ) {
     VStack::new(cx, move |cx| {
-        for (idx, accent) in [
-            (0, AMBER_RGB),
-            (1, GOLD_RGB),
-            (2, CORAL_RGB),
-            (3, AMBER_RGB),
-        ] {
+        for idx in 0..4 {
             build_osc_panel(
                 cx,
                 idx,
@@ -577,7 +571,6 @@ fn build_left_wing(
                 params.clone(),
                 gui_context.clone(),
                 mod_ui.clone(),
-                accent,
             );
         }
 

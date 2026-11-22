@@ -266,7 +266,6 @@ fn build_filter_aux_knob_cell(
     filter_idx: usize,
     params: Arc<JSynPluginParams>,
     mod_ui: Arc<ModUiState>,
-    accent_rgb: (u8, u8, u8),
     knob_sz: f32,
 ) {
     let params_for_tt = params.clone();
@@ -296,7 +295,6 @@ fn build_filter_aux_knob_cell(
             UiData::params,
             move |p| &p.filters[filter_idx].aux,
             false,
-            accent_rgb,
             ModDestination::filter_aux(filter_idx),
             mod_ui,
             0,
@@ -351,7 +349,6 @@ pub(super) fn build_filter_panel(
                     move |p| &p.filters[filter_idx].enabled,
                     label,
                     label,
-                    accent,
                 )
                 .width(Pixels(tokens::FILTER_LED_W))
                 .height(Pixels(tokens::HEADER_STRIP_H));
@@ -399,7 +396,6 @@ pub(super) fn build_filter_panel(
                     move |p| &p.filters[filter_idx].cutoff,
                     "CUTOFF",
                     false,
-                    accent,
                     tokens::KNOB_FLT,
                     ModDestination::filter_cutoff(filter_idx),
                     mod_ui.clone(),
@@ -413,7 +409,6 @@ pub(super) fn build_filter_panel(
                     move |p| &p.filters[filter_idx].resonance,
                     "RES",
                     false,
-                    accent,
                     tokens::KNOB_FLT,
                     ModDestination::filter_res(filter_idx),
                     mod_ui.clone(),
@@ -427,7 +422,6 @@ pub(super) fn build_filter_panel(
                     move |p| &p.filters[filter_idx].drive,
                     "DRIVE",
                     false,
-                    accent,
                     tokens::KNOB_FLT,
                     ModDestination::filter_drive(filter_idx),
                     mod_ui.clone(),
@@ -440,7 +434,6 @@ pub(super) fn build_filter_panel(
                     filter_idx,
                     params.clone(),
                     mod_ui.clone(),
-                    accent,
                     tokens::KNOB_FLT,
                 );
             }

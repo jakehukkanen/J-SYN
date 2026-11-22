@@ -13,7 +13,7 @@ use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_flex_knob_cell_mod, ScrollDropdown,
 };
 use super::mod_bar::ModUiState;
-use super::{tokens, UiData, UiEvent, AMBER_RGB, GOLD_RGB};
+use super::{tokens, UiData, UiEvent};
 use crate::{FxBusTopologyParam, JSynPluginParams};
 
 mod adapters;
@@ -204,7 +204,6 @@ fn build_lane_header(
                 move |p| p.fx_bus_level_param(bus_idx),
                 "LEVEL",
                 false,
-                AMBER_RGB,
                 tokens::KNOB_OSC,
                 lvl_dest,
                 m_lvl,
@@ -217,7 +216,6 @@ fn build_lane_header(
                 move |p| p.fx_bus_pan_param(bus_idx),
                 "PAN",
                 true,
-                GOLD_RGB,
                 tokens::KNOB_OSC,
                 pan_dest,
                 mod_ui,
