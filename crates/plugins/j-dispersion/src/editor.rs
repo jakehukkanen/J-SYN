@@ -21,7 +21,6 @@ use crate::JDispersionParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-DISPERSION",
     card_title: "DISPERSION",
-    card_subtitle: "ALLPASS",
     fx_type: FxType::Diopser,
 };
 
@@ -68,6 +67,7 @@ pub fn build_dispersion_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        Some(|p| &p.stack),
         initial_theme,
         initial_scale_pct,
         persist_settings,
@@ -88,6 +88,7 @@ pub fn build_dispersion_ui(
                     FxSlotScopeSnapshot {
                         enabled: p_scope.enabled.value(),
                         fx_type: FxType::Diopser,
+                        stack: p_scope.stack.value().clamp(1, 4) as u8,
                         eff_p: [
                             p_scope.freq.value(),
                             p_scope.res.value(),

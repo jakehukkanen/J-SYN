@@ -20,7 +20,6 @@ use crate::JClipperParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-CLIPPER",
     card_title: "CLIPPER",
-    card_subtitle: "ADAA CLIP",
     fx_type: FxType::JSatClipper,
 };
 
@@ -67,6 +66,7 @@ pub fn build_clipper_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        Some(|p| &p.stack),
         initial_theme,
         initial_scale_pct,
         persist_settings,
@@ -87,6 +87,7 @@ pub fn build_clipper_ui(
                     FxSlotScopeSnapshot {
                         enabled: p_scope.enabled.value(),
                         fx_type: FxType::JSatClipper,
+                        stack: p_scope.stack.value().clamp(1, 4) as u8,
                         eff_p: [
                             p_scope.drive.value(),
                             p_scope.ceil.value(),

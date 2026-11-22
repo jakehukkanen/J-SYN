@@ -22,7 +22,6 @@ use crate::JMbDistParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-MBDIST",
     card_title: "MB DIST",
-    card_subtitle: "3-BAND LR4",
     fx_type: FxType::MultibandDist,
 };
 
@@ -121,6 +120,7 @@ pub fn build_mbdist_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        Some(|p| &p.stack),
         initial_theme,
         initial_scale_pct,
         persist_settings,
@@ -165,6 +165,7 @@ pub fn build_mbdist_ui(
                         pre,
                         post,
                         activity: act,
+                        stack: p_scope.stack.value().clamp(1, 4) as u8,
                         ..FxSlotScopeSnapshot::default()
                     }
                 },

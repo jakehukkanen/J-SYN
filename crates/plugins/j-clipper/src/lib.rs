@@ -5,6 +5,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use j_syn_dsp::fx::dynamics::JSatClipperStereo;
+use j_syn_dsp::fx::MAX_FX_STACK;
 use j_syn_dsp::mod_matrix::FxScopeRing;
 use j_syn_dsp::{FxSlotParams, FxType};
 use j_syn_ui::fx_units::format_fx_slot_param_value;
@@ -20,6 +21,9 @@ pub struct JClipperParams {
 
     #[id = "en"]
     pub enabled: BoolParam,
+
+    #[id = "stk"]
+    pub stack: IntParam,
 
     #[id = "drive"]
     pub drive: FloatParam,
@@ -46,6 +50,7 @@ impl Default for JClipperParams {
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
+            stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: 4 }),
             drive: FloatParam::new("Drive", defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(fmt(0)),
             ceil: FloatParam::new("Ceiling", defs[1], FloatRange::Linear { min: 0.0, max: 1.0 })
@@ -61,7 +66,7 @@ impl Default for JClipperParams {
 
 pub struct JClipperPlugin {
     pub params: Arc<JClipperParams>,
-    dsp: JSatClipperStereo,
+    dsp: Box<[JSatClipperStereo; MAX_FX_STACK]>,
     pub scope_ring: Arc<FxScopeRing>,
     scope_decim: u32,
 }
@@ -70,7 +75,7 @@ impl Default for JClipperPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(JClipperParams::default()),
-            dsp: JSatClipperStereo::new(),
+            dsp: Box::new(std::array::from_fn(|_| JSatClipperStereo::new())),
             scope_ring: Arc::new(FxScopeRing::default()),
             scope_decim: 0,
         }
@@ -114,14 +119,18 @@ impl Plugin for JClipperPlugin {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        self.dsp.set_sample_rate(buffer_config.sample_rate);
-        self.dsp.reset();
+        for stage in self.dsp.iter_mut() {
+            stage.set_sample_rate(buffer_config.sample_rate);
+            stage.reset();
+        }
         self.scope_decim = 0;
         true
     }
 
     fn reset(&mut self) {
-        self.dsp.reset();
+        for stage in self.dsp.iter_mut() {
+            stage.reset();
+        }
         self.scope_decim = 0;
     }
 
@@ -135,6 +144,7 @@ impl Plugin for JClipperPlugin {
             return ProcessStatus::Normal;
         }
         let enabled = self.params.enabled.value();
+        let stack_count = (self.params.stack.value() as usize).clamp(1, MAX_FX_STACK);
         let pcm = self.params.pcm.value();
         let p = [
             self.params.drive.value(),
@@ -150,7 +160,18 @@ impl Plugin for JClipperPlugin {
             };
             let (in_l, in_r) = (*s_l, *s_r);
             let (out_l, out_r, act) = if enabled {
-                self.dsp.process(in_l, in_r, p, pcm)
+                let mut l = in_l;
+                let mut r = in_r;
+                let mut max_act = 0.0_f32;
+                for stage in self.dsp.iter_mut().take(stack_count) {
+                    let (nl, nr, a) = stage.process(l, r, p, pcm);
+                    l = nl;
+                    r = nr;
+                    if a > max_act {
+                        max_act = a;
+                    }
+                }
+                (l, r, max_act)
             } else {
                 (in_l, in_r, 0.0)
             };
@@ -203,7 +224,7 @@ mod tests {
         for (id, _, _) in params.param_map() {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
-        assert_eq!(seen.len(), 6);
+        assert_eq!(seen.len(), 7);
     }
 
     #[test]
@@ -216,7 +237,7 @@ mod tests {
 
         let p = FxSlotParams::default_params_for_type(FxType::JSatClipper);
         for _ in 0..512 {
-            let (l, r, act) = plugin.dsp.process(0.0, 0.0, p, true);
+            let (l, r, act) = plugin.dsp[0].process(0.0, 0.0, p, true);
             assert_eq!(l, 0.0);
             assert_eq!(r, 0.0);
             assert_eq!(act, 0.0);

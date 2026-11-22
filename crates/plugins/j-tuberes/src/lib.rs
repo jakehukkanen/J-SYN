@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use j_syn_dsp::fx::tube_resonator::TubeResonatorStereo;
 use j_syn_dsp::mod_matrix::FxScopeRing;
-use j_syn_dsp::{FxSlotParams, FxType};
+use j_syn_dsp::{FxSlotParams, FxType, MAX_FX_STACK};
 use j_syn_ui::fx_units::format_fx_slot_param_value;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
@@ -20,6 +20,9 @@ pub struct JTubeResParams {
 
     #[id = "en"]
     pub enabled: BoolParam,
+
+    #[id = "stk"]
+    pub stack: IntParam,
 
     #[id = "tune"]
     pub tune: FloatParam,
@@ -69,6 +72,7 @@ impl Default for JTubeResParams {
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
+            stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: MAX_FX_STACK as i32 }),
             tune: FloatParam::new("Tune", main_defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(fmt_main(0)),
             flt_en: BoolParam::new("Pre-Filter", true),
@@ -113,7 +117,7 @@ impl Default for JTubeResParams {
 
 pub struct JTubeResPlugin {
     pub params: Arc<JTubeResParams>,
-    dsp: TubeResonatorStereo,
+    dsp: Box<[TubeResonatorStereo; MAX_FX_STACK]>,
     pub scope_ring: Arc<FxScopeRing>,
     scope_decim: u32,
 }
@@ -122,7 +126,7 @@ impl Default for JTubeResPlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(JTubeResParams::default()),
-            dsp: TubeResonatorStereo::new(44_100.0),
+            dsp: Box::new(std::array::from_fn(|_| TubeResonatorStereo::new(44_100.0))),
             scope_ring: Arc::new(FxScopeRing::default()),
             scope_decim: 0,
         }
@@ -166,14 +170,18 @@ impl Plugin for JTubeResPlugin {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        self.dsp.set_sample_rate(buffer_config.sample_rate);
-        self.dsp.reset();
+        for stage in self.dsp.iter_mut() {
+            stage.set_sample_rate(buffer_config.sample_rate);
+            stage.reset();
+        }
         self.scope_decim = 0;
         true
     }
 
     fn reset(&mut self) {
-        self.dsp.reset();
+        for stage in self.dsp.iter_mut() {
+            stage.reset();
+        }
         self.scope_decim = 0;
     }
 
@@ -187,6 +195,7 @@ impl Plugin for JTubeResPlugin {
             return ProcessStatus::Normal;
         }
         let enabled = self.params.enabled.value();
+        let stack_count = (self.params.stack.value() as usize).clamp(1, MAX_FX_STACK);
         let flt_en = self.params.flt_en.value();
         let dirty = self.params.dirty.value();
         let p = [
@@ -209,7 +218,16 @@ impl Plugin for JTubeResPlugin {
             };
             let (in_l, in_r) = (*s_l, *s_r);
             let (out_l, out_r, act) = if enabled {
-                self.dsp.process(in_l, in_r, p, eq, flt_en, dirty)
+                let mut cur_l = in_l;
+                let mut cur_r = in_r;
+                let mut max_act = 0.0_f32;
+                for stage in self.dsp.iter_mut().take(stack_count) {
+                    let (nl, nr, s_act) = stage.process(cur_l, cur_r, p, eq, flt_en, dirty);
+                    cur_l = nl;
+                    cur_r = nr;
+                    max_act = max_act.max(s_act);
+                }
+                (cur_l, cur_r, max_act)
             } else {
                 (in_l, in_r, 0.0)
             };
@@ -262,7 +280,7 @@ mod tests {
         for (id, _, _) in params.param_map() {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
-        assert_eq!(seen.len(), 11);
+        assert_eq!(seen.len(), 12);
     }
 
     #[test]
@@ -276,7 +294,7 @@ mod tests {
         let p = FxSlotParams::default_params_for_type(FxType::TubeResonator);
         let eq = FxSlotParams::default_eq_params_for_type(FxType::TubeResonator);
         for _ in 0..512 {
-            let (l, r, _act) = plugin.dsp.process(0.0, 0.0, p, eq, true, true);
+            let (l, r, _act) = plugin.dsp[0].process(0.0, 0.0, p, eq, true, true);
             assert_eq!(l, 0.0);
             assert_eq!(r, 0.0);
         }

@@ -22,7 +22,6 @@ use crate::JTubeResParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-TUBERES",
     card_title: "TUBE RES.",
-    card_subtitle: "WAVEGUIDE",
     fx_type: FxType::TubeResonator,
 };
 
@@ -94,6 +93,7 @@ pub fn build_tube_res_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        Some(|p| &p.stack),
         initial_theme,
         initial_scale_pct,
         persist_settings,
@@ -133,6 +133,7 @@ pub fn build_tube_res_ui(
                         pre,
                         post,
                         activity: act,
+                        stack: p_scope.stack.value().clamp(1, 4) as u8,
                         ..FxSlotScopeSnapshot::default()
                     }
                 },

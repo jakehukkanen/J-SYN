@@ -22,7 +22,6 @@ use crate::JFlangerParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-FLANGER",
     card_title: "FLANGER",
-    card_subtitle: "STEREO • MOD",
     fx_type: FxType::Flanger,
 };
 
@@ -88,6 +87,7 @@ pub fn build_flanger_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        Some(|p| &p.stack),
         initial_theme,
         initial_scale_pct,
         persist_settings,
@@ -127,6 +127,7 @@ pub fn build_flanger_ui(
                         pre,
                         post,
                         activity: act,
+                        stack: p_scope.stack.value().clamp(1, 4) as u8,
                         ..FxSlotScopeSnapshot::default()
                     }
                 },

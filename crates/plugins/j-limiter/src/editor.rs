@@ -22,7 +22,6 @@ use crate::JLimiterParams;
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-LIMITER",
     card_title: "LIMITER",
-    card_subtitle: "LOOKAHD • TP",
     fx_type: FxType::Limiter,
 };
 
@@ -91,6 +90,7 @@ pub fn build_limiter_ui(
         HEADER_SPEC,
         params,
         |p| &p.enabled,
+        None,
         initial_theme,
         initial_scale_pct,
         persist_settings,
