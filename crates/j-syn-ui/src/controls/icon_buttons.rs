@@ -319,3 +319,64 @@ impl View for CheckIcon {
         canvas.stroke_path(&path, &paint);
     }
 }
+
+/// Crisp centered 6-tooth vector cogwheel icon for settings buttons.
+pub struct GearIcon;
+
+impl GearIcon {
+    pub fn new<'a>(cx: &'a mut Context) -> Handle<'a, Self> {
+        Self.build(cx, |_| {}).hoverable(false)
+    }
+}
+
+impl View for GearIcon {
+    fn element(&self) -> Option<&'static str> {
+        Some("gear-icon")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let bounds = cx.bounds();
+        if bounds.w <= 2.0 || bounds.h <= 2.0 {
+            return;
+        }
+        let pal = theme::current_palette(cx);
+        let color = theme::vg_color(&pal.text_muted, 255);
+        let cx_p = bounds.x + bounds.w * 0.5;
+        let cy_p = bounds.y + bounds.h * 0.5;
+        let r_outer = bounds.w.min(bounds.h) * 0.36;
+        let r_inner = r_outer * 0.68;
+        let r_hole = r_outer * 0.31;
+        let teeth = 6usize;
+
+        let mut gear = vg::Path::new();
+        for i in 0..teeth {
+            let base = (i as f32 / teeth as f32) * std::f32::consts::TAU;
+            let step = std::f32::consts::TAU / (teeth as f32 * 4.0);
+            let a0 = base - step * 1.15;
+            let a1 = base - step * 0.60;
+            let a2 = base + step * 0.60;
+            let a3 = base + step * 1.15;
+            let a4 = base + step * 2.00;
+
+            let p0 = (cx_p + r_inner * a0.cos(), cy_p + r_inner * a0.sin());
+            let p1 = (cx_p + r_outer * a1.cos(), cy_p + r_outer * a1.sin());
+            let p2 = (cx_p + r_outer * a2.cos(), cy_p + r_outer * a2.sin());
+            let p3 = (cx_p + r_inner * a3.cos(), cy_p + r_inner * a3.sin());
+            let p4 = (cx_p + r_inner * a4.cos(), cy_p + r_inner * a4.sin());
+            if i == 0 {
+                gear.move_to(p0.0, p0.1);
+            } else {
+                gear.line_to(p0.0, p0.1);
+            }
+            gear.line_to(p1.0, p1.1);
+            gear.line_to(p2.0, p2.1);
+            gear.line_to(p3.0, p3.1);
+            gear.line_to(p4.0, p4.1);
+        }
+        gear.close();
+        gear.circle(cx_p, cy_p, r_hole);
+        gear.solidity(vg::Solidity::Hole);
+
+        canvas.fill_path(&gear, &vg::Paint::color(color));
+    }
+}

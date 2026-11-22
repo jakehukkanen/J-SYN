@@ -406,6 +406,12 @@ dropdown popup {
   max-height: 340px;
 }
 
+.dropdown-scroll-compact {
+  width: 1s;
+  height: auto;
+  max-height: 156px;
+}
+
 .dropdown-scroll-content {
   width: 1s;
   height: auto;

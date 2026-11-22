@@ -3617,3 +3617,28 @@ fn insert_enabled_bypass_and_transfer_curve_evaluation() {
         assert!(y.is_finite());
     }
 }
+
+#[test]
+fn fx_clipper_pcm_stage_catches_oversampled_overshoots() {
+    use j_syn_dsp::fx::dynamics::JSatClipperStereo;
+
+    let ceil_norm = 0.5; // -9 dB
+    let ceil_db = -18.0 + ceil_norm * 18.0;
+    let ceil_lin = 10.0_f32.powf(ceil_db * 0.05);
+
+    for knee in [0.0_f32, 0.5_f32] {
+        let mut clipper = JSatClipperStereo::new();
+        let p = [0.75, ceil_norm, knee, 1.0];
+        let mut max_pcm_peak = 0.0_f32;
+        for i in 0..512 {
+            // Sharp alternating square/impulse steps that cause Gibbs overshoot in 4x downsampling
+            let s = if (i % 16) < 8 { 0.95 } else { -0.95 };
+            let (out_l, out_r, _) = clipper.process(s, -s, p, true);
+            max_pcm_peak = max_pcm_peak.max(out_l.abs()).max(out_r.abs());
+        }
+        assert!(
+            max_pcm_peak <= ceil_lin + 1e-6,
+            "PCM stage (knee={knee}) exceeded ceiling {ceil_lin}: {max_pcm_peak}"
+        );
+    }
+}

@@ -422,7 +422,7 @@ impl JSatClipperStereo {
     }
 
     #[inline]
-    pub fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4]) -> (f32, f32, f32) {
+    pub fn process(&mut self, in_l: f32, in_r: f32, p: [f32; 4], pcm_clip: bool) -> (f32, f32, f32) {
         if track_idle(&mut self.idle_samples, in_l, in_r) && self.idle_samples > 128 {
             return (0.0, 0.0, 0.0);
         }
@@ -453,6 +453,18 @@ impl JSatClipperStereo {
                     hard + (soft - hard) * knee
                 }
             });
+        }
+
+        if pcm_clip {
+            for sample in &mut ch_out {
+                let hard = sample.clamp(-ceil_lin, ceil_lin);
+                *sample = if knee <= 1e-4 {
+                    hard
+                } else {
+                    let soft = (((*sample as f64) * inv_ceil).tanh() * (ceil_lin as f64)) as f32;
+                    hard + (soft - hard) * knee
+                };
+            }
         }
 
         let post_peak = ch_out[0].abs().max(ch_out[1].abs());

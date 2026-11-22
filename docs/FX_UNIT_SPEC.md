@@ -11,9 +11,8 @@ Reference checklist for extracting or redesigning any `J-SYN` FX Unit in `crates
   - `FX_UNIT_HEADER_H = 20.0 px` (matches `CONTROL_H` so dropdown labels never clip).
   - `FX_UNIT_ARROW_H = 18.0 px` (`LedToggleSwitch` and `ArrowButton`s centered with `.top(Stretch(1.0)).bottom(Stretch(1.0))`).
 - **Standalone Header Bar (`224 px` window, `6 px` horizontal padding):**
-  - Title: `bold_label(cx, "J-<FX>", "header-title").font_size(11.5)`
-  - Theme picker: `.width(Pixels(88.0))`
-  - UI scale picker: `.width(Pixels(48.0))`
+  - Left: `[Brand Pill]` + `bold_label(cx, "J-<FX>", "header-title").font_size(11.5)` (fits full names like `J-DISPERSION` cleanly).
+  - Right: `22 × 22 px` cogwheel button (`GearIcon`) toggling an in-card **Settings** view (`THEME` + `UI SCALE` backed by shared `standalone-fx.json`, synced on window reopen).
 - **Scope Height (`fx_unit_scope_height`):**
   - Compact (`Utility`, `JSatClipper`, `Distortion`): `FX_UNIT_SCOPE_COMPACT_H = 44.0 px`
   - Medium (`Chorus`, `Flanger`, `Phaser`, `Delay`, `OTT`, `Diopser`): `FX_UNIT_SCOPE_H = 58.0 px`

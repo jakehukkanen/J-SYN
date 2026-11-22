@@ -17,7 +17,8 @@ use crate::tokens;
 use crate::widgets::{KnobDimExt, RotaryKnob, ValueFormatter};
 
 use super::{
-    format_fx_slot_param_value, fx_slot_param_label, DistortionModeParam, MB_DIST_MODE_ITEMS,
+    build_overlay_bool_pill, format_fx_slot_param_value, fx_slot_param_label, DistortionModeParam,
+    MB_DIST_MODE_ITEMS,
 };
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,7 +139,86 @@ pub(crate) fn build_2x2_knob_grid<L, Params, FEnabled, FPick>(
     .height(Auto);
 }
 
-/// Parameter projection trait for plain 4-knob FX Units (`Clipper`, `OTT`, `Phaser`).
+/// Parameter projection trait for the shared `Clipper` FX Unit view (with `PCM` scope toggle).
+pub trait ClipperUnitParams<Params: 'static>: Copy + Send + Sync + 'static {
+    fn enabled<'a>(&self, p: &'a Params) -> &'a BoolParam;
+    fn pcm<'a>(&self, p: &'a Params) -> &'a BoolParam;
+    fn param<'a>(&self, p: &'a Params, idx: usize) -> &'a FloatParam;
+}
+
+/// Shared `Clipper` FX Unit body (`ZStack` scope + top-left `PCM` toggle pill + `2×2` knob grid).
+#[allow(clippy::too_many_arguments)]
+pub fn build_clipper_fx_unit_body<L, Params, U, FScope>(
+    cx: &mut Context,
+    params_lens: L,
+    params: Arc<Params>,
+    gui_context: Arc<dyn GuiContext>,
+    unit_params: U,
+    mod_targets: Option<([ModDestination; 4], Arc<dyn ModUiHost>, u8)>,
+    scope_provider: FScope,
+    knob_sz: f32,
+) where
+    L: Lens<Target = Arc<Params>> + Clone,
+    Params: Send + Sync + 'static,
+    U: ClipperUnitParams<Params>,
+    FScope: Fn() -> FxSlotScopeSnapshot + Send + Sync + 'static,
+{
+    let scope_h = tokens::fx_unit_scope_height(FxType::JSatClipper);
+    let defs = j_syn_dsp::FxSlotParams::default_params_for_type(FxType::JSatClipper);
+    let accent = fx_accent_rgb(FxType::JSatClipper);
+
+    let lens_scope = params_lens.clone();
+    let p_scope = params.clone();
+
+    VStack::new(cx, move |cx| {
+        ZStack::new(cx, move |cx| {
+            FxSlotVisualizer::new(cx, scope_provider)
+                .hoverable(false)
+                .width(Stretch(1.0))
+                .height(Stretch(1.0));
+
+            HStack::new(cx, move |cx| {
+                build_overlay_bool_pill(
+                    cx,
+                    lens_scope,
+                    p_scope,
+                    gui_context,
+                    "PCM",
+                    move |p: &Arc<Params>| unit_params.pcm(p),
+                );
+                Element::new(cx).width(Stretch(1.0)).hoverable(false);
+            })
+            .position_type(PositionType::SelfDirected)
+            .width(Stretch(1.0))
+            .height(Pixels(tokens::FX_UNIT_OVERLAY_PILL_H))
+            .top(Pixels(tokens::SPACE_SM))
+            .left(Pixels(tokens::SPACE_SM))
+            .right(Pixels(tokens::SPACE_SM));
+        })
+        .width(Stretch(1.0))
+        .height(Pixels(scope_h));
+
+        build_2x2_knob_grid(
+            cx,
+            FxType::JSatClipper,
+            false,
+            [false; 4],
+            defs,
+            accent,
+            knob_sz,
+            params_lens,
+            params,
+            move |p| unit_params.enabled(p),
+            move |p, idx| unit_params.param(p, idx),
+            mod_targets,
+        );
+    })
+    .row_between(Pixels(tokens::SPACE_SM))
+    .width(Stretch(1.0))
+    .height(Auto);
+}
+
+/// Parameter projection trait for plain 4-knob FX Units (`OTT`, `Phaser`).
 pub trait FourKnobUnitParams<Params: 'static>: Copy + Send + Sync + 'static {
     fn enabled<'a>(&self, p: &'a Params) -> &'a BoolParam;
     fn param<'a>(&self, p: &'a Params, idx: usize) -> &'a FloatParam;

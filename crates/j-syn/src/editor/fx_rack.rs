@@ -6,11 +6,11 @@ use std::sync::Arc;
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{FxBusTopology, FxType, MB_BAND_LEVEL_DEFAULT_NORM};
 use j_syn_ui::fx_units::{
-    build_diopser_fx_unit_body, build_distortion_fx_unit_body, build_four_knob_fx_unit_body,
-    build_multiband_dist_fx_unit_body, build_tabbed_fx_unit_body, build_utility_fx_unit_body,
-    format_fx_slot_param_value, fx_slot_param_label, DiopserUnitParams, DistortionUnitParams,
-    EightKnobUnitParams, FourKnobUnitParams, FxSubTabHost, MultibandDistUnitParams,
-    MultibandTabHost, UtilityUnitParams,
+    build_clipper_fx_unit_body, build_diopser_fx_unit_body, build_distortion_fx_unit_body,
+    build_four_knob_fx_unit_body, build_multiband_dist_fx_unit_body, build_tabbed_fx_unit_body,
+    build_utility_fx_unit_body, format_fx_slot_param_value, fx_slot_param_label,
+    ClipperUnitParams, DiopserUnitParams, DistortionUnitParams, EightKnobUnitParams,
+    FourKnobUnitParams, FxSubTabHost, MultibandDistUnitParams, MultibandTabHost, UtilityUnitParams,
 };
 use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
@@ -114,6 +114,7 @@ struct SlotSnapshot {
     util_inv_l: bool,
     util_inv_r: bool,
     lim_tp: bool,
+    clip_pcm: bool,
     dist_m: DistortionModeParam,
     mb_bands: [(DistortionModeParam, bool, bool, f32, f32, f32, f32); 3],
 }
@@ -147,6 +148,7 @@ fn swap_fx_slots(
             util_inv_l: s.utility_inv_l.value(),
             util_inv_r: s.utility_inv_r.value(),
             lim_tp: s.limiter_true_peak.value(),
+            clip_pcm: s.clipper_pcm.value(),
             dist_m: s.distortion_mode.value(),
             mb_bands: std::array::from_fn(|b| {
                 let mb = &s.mb_bands[b];
@@ -218,6 +220,10 @@ fn swap_fx_slots(
         setter.begin_set_parameter(&s.limiter_true_peak);
         setter.set_parameter(&s.limiter_true_peak, snap.lim_tp);
         setter.end_set_parameter(&s.limiter_true_peak);
+
+        setter.begin_set_parameter(&s.clipper_pcm);
+        setter.set_parameter(&s.clipper_pcm, snap.clip_pcm);
+        setter.end_set_parameter(&s.clipper_pcm);
 
         setter.begin_set_parameter(&s.distortion_mode);
         setter.set_parameter(&s.distortion_mode, snap.dist_m);
@@ -294,6 +300,9 @@ fn set_fx_slot_type_with_defaults(
         setter.begin_set_parameter(&slot.limiter_true_peak);
         setter.set_parameter(&slot.limiter_true_peak, false);
         setter.end_set_parameter(&slot.limiter_true_peak);
+        setter.begin_set_parameter(&slot.clipper_pcm);
+        setter.set_parameter(&slot.clipper_pcm, true);
+        setter.end_set_parameter(&slot.clipper_pcm);
         for mb in &slot.mb_bands {
             setter.begin_set_parameter(&mb.mode);
             setter.set_parameter(&mb.mode, DistortionModeParam::Tube);
@@ -1104,10 +1113,40 @@ fn build_fx_unit_card(
                     );
                     return;
                 }
-                if matches!(
-                    fx_type,
-                    FxType::JSatClipper | FxType::Ott | FxType::Phaser
-                ) {
+                if fx_type == FxType::JSatClipper {
+                    #[derive(Clone, Copy)]
+                    struct JSynClipperSlotParams {
+                        bus_idx: usize,
+                        slot_idx: usize,
+                    }
+                    impl ClipperUnitParams<JSynPluginParams> for JSynClipperSlotParams {
+                        fn enabled<'a>(&self, p: &'a JSynPluginParams) -> &'a BoolParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].enabled
+                        }
+                        fn pcm<'a>(&self, p: &'a JSynPluginParams) -> &'a BoolParam {
+                            &p.fx_bus_slots(self.bus_idx)[self.slot_idx].clipper_pcm
+                        }
+                        fn param<'a>(&self, p: &'a JSynPluginParams, idx: usize) -> &'a FloatParam {
+                            p.fx_bus_slots(self.bus_idx)[self.slot_idx].param_at(idx)
+                        }
+                    }
+                    let mod_dests: [ModDestination; 4] =
+                        std::array::from_fn(|k| ModDestination::fx_bus_slot_param(bus_idx, slot_idx, k));
+                    let p_scope = p_unit.clone();
+                    let m_scope = m_unit.clone();
+                    build_clipper_fx_unit_body(
+                        cx,
+                        UiData::params,
+                        p_unit,
+                        g_unit,
+                        JSynClipperSlotParams { bus_idx, slot_idx },
+                        Some((mod_dests, m_unit, 0)),
+                        move || slot_scope_snapshot(bus_idx, slot_idx, &p_scope, &m_scope),
+                        tokens::KNOB_FX_UNIT_2X2,
+                    );
+                    return;
+                }
+                if matches!(fx_type, FxType::Ott | FxType::Phaser) {
                     #[derive(Clone, Copy)]
                     struct JSynFourKnobSlotParams {
                         bus_idx: usize,

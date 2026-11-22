@@ -30,13 +30,14 @@ pub use multiband_dist::{
     MultibandTabHost, MB_DIST_MODE_ITEMS,
 };
 pub use simple_units::{
-    build_diopser_fx_unit_body, build_distortion_fx_unit_body, build_four_knob_fx_unit_body,
-    build_tabbed_fx_unit_body, DiopserStagesParam, DiopserUnitParams, DistortionUnitParams,
-    EightKnobUnitParams, FourKnobUnitParams, FxSubTabHost, DIOPSER_STAGE_ITEMS,
+    build_clipper_fx_unit_body, build_diopser_fx_unit_body, build_distortion_fx_unit_body,
+    build_four_knob_fx_unit_body, build_tabbed_fx_unit_body, ClipperUnitParams,
+    DiopserStagesParam, DiopserUnitParams, DistortionUnitParams, EightKnobUnitParams,
+    FourKnobUnitParams, FxSubTabHost, DIOPSER_STAGE_ITEMS,
 };
 pub use standalone_shell::{
-    build_standalone_fx_shell, standalone_default_state, StandaloneFxConfig,
-    StandaloneFxHeaderSpec, StandaloneFxUiData,
+    build_standalone_fx_shell, create_standalone_fx_editor, standalone_default_state,
+    StandaloneFxConfig, StandaloneFxHeaderSpec, StandaloneFxUiData, StandaloneShellEvent,
 };
 
 #[inline]
@@ -364,7 +365,7 @@ pub trait UtilityUnitParams<Params: 'static>: Copy + Send + Sync + 'static {
     fn inv_r<'a>(&self, p: &'a Params) -> &'a BoolParam;
 }
 
-fn build_overlay_bool_pill<L, Params, FPick>(
+pub(crate) fn build_overlay_bool_pill<L, Params, FPick>(
     cx: &mut Context,
     params_lens: L,
     params: Arc<Params>,

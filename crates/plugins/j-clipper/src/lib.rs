@@ -32,6 +32,9 @@ pub struct JClipperParams {
 
     #[id = "mix"]
     pub mix: FloatParam,
+
+    #[id = "pcm"]
+    pub pcm: BoolParam,
 }
 
 impl Default for JClipperParams {
@@ -51,6 +54,7 @@ impl Default for JClipperParams {
                 .with_value_to_string(fmt(2)),
             mix: FloatParam::new("Mix", defs[3], FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_value_to_string(fmt(3)),
+            pcm: BoolParam::new("PCM Clip", true),
         }
     }
 }
@@ -131,6 +135,7 @@ impl Plugin for JClipperPlugin {
             return ProcessStatus::Normal;
         }
         let enabled = self.params.enabled.value();
+        let pcm = self.params.pcm.value();
         let p = [
             self.params.drive.value(),
             self.params.ceil.value(),
@@ -142,7 +147,7 @@ impl Plugin for JClipperPlugin {
             let in_l = *channel_samples.get_mut(0).unwrap();
             let in_r = *channel_samples.get_mut(1).unwrap();
             let (out_l, out_r, act) = if enabled {
-                self.dsp.process(in_l, in_r, p)
+                self.dsp.process(in_l, in_r, p, pcm)
             } else {
                 (in_l, in_r, 0.0)
             };
@@ -195,7 +200,7 @@ mod tests {
         for (id, _, _) in params.param_map() {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
-        assert_eq!(seen.len(), 5);
+        assert_eq!(seen.len(), 6);
     }
 
     #[test]
@@ -208,7 +213,7 @@ mod tests {
 
         let p = FxSlotParams::default_params_for_type(FxType::JSatClipper);
         for _ in 0..512 {
-            let (l, r, act) = plugin.dsp.process(0.0, 0.0, p);
+            let (l, r, act) = plugin.dsp.process(0.0, 0.0, p, true);
             assert_eq!(l, 0.0);
             assert_eq!(r, 0.0);
             assert_eq!(act, 0.0);

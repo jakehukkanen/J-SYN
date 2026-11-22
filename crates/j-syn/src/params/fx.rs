@@ -351,6 +351,8 @@ pub struct FxSlotPluginParams {
     pub utility_inv_r: BoolParam,
     #[id = "fx_lim_tp"]
     pub limiter_true_peak: BoolParam,
+    #[id = "fx_clip_pcm"]
+    pub clipper_pcm: BoolParam,
     #[id = "fx_dist_m"]
     pub distortion_mode: EnumParam<DistortionModeParam>,
     #[nested(array, group = "MB Bands")]
@@ -386,6 +388,7 @@ impl FxSlotPluginParams {
             utility_inv_l: BoolParam::new("Utility Inv L", init.utility_inv_l),
             utility_inv_r: BoolParam::new("Utility Inv R", init.utility_inv_r),
             limiter_true_peak: BoolParam::new("Limiter True Peak", init.limiter_true_peak),
+            clipper_pcm: BoolParam::new("Clipper PCM", init.clipper_pcm),
             distortion_mode: EnumParam::new("Distortion Mode", DistortionModeParam::Tube),
             mb_bands: std::array::from_fn(|b| Box::new(FxMbBandPluginParams::new_band(b))),
         }
@@ -436,6 +439,7 @@ impl FxSlotPluginParams {
             utility_inv_l: self.utility_inv_l.value(),
             utility_inv_r: self.utility_inv_r.value(),
             limiter_true_peak: self.limiter_true_peak.value(),
+            clipper_pcm: self.clipper_pcm.value(),
             distortion_mode: self.distortion_mode.value().into(),
             mb_bands: [
                 self.mb_bands[0].to_dsp(),

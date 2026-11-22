@@ -1,25 +1,30 @@
-//! Shared standalone FX plugin shell (`header-bar`, theme/scale pickers, `hardware-module` card,
-//! `StandaloneFxConfig`, `StandaloneFxUiData`, and 60 Hz redraw timer) so each `crates/plugins/j-<fx>/`
-//! stays concise and visually consistent.
+//! Shared standalone FX plugin shell (`header-bar` with cogwheel button, in-card Settings view,
+//! shared `standalone-fx.json` config, `StandaloneFxUiData`, and 60 Hz redraw timer) so each
+//! `crates/plugins/j-<fx>/` stays concise and visually consistent.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use j_syn_dsp::FxType;
-use nih_plug::prelude::BoolParam;
+use nih_plug::prelude::{BoolParam, Editor, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
-use nih_plug_vizia::ViziaState;
+use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
 use serde::{Deserialize, Serialize};
 
 use crate::controls::{
-    bold_label, build_dropdown_trigger_labels, build_ui_scale_picker, ScrollDropdown,
+    bold_label, build_dropdown_trigger_labels, build_ui_scale_picker, GearIcon, ScrollDropdown,
 };
 use crate::scopes::fx_accent_rgb;
-use crate::shell::{build_tooltip_overlay, UiKitEvent, UiShellState};
+use crate::shell::{
+    build_tooltip_overlay, notify_baseview_resize_macos, UiKitEvent, UiShellState,
+};
 use crate::theme::{self, ThemePalette};
 use crate::tokens;
 use crate::widgets::LedToggleSwitch;
+
+pub const STANDALONE_FX_CONFIG_FILE: &str = "standalone-fx.json";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StandaloneFxConfig {
@@ -37,12 +42,12 @@ impl Default for StandaloneFxConfig {
 }
 
 impl StandaloneFxConfig {
-    fn config_file_path(file_name: &str) -> Option<PathBuf> {
-        theme::ecosystem_config_dir().map(|d| d.join(file_name))
+    fn config_file_path() -> Option<PathBuf> {
+        theme::ecosystem_config_dir().map(|d| d.join(STANDALONE_FX_CONFIG_FILE))
     }
 
-    pub fn load(file_name: &str) -> Self {
-        let Some(path) = Self::config_file_path(file_name) else {
+    pub fn load() -> Self {
+        let Some(path) = Self::config_file_path() else {
             return Self::default();
         };
         let Ok(raw) = std::fs::read_to_string(&path) else {
@@ -51,8 +56,8 @@ impl StandaloneFxConfig {
         serde_json::from_str(&raw).unwrap_or_default()
     }
 
-    pub fn save(&self, file_name: &str) -> Result<(), String> {
-        let Some(path) = Self::config_file_path(file_name) else {
+    pub fn save(&self) -> Result<(), String> {
+        let Some(path) = Self::config_file_path() else {
             return Err("Could not determine config directory".to_string());
         };
         if let Some(parent) = path.parent() {
@@ -65,11 +70,16 @@ impl StandaloneFxConfig {
     }
 }
 
-pub fn standalone_default_state(fx_type: FxType, config_file: &str) -> Arc<ViziaState> {
+pub fn standalone_default_state(fx_type: FxType) -> Arc<ViziaState> {
     let (w, h) = tokens::standalone_fx_window_size(fx_type);
-    let cfg = StandaloneFxConfig::load(config_file);
+    let cfg = StandaloneFxConfig::load();
     let scale = (cfg.ui_scale.clamp(85, 200) as f64) / 100.0;
     ViziaState::new_with_default_scale_factor(move || (w, h), scale)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum StandaloneShellEvent {
+    ToggleSettings,
 }
 
 #[derive(Lens)]
@@ -77,6 +87,7 @@ pub struct StandaloneFxUiData<Params: Send + Sync + 'static> {
     pub params: Arc<Params>,
     pub ui_rev: u64,
     pub val_rev: u64,
+    pub show_settings: bool,
 }
 
 impl<Params: Send + Sync + 'static> Model for StandaloneFxUiData<Params> {
@@ -92,6 +103,12 @@ impl<Params: Send + Sync + 'static> Model for StandaloneFxUiData<Params> {
             }
             _ => {}
         });
+        event.map(|shell_event, meta| match shell_event {
+            StandaloneShellEvent::ToggleSettings => {
+                self.show_settings = !self.show_settings;
+                meta.consume();
+            }
+        });
     }
 }
 
@@ -101,7 +118,6 @@ pub struct StandaloneFxHeaderSpec {
     pub card_title: &'static str,
     pub card_subtitle: &'static str,
     pub fx_type: FxType,
-    pub config_file: &'static str,
 }
 
 fn build_theme_picker(cx: &mut Context) -> Handle<'_, ScrollDropdown> {
@@ -150,14 +166,82 @@ fn build_theme_picker(cx: &mut Context) -> Handle<'_, ScrollDropdown> {
                             })
                             .class("dropdown-scroll-content");
                         })
-                        .class("dropdown-scroll");
+                        .class("dropdown-scroll-compact");
                     });
                 },
             )
         },
     )
-    .width(Pixels(88.0))
-    .height(Pixels(tokens::PILL_H))
+    .width(Stretch(1.0))
+    .height(Pixels(tokens::CONTROL_H))
+}
+
+fn build_settings_card_body(cx: &mut Context) {
+    VStack::new(cx, |cx| {
+        // Card header strip
+        HStack::new(cx, |cx| {
+            bold_label(cx, "SETTINGS", "module-title")
+                .width(Stretch(1.0))
+                .height(Stretch(1.0))
+                .child_top(Stretch(1.0))
+                .child_bottom(Stretch(1.0));
+
+            Button::new(
+                cx,
+                |cx| cx.emit(StandaloneShellEvent::ToggleSettings),
+                |cx| bold_label(cx, "DONE", "fx-subtab-lbl").hoverable(false),
+            )
+            .class("fx-mb-side-btn")
+            .class("fx-subtab-active")
+            .width(Pixels(44.0))
+            .height(Pixels(tokens::FX_UNIT_ARROW_H))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+        })
+        .col_between(Pixels(tokens::SPACE_MD))
+        .height(Pixels(tokens::FX_UNIT_HEADER_H))
+        .width(Stretch(1.0));
+
+        // Theme & Scale controls
+        VStack::new(cx, |cx| {
+            VStack::new(cx, |cx| {
+                bold_label(cx, "THEME", "mini-label")
+                    .width(Stretch(1.0))
+                    .height(Pixels(14.0));
+                build_theme_picker(cx);
+            })
+            .row_between(Pixels(tokens::SPACE_XS))
+            .width(Stretch(1.0))
+            .height(Auto);
+
+            VStack::new(cx, |cx| {
+                bold_label(cx, "UI SCALE", "mini-label")
+                    .width(Stretch(1.0))
+                    .height(Pixels(14.0));
+                build_ui_scale_picker(cx)
+                    .width(Stretch(1.0))
+                    .height(Pixels(tokens::CONTROL_H));
+            })
+            .row_between(Pixels(tokens::SPACE_XS))
+            .width(Stretch(1.0))
+            .height(Auto);
+
+            Element::new(cx).height(Stretch(1.0));
+
+            bold_label(cx, "SHARED ACROSS ALL J-FX", "mini-label")
+                .width(Stretch(1.0))
+                .height(Auto)
+                .child_space(Stretch(1.0));
+        })
+        .row_between(Pixels(tokens::SPACE_LG))
+        .top(Pixels(tokens::SPACE_MD))
+        .bottom(Pixels(tokens::SPACE_MD))
+        .width(Stretch(1.0))
+        .height(Stretch(1.0));
+    })
+    .row_between(Pixels(tokens::SPACE_SM))
+    .width(Stretch(1.0))
+    .height(Stretch(1.0));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -173,25 +257,23 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
 ) where
     Params: Send + Sync + 'static,
     FEnabled: Fn(&Arc<Params>) -> &BoolParam + Copy + Send + Sync + 'static,
-    FBody: FnOnce(&mut Context) + 'static,
+    FBody: Fn(&mut Context) + Send + Sync + 'static,
 {
     let (win_w, win_h) = tokens::standalone_fx_window_size(spec.fx_type);
     let accent = fx_accent_rgb(spec.fx_type);
-    let cfg_file_theme = spec.config_file;
-    let cfg_file_scale = spec.config_file;
 
     let mut shell = UiShellState::new(initial_theme, initial_scale_pct);
     if persist_settings {
         shell = shell
-            .with_theme_callback(move |name| {
-                let mut cfg = StandaloneFxConfig::load(cfg_file_theme);
+            .with_theme_callback(|name| {
+                let mut cfg = StandaloneFxConfig::load();
                 cfg.theme = name.to_string();
-                let _ = cfg.save(cfg_file_theme);
+                let _ = cfg.save();
             })
-            .with_scale_callback(move |pct| {
-                let mut cfg = StandaloneFxConfig::load(cfg_file_scale);
+            .with_scale_callback(|pct| {
+                let mut cfg = StandaloneFxConfig::load();
                 cfg.ui_scale = pct;
-                let _ = cfg.save(cfg_file_scale);
+                let _ = cfg.save();
             });
     }
     shell.install(cx);
@@ -200,21 +282,31 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
         params: params.clone(),
         ui_rev: 0,
         val_rev: 0,
+        show_settings: false,
     }
     .build(cx);
 
     let p_root = params;
+    let body_fn = Arc::new(build_body);
 
     VStack::new(cx, move |cx| {
-        // Single 60 Hz scope redraw timer
+        // Single 60 Hz scope redraw timer (also syncs shared UI scale on first tick if another FX changed it)
+        let target_scale = (initial_scale_pct as f64) / 100.0;
+        let scale_synced = AtomicBool::new(!persist_settings);
         let timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
             if matches!(action, TimerAction::Tick(_)) {
+                if !scale_synced.swap(true, Ordering::Relaxed)
+                    && (cx.user_scale_factor() - target_scale).abs() > 0.005
+                {
+                    cx.set_user_scale_factor(target_scale);
+                    notify_baseview_resize_macos();
+                }
                 cx.needs_redraw();
             }
         });
         cx.start_timer(timer);
 
-        // Compact standalone header bar (224 px window, 6 px horizontal padding)
+        // Compact standalone header bar: [Brand Pill] [J-<FX>] ... [⚙]
         HStack::new(cx, move |cx| {
             HStack::new(cx, |cx| {
                 Element::new(cx)
@@ -234,15 +326,25 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
 
             Element::new(cx).width(Stretch(1.0));
 
-            build_theme_picker(cx)
-                .top(Stretch(1.0))
-                .bottom(Stretch(1.0));
-
-            build_ui_scale_picker(cx)
-                .width(Pixels(48.0))
-                .height(Pixels(tokens::PILL_H))
-                .top(Stretch(1.0))
-                .bottom(Stretch(1.0));
+            Button::new(
+                cx,
+                |cx| cx.emit(StandaloneShellEvent::ToggleSettings),
+                |cx| {
+                    GearIcon::new(cx)
+                        .width(Pixels(14.0))
+                        .height(Pixels(14.0))
+                        .child_space(Stretch(1.0))
+                },
+            )
+            .class("fx-mb-side-btn")
+            .toggle_class(
+                "fx-subtab-active",
+                StandaloneFxUiData::<Params>::show_settings,
+            )
+            .width(Pixels(22.0))
+            .height(Pixels(22.0))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
         })
         .class("header-bar")
         .col_between(Pixels(tokens::SPACE_SM))
@@ -251,54 +353,71 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
         .height(Pixels(tokens::STANDALONE_FX_HEADER_H))
         .width(Stretch(1.0));
 
-        // Main FX Unit Card reusing j-syn-ui's exact FX Unit body & scope
-        let mut body_opt = Some(build_body);
+        // Main FX Unit Card (or in-card Settings view when cogwheel is active)
+        let body_arc = body_fn.clone();
         VStack::new(cx, move |cx| {
-            VStack::new(cx, move |cx| {
-                // Card header strip
-                HStack::new(cx, move |cx| {
-                    LedToggleSwitch::new(
-                        cx,
-                        StandaloneFxUiData::<Params>::params,
-                        pick_enabled,
-                        "OFF",
-                        "ON",
-                        accent,
-                    )
-                    .width(Pixels(tokens::FX_UNIT_LED_W + 4.0))
-                    .height(Pixels(tokens::FX_UNIT_ARROW_H))
-                    .top(Stretch(1.0))
-                    .bottom(Stretch(1.0));
-
-                    bold_label(cx, spec.card_title, "module-title")
+            let body_inner = body_arc.clone();
+            Binding::new(
+                cx,
+                StandaloneFxUiData::<Params>::show_settings,
+                move |cx, settings_lens| {
+                    let show_settings = settings_lens.get(cx);
+                    if show_settings {
+                        VStack::new(cx, |cx| {
+                            build_settings_card_body(cx);
+                        })
+                        .class("hardware-module")
+                        .class("fx-full-card")
                         .width(Stretch(1.0))
-                        .height(Stretch(1.0))
-                        .child_top(Stretch(1.0))
-                        .child_bottom(Stretch(1.0));
+                        .height(Stretch(1.0));
+                    } else {
+                        let body_card = body_inner.clone();
+                        VStack::new(cx, move |cx| {
+                            HStack::new(cx, move |cx| {
+                                LedToggleSwitch::new(
+                                    cx,
+                                    StandaloneFxUiData::<Params>::params,
+                                    pick_enabled,
+                                    "OFF",
+                                    "ON",
+                                    accent,
+                                )
+                                .width(Pixels(tokens::FX_UNIT_LED_W + 4.0))
+                                .height(Pixels(tokens::FX_UNIT_ARROW_H))
+                                .top(Stretch(1.0))
+                                .bottom(Stretch(1.0));
 
-                    bold_label(cx, spec.card_subtitle, "mini-label")
-                        .width(Auto)
-                        .height(Stretch(1.0))
-                        .child_top(Stretch(1.0))
-                        .child_bottom(Stretch(1.0));
-                })
-                .col_between(Pixels(tokens::SPACE_MD))
-                .height(Pixels(tokens::FX_UNIT_HEADER_H))
-                .width(Stretch(1.0));
+                                bold_label(cx, spec.card_title, "module-title")
+                                    .width(Stretch(1.0))
+                                    .height(Stretch(1.0))
+                                    .child_top(Stretch(1.0))
+                                    .child_bottom(Stretch(1.0));
 
-                if let Some(build_body) = body_opt.take() {
-                    build_body(cx);
-                }
-            })
-            .class("hardware-module")
-            .class("fx-full-card")
-            .toggle_class(
-                "module-disabled",
-                StandaloneFxUiData::<Params>::params.map(move |p| !pick_enabled(p).value()),
-            )
-            .width(Stretch(1.0))
-            .height(Auto)
-            .row_between(Pixels(tokens::SPACE_SM));
+                                bold_label(cx, spec.card_subtitle, "mini-label")
+                                    .width(Auto)
+                                    .height(Stretch(1.0))
+                                    .child_top(Stretch(1.0))
+                                    .child_bottom(Stretch(1.0));
+                            })
+                            .col_between(Pixels(tokens::SPACE_MD))
+                            .height(Pixels(tokens::FX_UNIT_HEADER_H))
+                            .width(Stretch(1.0));
+
+                            body_card(cx);
+                        })
+                        .class("hardware-module")
+                        .class("fx-full-card")
+                        .toggle_class(
+                            "module-disabled",
+                            StandaloneFxUiData::<Params>::params
+                                .map(move |p| !pick_enabled(p).value()),
+                        )
+                        .width(Stretch(1.0))
+                        .height(Auto)
+                        .row_between(Pixels(tokens::SPACE_SM));
+                    }
+                },
+            );
         })
         .class("main-chassis")
         .child_space(Pixels(tokens::STANDALONE_FX_PAD))
@@ -317,4 +436,21 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
     )
     .width(Stretch(1.0))
     .height(Stretch(1.0));
+}
+
+/// Creates a standalone FX `Vizia` editor that always syncs to the shared `standalone-fx.json`
+/// theme & UI scale when the plugin window is opened.
+pub fn create_standalone_fx_editor<F>(
+    editor_state: Arc<ViziaState>,
+    build_ui: F,
+) -> Option<Box<dyn Editor>>
+where
+    F: Fn(&mut Context, Arc<dyn GuiContext>, ThemePalette, u32) + Send + Sync + 'static,
+{
+    create_vizia_editor(editor_state, ViziaTheming::Builtin, move |cx, gui_context| {
+        let cfg = StandaloneFxConfig::load();
+        let initial_scale_pct = cfg.ui_scale.clamp(85, 200);
+        let initial_theme = theme::find_theme_by_name(&cfg.theme);
+        build_ui(cx, gui_context, initial_theme, initial_scale_pct);
+    })
 }

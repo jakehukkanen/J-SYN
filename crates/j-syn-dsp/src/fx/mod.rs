@@ -234,6 +234,8 @@ pub struct FxSlotParams {
     pub utility_inv_r: bool,
     /// Enable 4x True Peak detection in `LIMITER` (default `false`).
     pub limiter_true_peak: bool,
+    /// Enable secondary 1x non-oversampled PCM peak-catching clipper stage (default `true`).
+    pub clipper_pcm: bool,
     /// Master Distortion waveshaping algorithm (default `DistortionMode::Tube`).
     pub distortion_mode: DistortionMode,
     /// Per-band parameters (`[Low, Mid, High]`) for `FxType::MultibandDist`.
@@ -255,6 +257,7 @@ impl Default for FxSlotParams {
             utility_inv_l: false,
             utility_inv_r: false,
             limiter_true_peak: false,
+            clipper_pcm: true,
             distortion_mode: DistortionMode::Tube,
             mb_bands: [MbDistBandParams {
                 mode: DistortionMode::Tube,
@@ -340,6 +343,7 @@ impl FxSlotParams {
             utility_inv_l: false,
             utility_inv_r: false,
             limiter_true_peak: false,
+            clipper_pcm: true,
             distortion_mode: DistortionMode::Tube,
             mb_bands: [MbDistBandParams {
                 mode: DistortionMode::Tube,
@@ -711,7 +715,7 @@ impl StereoFxStage {
             FxType::Chorus => self.chorus.process(in_l, in_r, p, eq),
             FxType::Delay => self.delay.process(in_l, in_r, p, eq, tempo_bpm),
             FxType::Reverb => self.reverb.process(in_l, in_r, p, eq),
-            FxType::JSatClipper => self.clipper.process(in_l, in_r, p),
+            FxType::JSatClipper => self.clipper.process(in_l, in_r, p, slot.clipper_pcm),
             FxType::Filter => self.filter.process(in_l, in_r, slot.filter_mode, slot.filter_slope, p),
             FxType::Phaser => self.phaser.process(in_l, in_r, p),
             FxType::Diopser => self.diopser.process(in_l, in_r, p, slot.diopser_stages as usize),

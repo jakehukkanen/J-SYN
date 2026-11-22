@@ -246,18 +246,42 @@ where
                     .overflow(Overflow::Hidden)
                 },
                 move |cx| {
-                    for &(label, val) in items {
-                        let p_ref = params.clone();
-                        let gui_ctx = gui_context.clone();
-                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                            let setter = ParamSetter::new(gui_ctx.as_ref());
-                            let param = params_to_param(&p_ref);
-                            setter.begin_set_parameter(param);
-                            setter.set_parameter(param, val);
-                            setter.end_set_parameter(param);
-                            cx.emit(UiKitEvent::ModUiChanged);
-                            cx.emit(PopupEvent::Close);
-                        });
+                    if items.len() > 7 {
+                        let p_scroll = params.clone();
+                        let g_scroll = gui_context.clone();
+                        ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+                            VStack::new(cx, move |cx| {
+                                for &(label, val) in items {
+                                    let p_ref = p_scroll.clone();
+                                    let gui_ctx = g_scroll.clone();
+                                    bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                                        let setter = ParamSetter::new(gui_ctx.as_ref());
+                                        let param = params_to_param(&p_ref);
+                                        setter.begin_set_parameter(param);
+                                        setter.set_parameter(param, val);
+                                        setter.end_set_parameter(param);
+                                        cx.emit(UiKitEvent::ModUiChanged);
+                                        cx.emit(PopupEvent::Close);
+                                    });
+                                }
+                            })
+                            .class("dropdown-scroll-content");
+                        })
+                        .class("dropdown-scroll-compact");
+                    } else {
+                        for &(label, val) in items {
+                            let p_ref = params.clone();
+                            let gui_ctx = gui_context.clone();
+                            bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                                let setter = ParamSetter::new(gui_ctx.as_ref());
+                                let param = params_to_param(&p_ref);
+                                setter.begin_set_parameter(param);
+                                setter.set_parameter(param, val);
+                                setter.end_set_parameter(param);
+                                cx.emit(UiKitEvent::ModUiChanged);
+                                cx.emit(PopupEvent::Close);
+                            });
+                        }
                     }
                 },
             );
@@ -671,14 +695,20 @@ pub fn build_ui_scale_picker(cx: &mut Context) -> Handle<'_, ScrollDropdown> {
                     .overflow(Overflow::Hidden)
                 },
                 move |cx| {
-                    for &(label, pct, factor) in UI_SCALE_ITEMS {
-                        bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                            cx.set_user_scale_factor(factor);
-                            cx.emit(UiKitEvent::SetUiScale(pct));
-                            cx.emit(PopupEvent::Close);
-                            notify_baseview_resize_macos();
-                        });
-                    }
+                    ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+                        VStack::new(cx, |cx| {
+                            for &(label, pct, factor) in UI_SCALE_ITEMS {
+                                bold_label(cx, label, "dropdown-item").on_press(move |cx| {
+                                    cx.set_user_scale_factor(factor);
+                                    cx.emit(UiKitEvent::SetUiScale(pct));
+                                    cx.emit(PopupEvent::Close);
+                                    notify_baseview_resize_macos();
+                                });
+                            }
+                        })
+                        .class("dropdown-scroll-content");
+                    })
+                    .class("dropdown-scroll-compact");
                 },
             )
         },

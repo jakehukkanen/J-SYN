@@ -5,26 +5,23 @@ use std::sync::Arc;
 use j_syn_dsp::mod_matrix::{FxScopeRing, FX_SCOPE_LEN};
 use j_syn_dsp::FxType;
 use j_syn_ui::fx_units::{
-    build_four_knob_fx_unit_body, build_standalone_fx_shell, standalone_default_state,
-    FourKnobUnitParams, StandaloneFxConfig, StandaloneFxHeaderSpec, StandaloneFxUiData,
+    build_four_knob_fx_unit_body, build_standalone_fx_shell, create_standalone_fx_editor,
+    standalone_default_state, FourKnobUnitParams, StandaloneFxHeaderSpec, StandaloneFxUiData,
 };
 use j_syn_ui::scopes::FxSlotScopeSnapshot;
-use j_syn_ui::theme::{self, ThemePalette};
+use j_syn_ui::theme::ThemePalette;
 use j_syn_ui::tokens;
 use nih_plug::prelude::{BoolParam, Editor, FloatParam, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
-use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
+use nih_plug_vizia::ViziaState;
 
 use crate::JOttParams;
-
-const CONFIG_FILE: &str = "j-ott.json";
 
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-OTT",
     card_title: "OTT",
     card_subtitle: "3-BAND UP/DOWN",
     fx_type: FxType::Ott,
-    config_file: CONFIG_FILE,
 };
 
 pub fn ott_window_size() -> (u32, u32) {
@@ -32,7 +29,7 @@ pub fn ott_window_size() -> (u32, u32) {
 }
 
 pub fn default_state() -> Arc<ViziaState> {
-    standalone_default_state(FxType::Ott, CONFIG_FILE)
+    standalone_default_state(FxType::Ott)
 }
 
 #[derive(Clone, Copy)]
@@ -72,13 +69,13 @@ pub fn build_ott_ui(
         persist_settings,
         move |cx| {
             let p_scope = p_body.clone();
-            let ring = scope_ring;
+            let ring = scope_ring.clone();
             build_four_knob_fx_unit_body(
                 cx,
                 FxType::Ott,
                 [false, false, true, true],
                 StandaloneFxUiData::<JOttParams>::params,
-                p_body,
+                p_body.clone(),
                 StandaloneOttParams,
                 None,
                 move || {
@@ -111,17 +108,14 @@ pub fn create(
     editor_state: Arc<ViziaState>,
     scope_ring: Arc<FxScopeRing>,
 ) -> Option<Box<dyn Editor>> {
-    create_vizia_editor(editor_state, ViziaTheming::Builtin, move |cx, gui_context| {
-        let cfg = StandaloneFxConfig::load(CONFIG_FILE);
-        let initial_scale_pct = cfg.ui_scale.clamp(85, 200);
-        let initial_theme = theme::find_theme_by_name(&cfg.theme);
+    create_standalone_fx_editor(editor_state, move |cx, gui_context, pal, scale_pct| {
         build_ott_ui(
             cx,
             params.clone(),
             gui_context,
             scope_ring.clone(),
-            initial_theme,
-            initial_scale_pct,
+            pal,
+            scale_pct,
             true,
         );
     })

@@ -140,7 +140,8 @@ impl ModUiState {
                     | ((fx.utility_inv_l.value() as u64) << 20)
                     | ((fx.utility_inv_r.value() as u64) << 21)
                     | ((fx.limiter_true_peak.value() as u64) << 22)
-                    | ((fx.distortion_mode.value() as u64) << 23);
+                    | ((fx.distortion_mode.value() as u64) << 23)
+                    | ((fx.clipper_pcm.value() as u64) << 27);
                 Self::fnv1a_mix(&mut h, packed);
                 for mb in &fx.mb_bands {
                     let mb_packed = (mb.enabled.value() as u64)

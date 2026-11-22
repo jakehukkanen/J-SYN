@@ -6,27 +6,24 @@ use std::sync::Arc;
 use j_syn_dsp::mod_matrix::{FxScopeRing, FX_SCOPE_LEN};
 use j_syn_dsp::FxType;
 use j_syn_ui::fx_units::{
-    build_standalone_fx_shell, build_tabbed_fx_unit_body, standalone_default_state,
-    EightKnobUnitParams, FxSubTabHost, StandaloneFxConfig, StandaloneFxHeaderSpec,
+    build_standalone_fx_shell, build_tabbed_fx_unit_body, create_standalone_fx_editor,
+    standalone_default_state, EightKnobUnitParams, FxSubTabHost, StandaloneFxHeaderSpec,
     StandaloneFxUiData,
 };
 use j_syn_ui::scopes::FxSlotScopeSnapshot;
-use j_syn_ui::theme::{self, ThemePalette};
+use j_syn_ui::theme::ThemePalette;
 use j_syn_ui::tokens;
 use nih_plug::prelude::{BoolParam, Editor, FloatParam, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
-use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
+use nih_plug_vizia::ViziaState;
 
 use crate::JChorusParams;
-
-const CONFIG_FILE: &str = "j-chorus.json";
 
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
     header_title: "J-CHORUS",
     card_title: "CHORUS",
     card_subtitle: "DIMENSION • EQ",
     fx_type: FxType::Chorus,
-    config_file: CONFIG_FILE,
 };
 
 pub fn chorus_window_size() -> (u32, u32) {
@@ -34,7 +31,7 @@ pub fn chorus_window_size() -> (u32, u32) {
 }
 
 pub fn default_state() -> Arc<ViziaState> {
-    standalone_default_state(FxType::Chorus, CONFIG_FILE)
+    standalone_default_state(FxType::Chorus)
 }
 
 struct StandaloneSubTabHost {
@@ -96,7 +93,7 @@ pub fn build_chorus_ui(
         persist_settings,
         move |cx| {
             let p_scope = p_body.clone();
-            let ring = scope_ring;
+            let ring = scope_ring.clone();
             build_tabbed_fx_unit_body(
                 cx,
                 FxType::Chorus,
@@ -104,9 +101,9 @@ pub fn build_chorus_ui(
                 [false; 4],
                 StandaloneFxUiData::<JChorusParams>::params,
                 StandaloneFxUiData::<JChorusParams>::ui_rev,
-                p_body,
+                p_body.clone(),
                 StandaloneChorusParams,
-                tab_host,
+                tab_host.clone(),
                 None,
                 move || {
                     let mut pre = [0.0_f32; FX_SCOPE_LEN];
@@ -144,17 +141,14 @@ pub fn create(
     editor_state: Arc<ViziaState>,
     scope_ring: Arc<FxScopeRing>,
 ) -> Option<Box<dyn Editor>> {
-    create_vizia_editor(editor_state, ViziaTheming::Builtin, move |cx, gui_context| {
-        let cfg = StandaloneFxConfig::load(CONFIG_FILE);
-        let initial_scale_pct = cfg.ui_scale.clamp(85, 200);
-        let initial_theme = theme::find_theme_by_name(&cfg.theme);
+    create_standalone_fx_editor(editor_state, move |cx, gui_context, pal, scale_pct| {
         build_chorus_ui(
             cx,
             params.clone(),
             gui_context,
             scope_ring.clone(),
-            initial_theme,
-            initial_scale_pct,
+            pal,
+            scale_pct,
             0,
             true,
         );

@@ -5,27 +5,24 @@ use std::sync::Arc;
 use j_syn_dsp::mod_matrix::{FxScopeRing, FX_SCOPE_LEN};
 use j_syn_dsp::FxType;
 use j_syn_ui::fx_units::{
-    build_diopser_fx_unit_body, build_standalone_fx_shell, standalone_default_state,
-    DiopserStagesParam, DiopserUnitParams, StandaloneFxConfig, StandaloneFxHeaderSpec,
+    build_diopser_fx_unit_body, build_standalone_fx_shell, create_standalone_fx_editor,
+    standalone_default_state, DiopserStagesParam, DiopserUnitParams, StandaloneFxHeaderSpec,
     StandaloneFxUiData,
 };
 use j_syn_ui::scopes::FxSlotScopeSnapshot;
-use j_syn_ui::theme::{self, ThemePalette};
+use j_syn_ui::theme::ThemePalette;
 use j_syn_ui::tokens;
 use nih_plug::prelude::{BoolParam, Editor, EnumParam, FloatParam, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
-use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
+use nih_plug_vizia::ViziaState;
 
 use crate::JDispersionParams;
 
-const CONFIG_FILE: &str = "j-dispersion.json";
-
 const HEADER_SPEC: StandaloneFxHeaderSpec = StandaloneFxHeaderSpec {
-    header_title: "J-DISPERSE",
+    header_title: "J-DISPERSION",
     card_title: "DISPERSION",
     card_subtitle: "ALLPASS",
     fx_type: FxType::Diopser,
-    config_file: CONFIG_FILE,
 };
 
 pub fn dispersion_window_size() -> (u32, u32) {
@@ -33,7 +30,7 @@ pub fn dispersion_window_size() -> (u32, u32) {
 }
 
 pub fn default_state() -> Arc<ViziaState> {
-    standalone_default_state(FxType::Diopser, CONFIG_FILE)
+    standalone_default_state(FxType::Diopser)
 }
 
 #[derive(Clone, Copy)]
@@ -76,12 +73,12 @@ pub fn build_dispersion_ui(
         persist_settings,
         move |cx| {
             let p_scope = p_body.clone();
-            let ring = scope_ring;
+            let ring = scope_ring.clone();
             build_diopser_fx_unit_body(
                 cx,
                 StandaloneFxUiData::<JDispersionParams>::params,
-                p_body,
-                gui_context,
+                p_body.clone(),
+                gui_context.clone(),
                 StandaloneDispersionParams,
                 None,
                 move || {
@@ -115,17 +112,14 @@ pub fn create(
     editor_state: Arc<ViziaState>,
     scope_ring: Arc<FxScopeRing>,
 ) -> Option<Box<dyn Editor>> {
-    create_vizia_editor(editor_state, ViziaTheming::Builtin, move |cx, gui_context| {
-        let cfg = StandaloneFxConfig::load(CONFIG_FILE);
-        let initial_scale_pct = cfg.ui_scale.clamp(85, 200);
-        let initial_theme = theme::find_theme_by_name(&cfg.theme);
+    create_standalone_fx_editor(editor_state, move |cx, gui_context, pal, scale_pct| {
         build_dispersion_ui(
             cx,
             params.clone(),
             gui_context,
             scope_ring.clone(),
-            initial_theme,
-            initial_scale_pct,
+            pal,
+            scale_pct,
             true,
         );
     })
