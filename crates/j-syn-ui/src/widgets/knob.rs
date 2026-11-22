@@ -925,3 +925,11 @@ impl View for RotaryKnob {
         }
     }
 }
+
+impl Drop for RotaryKnob {
+    fn drop(&mut self) {
+        if let Some(ref mb) = self.mod_binding {
+            mb.mod_ui.unregister_drop_rect(mb.dest);
+        }
+    }
+}

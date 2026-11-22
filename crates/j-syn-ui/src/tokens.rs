@@ -84,8 +84,10 @@ pub const FX_UNIT_SCOPE_TALL_H: f32 = 80.0;
 pub const FX_UNIT_OVERLAY_PILL_H: f32 = 17.0;
 pub const FX_UNIT_OVERLAY_PILL_W: f32 = 30.0;
 pub const FX_UNIT_KNOB_ROW_H: f32 = 40.0;
-pub const FX_UNIT_KNOB_ROW_2X2_H: f32 = 60.0;
+pub const FX_UNIT_KNOB_ROW_2X2_H: f32 = 64.0;
 pub const FX_UNIT_2X2_INSET_X: f32 = 27.0;
+pub const FX_UNIT_2X2_TOP_PAD: f32 = 3.0;
+pub const FX_UNIT_2X2_BOTTOM_PAD: f32 = 20.0;
 
 // Standalone single-FX plugin shell metrics (built around FX_UNIT_W)
 pub const STANDALONE_FX_PAD: f32 = 12.0;
@@ -127,12 +129,15 @@ pub const fn standalone_fx_window_size(fx_type: FxType) -> (u32, u32) {
     let scope_h = fx_unit_scope_height(fx_type) as u32;
     let w = (standalone_fx_card_width(fx_type) + STANDALONE_FX_PAD * 2.0) as u32;
     let extra_h = match fx_type {
-        // Band tab bar (18 + 4) + context/mode strip (20 + 4) + 2x2 knob grid delta (136 - 40 = 96)
+        // Band tab bar (18 + 4) + context/mode strip (20 + 4) + 2x2 knob grid delta (157 - 40 = 117)
         FxType::MultibandDist => {
             ((PILL_H + SPACE_SM) as u32)
                 + ((CONTROL_H + SPACE_SM) as u32)
-                + ((FX_UNIT_KNOB_ROW_2X2_H * 2.0 + SPACE_LG + SPACE_SM * 2.0 - FX_UNIT_KNOB_ROW_H)
-                    as u32)
+                + ((FX_UNIT_KNOB_ROW_2X2_H * 2.0
+                    + SPACE_MD
+                    + FX_UNIT_2X2_TOP_PAD
+                    + FX_UNIT_2X2_BOTTOM_PAD
+                    - FX_UNIT_KNOB_ROW_H) as u32)
         }
         _ => 0,
     };

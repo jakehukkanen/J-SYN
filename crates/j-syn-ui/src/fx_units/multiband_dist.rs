@@ -205,7 +205,7 @@ fn build_mb_knob_cell<L, R, Params, U>(
             VStack::new(cx, move |cx| {
                 bold_label(cx, title, "knob-title")
                     .width(Stretch(1.0))
-                    .height(Pixels(tokens::KNOB_TITLE_COMPACT_H))
+                    .height(Pixels(tokens::KNOB_TITLE_H))
                     .child_space(Stretch(1.0));
 
                 let knob = if let Some(band) = mb_band {
@@ -548,9 +548,10 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                 .height(Auto);
             }
         })
-        .row_between(Pixels(tokens::SPACE_LG))
-        .top(Pixels(tokens::SPACE_SM))
-        .bottom(Pixels(tokens::SPACE_SM))
+        .class("fx-unit-2x2")
+        .row_between(Pixels(tokens::SPACE_MD))
+        .top(Pixels(tokens::FX_UNIT_2X2_TOP_PAD))
+        .bottom(Pixels(tokens::FX_UNIT_2X2_BOTTOM_PAD))
         .width(Stretch(1.0))
         .height(Auto);
     })
