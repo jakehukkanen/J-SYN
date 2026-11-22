@@ -125,6 +125,16 @@ impl View for ScrollDropdown {
                 if *y == 0.0 {
                     return;
                 }
+                let popup_open = cx
+                    .nth_child(0)
+                    .and_then(|dd| cx.with_current(dd, |cx| cx.nth_child(0)))
+                    .is_some_and(|trigger| cx.with_current(trigger, |cx| cx.is_checked()));
+                let b = cx.bounds();
+                let mx = cx.mouse().cursorx;
+                let my = cx.mouse().cursory;
+                if popup_open || mx < b.x || mx > b.x + b.w || my < b.y || my > b.y + b.h {
+                    return;
+                }
                 if let Some(ref cb) = self.on_activate {
                     cb(cx);
                 }

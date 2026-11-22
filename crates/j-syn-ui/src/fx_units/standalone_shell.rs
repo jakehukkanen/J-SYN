@@ -185,17 +185,6 @@ fn build_settings_card_body(cx: &mut Context) {
                 .height(Stretch(1.0))
                 .child_top(Stretch(1.0))
                 .child_bottom(Stretch(1.0));
-
-            Button::new(
-                cx,
-                |cx| cx.emit(StandaloneShellEvent::ToggleSettings),
-                |cx| bold_label(cx, "DONE", "fx-subtab-lbl").hoverable(false),
-            )
-            .class("fx-mb-side-btn")
-            .width(Pixels(44.0))
-            .height(Pixels(tokens::FX_UNIT_ARROW_H))
-            .top(Stretch(1.0))
-            .bottom(Stretch(1.0));
         })
         .col_between(Pixels(tokens::SPACE_MD))
         .height(Pixels(tokens::FX_UNIT_HEADER_H))

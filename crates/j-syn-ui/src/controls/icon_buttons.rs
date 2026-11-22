@@ -339,8 +339,7 @@ impl View for GearIcon {
         if bounds.w <= 2.0 || bounds.h <= 2.0 {
             return;
         }
-        let pal = theme::current_palette(cx);
-        let color = theme::vg_color(&pal.text_muted, 255);
+        let color = resolve_glyph_color(cx);
         let cx_p = bounds.x + bounds.w * 0.5;
         let cy_p = bounds.y + bounds.h * 0.5;
         let r_outer = bounds.w.min(bounds.h) * 0.36;
