@@ -14,7 +14,25 @@ pub struct LedToggleSwitch {
     param_base: ParamWidgetBase,
     #[allow(dead_code)]
     accent_rgb: (u8, u8, u8),
+    centered_led: bool,
     hovered: bool,
+    on_cmd_click: Option<Box<dyn Fn(&mut EventContext) + Send + Sync>>,
+}
+
+pub trait LedToggleSwitchExt {
+    /// Overrides `Cmd/Ctrl + Left-Click` on this switch (instead of resetting to default).
+    fn on_cmd_click<F>(self, cb: F) -> Self
+    where
+        F: Fn(&mut EventContext) + Send + Sync + 'static;
+}
+
+impl LedToggleSwitchExt for Handle<'_, LedToggleSwitch> {
+    fn on_cmd_click<F>(self, cb: F) -> Self
+    where
+        F: Fn(&mut EventContext) + Send + Sync + 'static,
+    {
+        self.modify(move |sw| sw.on_cmd_click = Some(Box::new(cb)))
+    }
 }
 
 impl LedToggleSwitch {
@@ -33,12 +51,18 @@ impl LedToggleSwitch {
         FMap: Fn(&Params) -> &P + Copy + 'static,
     {
         let text_params = params.clone();
+        let centered_led = off_label.is_empty() && on_label.is_empty();
         Self {
             param_base: ParamWidgetBase::new(cx, params.clone(), params_to_param),
             accent_rgb,
+            centered_led,
             hovered: false,
+            on_cmd_click: None,
         }
         .build(cx, move |cx| {
+            if centered_led {
+                return;
+            }
             let text_lens = ParamWidgetBase::make_lens(text_params, params_to_param, move |param| {
                 if param.modulated_normalized_value() >= 0.5 {
                     on_label
@@ -112,12 +136,16 @@ impl View for LedToggleSwitch {
             | WindowEvent::MouseDoubleClick(MouseButton::Left)
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
                 if cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL) {
-                    let def = self.param_base.default_normalized_value();
-                    self.param_base.begin_set_parameter(cx);
-                    self.param_base.set_normalized_value(cx, def);
-                    self.param_base.end_set_parameter(cx);
-                    cx.emit(UiKitEvent::ModUiChanged);
-                    cx.needs_redraw();
+                    if let Some(ref cb) = self.on_cmd_click {
+                        cb(cx);
+                    } else {
+                        let def = self.param_base.default_normalized_value();
+                        self.param_base.begin_set_parameter(cx);
+                        self.param_base.set_normalized_value(cx, def);
+                        self.param_base.end_set_parameter(cx);
+                        cx.emit(UiKitEvent::ModUiChanged);
+                        cx.needs_redraw();
+                    }
                 } else {
                     self.toggle(cx);
                     cx.emit(UiKitEvent::ModUiChanged);
@@ -158,7 +186,11 @@ impl View for LedToggleSwitch {
         border.set_line_width(1.0 * dpx);
         canvas.stroke_path(&bg, &border);
 
-        let led_x = bounds.x + 8.0 * dpx;
+        let led_x = if self.centered_led {
+            bounds.x + bounds.w * 0.5
+        } else {
+            bounds.x + 8.0 * dpx
+        };
         let led_y = bounds.y + bounds.h * 0.5;
         let led_r = 2.8 * dpx;
 

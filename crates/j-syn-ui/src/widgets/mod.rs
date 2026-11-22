@@ -1,6 +1,8 @@
 //! Custom skeuomorphic `femtovg` and `ParamWidgetBase` controls (`RotaryKnob`, `LedToggleSwitch`, `ParamStepPill`, `PitchDragBox`, `RatioDragBox`).
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use j_syn_dsp::mod_matrix::ModDestination;
 use nih_plug_vizia::vizia::prelude::*;
@@ -161,6 +163,44 @@ pub(super) fn update_mod_collar_cursor(
     }
 }
 
+const SCROLL_WHEEL_COOLDOWN_MS: u64 = 250;
+const SCROLL_POINTER_MOVE_PX: f32 = 2.0;
+
+static SCROLL_EPOCH: OnceLock<Instant> = OnceLock::new();
+static LAST_LANE_SCROLL_MS: AtomicU64 = AtomicU64::new(0);
+static LAST_LANE_SCROLL_X: AtomicU32 = AtomicU32::new(0);
+static LAST_LANE_SCROLL_Y: AtomicU32 = AtomicU32::new(0);
+
+#[inline]
+fn scroll_now_ms() -> u64 {
+    let start = SCROLL_EPOCH.get_or_init(Instant::now);
+    // Offset by +1 so 0 means "never scrolled".
+    start.elapsed().as_millis() as u64 + 1
+}
+
+/// Records that a scrollable FX lane handled a mouse-wheel event at `(cursor_x, cursor_y)`.
+pub fn notify_scroll_lane_wheeled(cursor_x: f32, cursor_y: f32) {
+    LAST_LANE_SCROLL_X.store(cursor_x.to_bits(), Ordering::Relaxed);
+    LAST_LANE_SCROLL_Y.store(cursor_y.to_bits(), Ordering::Relaxed);
+    LAST_LANE_SCROLL_MS.store(scroll_now_ms(), Ordering::Release);
+}
+
+/// Returns `true` while an FX lane scroll cooldown (`250 ms`) is active and the pointer has not
+/// deliberately moved (`>= 2 px`) onto a new control, so scrolling passes through to `ScrollView`.
+pub fn is_scroll_wheel_guarded(cursor_x: f32, cursor_y: f32) -> bool {
+    let last_ms = LAST_LANE_SCROLL_MS.load(Ordering::Acquire);
+    if last_ms == 0 {
+        return false;
+    }
+    let now_ms = scroll_now_ms();
+    if now_ms.saturating_sub(last_ms) >= SCROLL_WHEEL_COOLDOWN_MS {
+        return false;
+    }
+    let lx = f32::from_bits(LAST_LANE_SCROLL_X.load(Ordering::Relaxed));
+    let ly = f32::from_bits(LAST_LANE_SCROLL_Y.load(Ordering::Relaxed));
+    (cursor_x - lx).hypot(cursor_y - ly) < SCROLL_POINTER_MOVE_PX
+}
+
 mod knob;
 mod pill;
 mod ratio;
@@ -169,4 +209,23 @@ mod switch;
 pub use knob::{KnobDimExt, RotaryKnob};
 pub use pill::{ParamStepPill, PitchDragBox, PitchGroupModOverlay, PitchPart, decompose_pitch_st};
 pub use ratio::RatioDragBox;
-pub use switch::LedToggleSwitch;
+pub use switch::{LedToggleSwitch, LedToggleSwitchExt};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scroll_wheel_guard_blocks_stationary_cursor_and_releases_on_move_or_expiry() {
+        notify_scroll_lane_wheeled(100.0, 200.0);
+        // Stationary or sub-pixel jitter stays guarded.
+        assert!(is_scroll_wheel_guarded(100.0, 200.0));
+        assert!(is_scroll_wheel_guarded(101.0, 200.5));
+        // Deliberate pointer movement (>= 2 px) releases the guard immediately.
+        assert!(!is_scroll_wheel_guarded(103.0, 200.0));
+        assert!(!is_scroll_wheel_guarded(100.0, 203.0));
+        // Cooldown expiry (> 250 ms) releases the guard even with stationary cursor.
+        std::thread::sleep(std::time::Duration::from_millis(SCROLL_WHEEL_COOLDOWN_MS + 15));
+        assert!(!is_scroll_wheel_guarded(100.0, 200.0));
+    }
+}

@@ -40,6 +40,7 @@ pub(crate) struct ModUiState {
     active_modseq_subtab: AtomicU8,
     active_view_mode: AtomicU8,
     fx_eq_mask: AtomicU32,
+    fx_collapsed_mask: AtomicU32,
     mb_dist_tab: [[AtomicU8; 8]; 3],
     inspected_dest: AtomicU16,
     inspected_slot: AtomicU8,
@@ -64,6 +65,7 @@ impl ModUiState {
             active_modseq_subtab: AtomicU8::new(0),
             active_view_mode: AtomicU8::new(0),
             fx_eq_mask: AtomicU32::new(0),
+            fx_collapsed_mask: AtomicU32::new(0),
             mb_dist_tab: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU8::new(0))),
             inspected_dest: AtomicU16::new(UNSET_DEST),
             inspected_slot: AtomicU8::new(UNSET_U8),
@@ -264,6 +266,34 @@ impl ModUiState {
         let b = self.fx_eq_subtab(bus, slot_b);
         self.set_fx_eq_subtab(bus, slot_a, b);
         self.set_fx_eq_subtab(bus, slot_b, a);
+    }
+
+    #[inline]
+    pub fn fx_collapsed(&self, bus: usize, slot: usize) -> bool {
+        let bit = (bus.min(2) * 8 + (slot & 7)) as u32;
+        ((self.fx_collapsed_mask.load(Ordering::Relaxed) >> bit) & 1) != 0
+    }
+
+    pub fn set_fx_collapsed(&self, bus: usize, slot: usize, collapsed: bool) {
+        let bit = 1_u32 << ((bus.min(2) * 8 + (slot & 7)) as u32);
+        if collapsed {
+            self.fx_collapsed_mask.fetch_or(bit, Ordering::Relaxed);
+        } else {
+            self.fx_collapsed_mask.fetch_and(!bit, Ordering::Relaxed);
+        }
+    }
+
+    pub fn toggle_fx_collapsed(&self, bus: usize, slot: usize) -> bool {
+        let bit = 1_u32 << ((bus.min(2) * 8 + (slot & 7)) as u32);
+        let prev = self.fx_collapsed_mask.fetch_xor(bit, Ordering::Relaxed);
+        (prev & bit) == 0
+    }
+
+    pub fn swap_fx_collapsed(&self, bus: usize, slot_a: usize, slot_b: usize) {
+        let a = self.fx_collapsed(bus, slot_a);
+        let b = self.fx_collapsed(bus, slot_b);
+        self.set_fx_collapsed(bus, slot_a, b);
+        self.set_fx_collapsed(bus, slot_b, a);
     }
 
     #[inline]

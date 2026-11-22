@@ -13,8 +13,11 @@ use j_syn_ui::fx_units::{
     EightKnobUnitParams, FilterUnitParams, FourKnobUnitParams, FxSubTabHost, LimiterUnitParams,
     MultibandDistUnitParams, MultibandTabHost, TubeResonatorUnitParams, UtilityUnitParams,
 };
+use j_syn_ui::widgets::{notify_scroll_lane_wheeled, LedToggleSwitch, LedToggleSwitchExt};
 use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
+use nih_plug_vizia::vizia::vg;
+use nih_plug_vizia::widgets::util::ModifiersExt;
 
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_flex_knob_cell_mod, build_inline_pill_cell,
@@ -23,7 +26,6 @@ use super::controls::{
 use super::fx_scopes::slot_scope_snapshot;
 use super::mod_bar::ModUiState;
 use super::tokens;
-use super::widgets::LedToggleSwitch;
 use super::{AMBER_RGB, GOLD_RGB, UiData, UiEvent};
 use crate::{
     DiopserStagesParam, DistortionModeParam, FilterModeParam, FxBusTopologyParam,
@@ -239,6 +241,7 @@ fn swap_fx_slots(
     write(slot_b, a);
     mod_ui.swap_fx_eq_subtab(bus_idx, slot_a, slot_b);
     mod_ui.swap_fx_mb_tab(bus_idx, slot_a, slot_b);
+    mod_ui.swap_fx_collapsed(bus_idx, slot_a, slot_b);
     swap_mod_destinations_for_slots(params, bus_idx, slot_a, slot_b);
 }
 
@@ -311,6 +314,85 @@ fn set_fx_slot_type_with_defaults(
         }
         mod_ui.set_fx_eq_subtab(bus_idx, slot_idx, false);
         mod_ui.set_fx_mb_tab(bus_idx, slot_idx, 0);
+        mod_ui.set_fx_collapsed(bus_idx, slot_idx, false);
+    }
+}
+
+/// Hover-passthrough `ZStack` overlay over an FX card header that illuminates with a subtle
+/// accent tint + rim whenever the pointer hovers the header while holding `Cmd` or `Ctrl`.
+struct FxHeaderCmdHighlight {
+    bus_idx: usize,
+    slot_idx: usize,
+    params: Arc<JSynPluginParams>,
+}
+
+impl FxHeaderCmdHighlight {
+    fn new(
+        cx: &mut Context,
+        bus_idx: usize,
+        slot_idx: usize,
+        params: Arc<JSynPluginParams>,
+    ) -> Handle<'_, Self> {
+        Self {
+            bus_idx,
+            slot_idx,
+            params,
+        }
+        .build(cx, |_| {})
+        .hoverable(false)
+    }
+}
+
+impl View for FxHeaderCmdHighlight {
+    fn element(&self) -> Option<&'static str> {
+        Some("fx-header-cmd-highlight")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        if self.params.fx_bus_slots(self.bus_idx)[self.slot_idx]
+            .fx_type
+            .value()
+            == FxTypeParam::Off
+        {
+            return;
+        }
+        let mods = cx.modifiers();
+        if !(mods.command() || mods.contains(Modifiers::CTRL)) {
+            return;
+        }
+        let b = cx.bounds();
+        if b.w <= 1.0 || b.h <= 1.0 {
+            return;
+        }
+        let mx = cx.mouse().cursorx;
+        let my = cx.mouse().cursory;
+        if mx < b.x || mx > b.x + b.w || my < b.y || my > b.y + b.h {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let pal = j_syn_ui::theme::current_palette(cx);
+        let (ar, ag, ab) = pal.accent_rgb();
+        let r = tokens::RADIUS_PILL * dpx;
+        let mut rect = vg::Path::new();
+        rect.rounded_rect(b.x, b.y, b.w, b.h, r);
+        canvas.fill_path(&rect, &vg::Paint::color(vg::Color::rgba(ar, ag, ab, 32)));
+        let mut border = vg::Paint::color(vg::Color::rgba(ar, ag, ab, 195));
+        border.set_line_width(1.0 * dpx);
+        canvas.stroke_path(&rect, &border);
+    }
+}
+
+#[inline]
+fn toggle_slot_collapse_if_active(
+    cx: &mut EventContext,
+    params: &JSynPluginParams,
+    mod_ui: &ModUiState,
+    bus_idx: usize,
+    slot_idx: usize,
+) {
+    if params.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() != FxTypeParam::Off {
+        mod_ui.toggle_fx_collapsed(bus_idx, slot_idx);
+        cx.emit(UiEvent::ModUiChanged);
     }
 }
 
@@ -348,6 +430,8 @@ fn build_fx_type_dropdown(
             }
         },
         move |cx| {
+            let p_trig = params.clone();
+            let m_trig = mod_ui.clone();
             Dropdown::new(
                 cx,
                 move |cx| {
@@ -361,7 +445,32 @@ fn build_fx_type_dropdown(
                             )
                         },
                     );
+                    let p_cmd = p_trig.clone();
+                    let m_cmd = m_trig.clone();
                     HStack::new(cx, move |cx| {
+                        cx.add_listener(move |_view: &mut HStack, cx, event| {
+                            event.map(|window_event, meta| {
+                                let cmd_or_ctrl = cx.modifiers().command()
+                                    || cx.modifiers().contains(Modifiers::CTRL);
+                                if !cmd_or_ctrl {
+                                    return;
+                                }
+                                match window_event {
+                                    WindowEvent::MouseDown(MouseButton::Left)
+                                    | WindowEvent::MouseDoubleClick(MouseButton::Left) => {
+                                        toggle_slot_collapse_if_active(
+                                            cx, &p_cmd, &m_cmd, bus_idx, slot_idx,
+                                        );
+                                        meta.consume();
+                                    }
+                                    WindowEvent::Press { .. }
+                                    | WindowEvent::PressDown { .. } => {
+                                        meta.consume();
+                                    }
+                                    _ => {}
+                                }
+                            });
+                        });
                         build_dropdown_trigger_labels(cx, text_lens);
                     })
                     .width(Stretch(1.0))
@@ -403,90 +512,171 @@ fn build_fx_slot_header(
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
-    HStack::new(cx, move |cx| {
-        LedToggleSwitch::new(
-            cx,
-            UiData::params,
-            move |p| &p.fx_bus_slots(bus_idx)[slot_idx].enabled,
-            "OFF",
-            "ON",
-            AMBER_RGB,
-        )
-        .width(Pixels(tokens::FX_UNIT_LED_W))
-        .height(Pixels(tokens::FX_UNIT_ARROW_H))
-        .top(Stretch(1.0))
-        .bottom(Stretch(1.0));
-
-        build_fx_type_dropdown(
-            cx,
-            bus_idx,
-            slot_idx,
-            params.clone(),
-            gui_context.clone(),
-            mod_ui.clone(),
-        );
-
+    let p_hl = params.clone();
+    ZStack::new(cx, move |cx| {
+        let p_hdr_cmd = params.clone();
+        let m_hdr_cmd = mod_ui.clone();
         HStack::new(cx, move |cx| {
-            build_inline_pill_cell(
+            cx.add_listener(move |_view: &mut HStack, cx, event| {
+                event.map(|window_event, meta| {
+                    if matches!(
+                        window_event,
+                        WindowEvent::MouseDown(MouseButton::Left)
+                            | WindowEvent::MouseDoubleClick(MouseButton::Left)
+                    ) && (cx.modifiers().command() || cx.modifiers().contains(Modifiers::CTRL))
+                    {
+                        toggle_slot_collapse_if_active(
+                            cx,
+                            &p_hdr_cmd,
+                            &m_hdr_cmd,
+                            bus_idx,
+                            slot_idx,
+                        );
+                        meta.consume();
+                    }
+                });
+            });
+
+            let p_led_cmd = params.clone();
+            let m_led_cmd = mod_ui.clone();
+            LedToggleSwitch::new(
                 cx,
                 UiData::params,
-                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].stack,
-                "STK",
-                4,
-                1.0,
+                move |p| &p.fx_bus_slots(bus_idx)[slot_idx].enabled,
+                "",
+                "",
+                AMBER_RGB,
             )
-            .class("stk-pill");
-        })
-        .width(Pixels(tokens::FX_UNIT_STACK_W))
-        .height(Pixels(tokens::FX_UNIT_HEADER_H));
+            .on_cmd_click(move |cx| {
+                toggle_slot_collapse_if_active(cx, &p_led_cmd, &m_led_cmd, bus_idx, slot_idx);
+            })
+            .width(Pixels(tokens::FX_UNIT_LED_W))
+            .height(Pixels(tokens::FX_UNIT_ARROW_H))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
 
-        let p_up = params.clone();
-        let g_up = gui_context.clone();
-        let m_up = mod_ui.clone();
-        ArrowButton::new(
-            cx,
-            move |cx| {
-                if slot_idx > 0 {
-                    swap_fx_slots(&p_up, g_up.as_ref(), &m_up, bus_idx, slot_idx, slot_idx - 1);
-                    cx.emit(UiEvent::ModUiChanged);
-                }
-            },
-            ArrowDir::Up,
-        )
-        .class("fx-move-btn")
-        .class("fx-move-label")
-        .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 0))
-        .width(Pixels(tokens::FX_UNIT_ARROW_W))
-        .height(Pixels(tokens::FX_UNIT_ARROW_H))
-        .top(Stretch(1.0))
-        .bottom(Stretch(1.0));
+            build_fx_type_dropdown(
+                cx,
+                bus_idx,
+                slot_idx,
+                params.clone(),
+                gui_context.clone(),
+                mod_ui.clone(),
+            );
 
-        ArrowButton::new(
-            cx,
-            move |cx| {
-                if slot_idx < 7 {
-                    swap_fx_slots(
-                        &params,
-                        gui_context.as_ref(),
-                        &mod_ui,
+            HStack::new(cx, move |cx| {
+                build_inline_pill_cell(
+                    cx,
+                    UiData::params,
+                    move |p| &p.fx_bus_slots(bus_idx)[slot_idx].stack,
+                    "STK",
+                    4,
+                    1.0,
+                )
+                .class("stk-pill");
+            })
+            .width(Pixels(tokens::FX_UNIT_STACK_W))
+            .height(Pixels(tokens::FX_UNIT_HEADER_H));
+
+            let p_up = params.clone();
+            let g_up = gui_context.clone();
+            let m_up = mod_ui.clone();
+            ArrowButton::new(
+                cx,
+                move |cx| {
+                    if slot_idx > 0 {
+                        swap_fx_slots(&p_up, g_up.as_ref(), &m_up, bus_idx, slot_idx, slot_idx - 1);
+                        cx.emit(UiEvent::ModUiChanged);
+                    }
+                },
+                ArrowDir::Up,
+            )
+            .class("fx-move-btn")
+            .class("fx-move-label")
+            .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 0))
+            .width(Pixels(tokens::FX_UNIT_ARROW_W))
+            .height(Pixels(tokens::FX_UNIT_ARROW_H))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+
+            let p_dn = params.clone();
+            let g_dn = gui_context;
+            let m_dn = mod_ui.clone();
+            ArrowButton::new(
+                cx,
+                move |cx| {
+                    if slot_idx < 7 {
+                        swap_fx_slots(
+                            &p_dn,
+                            g_dn.as_ref(),
+                            &m_dn,
+                            bus_idx,
+                            slot_idx,
+                            slot_idx + 1,
+                        );
+                        cx.emit(UiEvent::ModUiChanged);
+                    }
+                },
+                ArrowDir::Down,
+            )
+            .class("fx-move-btn")
+            .class("fx-move-label")
+            .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 7))
+            .width(Pixels(tokens::FX_UNIT_ARROW_W))
+            .height(Pixels(tokens::FX_UNIT_ARROW_H))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+
+            let p_col_press = params.clone();
+            let m_col_press = mod_ui.clone();
+            let p_col_dir = params.clone();
+            let m_col_dir = mod_ui;
+            ArrowButton::reactive(
+                cx,
+                move |cx| {
+                    toggle_slot_collapse_if_active(
+                        cx,
+                        &p_col_press,
+                        &m_col_press,
                         bus_idx,
                         slot_idx,
-                        slot_idx + 1,
                     );
-                    cx.emit(UiEvent::ModUiChanged);
-                }
-            },
-            ArrowDir::Down,
-        )
-        .class("fx-move-btn")
-        .class("fx-move-label")
-        .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 7))
-        .width(Pixels(tokens::FX_UNIT_ARROW_W))
-        .height(Pixels(tokens::FX_UNIT_ARROW_H))
-        .top(Stretch(1.0))
-        .bottom(Stretch(1.0));
+                },
+                UiData::mod_ui_rev,
+                move |_| {
+                    let is_off = p_col_dir.fx_bus_slots(bus_idx)[slot_idx].fx_type.value()
+                        == FxTypeParam::Off;
+                    if is_off || m_col_dir.fx_collapsed(bus_idx, slot_idx) {
+                        ArrowDir::Right
+                    } else {
+                        ArrowDir::Down
+                    }
+                },
+            )
+            .class("fx-move-btn")
+            .class("fx-move-label")
+            .toggle_class(
+                "fx-move-disabled",
+                UiData::params.map(move |p| {
+                    p.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() == FxTypeParam::Off
+                }),
+            )
+            .width(Pixels(tokens::FX_UNIT_COLLAPSE_W))
+            .height(Pixels(tokens::FX_UNIT_ARROW_H))
+            .top(Stretch(1.0))
+            .bottom(Stretch(1.0));
+        })
+        .col_between(Pixels(tokens::SPACE_XS))
+        .height(Pixels(tokens::FX_UNIT_HEADER_H))
+        .width(Stretch(1.0));
+
+        FxHeaderCmdHighlight::new(cx, bus_idx, slot_idx, p_hl)
+            .position_type(PositionType::SelfDirected)
+            .left(Pixels(0.0))
+            .top(Pixels(0.0))
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
     })
-    .col_between(Pixels(tokens::SPACE_XS))
     .height(Pixels(tokens::FX_UNIT_HEADER_H))
     .width(Stretch(1.0));
 }
@@ -733,13 +923,19 @@ fn build_fx_unit_card(
         let p_body = params.clone();
         let g_body = gui_context.clone();
         let m_body = mod_ui.clone();
+        let m_col_key = mod_ui.clone();
         Binding::new(
             cx,
-            UiData::params
-                .map(move |p| p.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() as usize),
-            move |cx, fx_idx_lens| {
-                let fx_type = FxType::from_index(fx_idx_lens.get(cx));
-                if fx_type == FxType::Off {
+            UiData::root.map(move |data| {
+                (
+                    data.params.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() as usize,
+                    m_col_key.fx_collapsed(bus_idx, slot_idx),
+                )
+            }),
+            move |cx, slot_view_lens| {
+                let (fx_idx, is_collapsed) = slot_view_lens.get(cx);
+                let fx_type = FxType::from_index(fx_idx);
+                if fx_type == FxType::Off || is_collapsed {
                     return;
                 }
                 let p_unit = p_body.clone();
@@ -1247,6 +1443,18 @@ pub(crate) fn build_three_lane_fx_rack(
 
                 ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
                     VStack::new(cx, move |cx| {
+                        cx.add_listener(|_view: &mut VStack, cx, event| {
+                            event.map(|window_event, _meta| {
+                                if let WindowEvent::MouseScroll(_, sy) = window_event {
+                                    if *sy != 0.0 {
+                                        notify_scroll_lane_wheeled(
+                                            cx.mouse().cursorx,
+                                            cx.mouse().cursory,
+                                        );
+                                    }
+                                }
+                            });
+                        });
                         for slot_idx in 0..8 {
                             build_fx_unit_card(
                                 cx,

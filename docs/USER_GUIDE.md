@@ -1,6 +1,6 @@
 # J-SYN User Guide
 
-Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP plugin featuring a unified `1760 × 840` 3-Wing workspace (`Left Wing`: Oscillators & Noise, `Center Wing`: Dual Filters, Center Modulation Stage, Insert Shapers & Permanent `2×4` Macro/Source Dock, `Right Wing`: 3-Lane Scrollable Master FX Rack).
+Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP plugin featuring a unified `1568 × 882` (`16:9`) 3-Wing workspace (`Left Wing`: Oscillators & Noise, `Center Wing`: Dual Filters, Center Modulation Stage, Insert Shapers & Permanent `2×4` Macro/Source Dock, `Right Wing`: 3-Lane Scrollable Master FX Rack).
 
 ---
 
@@ -42,7 +42,9 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 
 ## 4. Right Wing — 3-Lane Scrollable FX Rack (`BUS A | BUS B | BUS C`)
 - **Three Parallel / Routable 8-Slot FX Lanes (`BUS A`, `BUS B`, `BUS C`):**
-  - Each lane features a `54 px` bus header with output routing dropdown (`-> MST`, `-> B`, `-> C` for `BUS A`; `-> MST`, `-> C` for `BUS B`; `-> MST` for `BUS C`) and `30 px` `LEVEL` & `PAN` knobs, above an 8-slot always-visible scrollable stack of variable-height FX Unit cards (`Empty` slots collapse cleanly to a slim selector strip; active FX units expand to match their scope and `27 px` 4-knob footer with `ON/OFF`, effect selector, `STK 1..4` stacking, `↑`/`↓` slot reordering, and live `150 Hz` pre/post visualizer scope).
+  - Each lane features a `54 px` bus header with output routing dropdown (`-> MST`, `-> B`, `-> C` for `BUS A`; `-> MST`, `-> C` for `BUS B`; `-> MST` for `BUS C`) and `30 px` `LEVEL` & `PAN` knobs, above an 8-slot always-visible scrollable stack of `200 px` variable-height FX Unit cards (`Empty` slots collapse cleanly to a slim selector strip; active FX units feature an icon-only `ON/OFF` LED button, effect selector, `STK 1..4` stacking, `↑`/`↓` slot reordering, a right-edge minimize/maximize button, live `150 Hz` pre/post visualizer scope, and `46 px` knob grid).
+  - **Minimize / Maximize FX Cards:** Click the right-edge chevron (`▾`/`▸`) or **`Cmd/Ctrl + Click`** anywhere on an active FX card's header (LED, effect dropdown, or header strip — excluding `STK`, which still resets stack count to `1`) to collapse or expand its body while keeping the effect active. Holding **`Cmd`/`Ctrl`** while hovering an active FX card header highlights the header strip with an accent outline.
+  - **Scroll-Wheel Protection:** After scrolling an FX lane with the mouse wheel, knobs, pills, and dropdowns ignore scroll-wheel input for `250 ms` (or until the pointer deliberately moves `≥ 2 px`) so controls sliding beneath a stationary cursor are never adjusted accidentally.
   - **Lane-to-Lane Routing:** Use the `BUS A` / `BUS B` header dropdowns to configure 6 routing topologies (defaults to **`Serial (A -> B | C)`**; `Bus C` always outputs `-> MST`):
     - **`Parallel (A | B | C)`:** All 3 lanes sum independently to Master.
     - **`Serial (A -> B | C)`:** `Bus A` feeds `Bus B`; `Bus C` runs in parallel.
@@ -95,7 +97,7 @@ Welcome to **J-SYN**, a 64-voice polyphonic wavetable synthesizer VST3 and CLAP 
 ---
 
 ## 7. Mouse & Keyboard Shortcuts
-- **Double-Click / `Cmd+Click` / `Ctrl+Click`:** Reset knob or pill to default.
+- **Double-Click / `Cmd+Click` / `Ctrl+Click`:** Reset knob or pill to default (`Cmd/Ctrl + Click` on an active FX card header toggles minimize/maximize instead, except on `STK` which still resets to `1`).
 - **`Shift + Drag`:** Fine precision adjustment.
 - **`Opt/Alt + Drag` (Oscillator `PITCH`):** Step by octaves (`±12.00 st`).
 - **`Shift + Right-Click` (Modulated control):** Quick-remove primary modulation slot.

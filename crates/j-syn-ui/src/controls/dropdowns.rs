@@ -122,7 +122,12 @@ impl View for ScrollDropdown {
                 }
             }
             WindowEvent::MouseScroll(_x, y) => {
-                if *y == 0.0 {
+                if *y == 0.0
+                    || crate::widgets::is_scroll_wheel_guarded(
+                        cx.mouse().cursorx,
+                        cx.mouse().cursory,
+                    )
+                {
                     return;
                 }
                 let popup_open = cx

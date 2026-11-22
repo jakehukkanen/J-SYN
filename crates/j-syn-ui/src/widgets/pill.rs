@@ -497,6 +497,9 @@ impl View for ParamStepPill {
                 }
             }
             WindowEvent::MouseScroll(_sx, sy) => {
+                if super::is_scroll_wheel_guarded(cx.mouse().cursorx, cx.mouse().cursory) {
+                    return;
+                }
                 self.param_base.begin_set_parameter(cx);
                 let base_step = 1.0 / (self.num_steps - 1) as f32;
                 let step = if !self.click_cycles && cx.modifiers().shift() {
