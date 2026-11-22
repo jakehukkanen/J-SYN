@@ -22,6 +22,12 @@ use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
 use crate::widgets::{KnobDimExt, RotaryKnob, ValueFormatter};
 
+pub mod multiband_dist;
+pub use multiband_dist::{
+    build_multiband_dist_fx_unit_body, DistortionModeParam, MultibandDistUnitParams,
+    MultibandTabHost, MB_DIST_MODE_ITEMS,
+};
+
 #[inline]
 pub fn format_hz(hz: f32) -> String {
     if hz >= 10_000.0 {
@@ -432,7 +438,6 @@ pub fn build_utility_fx_unit_body<L, Params, U, FScope>(
             })
             .col_between(Pixels(tokens::SPACE_SM))
             .position_type(PositionType::SelfDirected)
-            .z_index(10)
             .width(Stretch(1.0))
             .height(Pixels(tokens::FX_UNIT_OVERLAY_PILL_H))
             .top(Pixels(tokens::SPACE_SM))

@@ -233,6 +233,12 @@ impl ModUiState {
         }
     }
 
+    pub fn unregister_drop_rect(&self, dest: ModDestination) {
+        if let Ok(mut rects) = self.drop_rects.lock() {
+            rects[dest.index()] = (0.0, 0.0, 0.0, 0.0, UNSET_U8);
+        }
+    }
+
     pub fn set_view_mode(&self, mode: u8) {
         self.active_view_mode.store(mode, Ordering::Relaxed);
     }
@@ -654,6 +660,10 @@ impl ModUiHost for ModUiState {
 
     fn register_drop_rect(&self, dest: ModDestination, tab_tag: u8, bounds: BoundingBox) {
         ModUiState::register_drop_rect(self, dest, tab_tag, bounds);
+    }
+
+    fn unregister_drop_rect(&self, dest: ModDestination) {
+        ModUiState::unregister_drop_rect(self, dest);
     }
 
     fn slots_for_dest(&self, dest: ModDestination) -> ([ModSlot; 4], [usize; 4], usize) {

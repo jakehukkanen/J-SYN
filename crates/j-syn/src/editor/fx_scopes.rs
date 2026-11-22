@@ -5,15 +5,12 @@ use std::sync::Arc;
 
 use j_syn_dsp::evaluate_insert_curve;
 use j_syn_dsp::mod_matrix::{FxScopeRing, ModDestination, ModUiTelemetry, FX_SCOPE_LEN};
-use j_syn_dsp::{MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM};
-use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::RawParamEvent;
 
 pub(crate) use j_syn_ui::scopes::{
     fx_accent_rgb, FxSlotScopeSnapshot, FxSlotVisualizer, MbBandScopeSnapshot,
-    MultibandXoverDragOverlay, MultibandXoverHost,
 };
 
 use super::mod_bar::ModUiState;
@@ -82,54 +79,20 @@ pub(crate) fn slot_scope_snapshot(
         mb_tab: mod_ui.fx_mb_tab(bus_idx, slot_idx),
         mb_bands: std::array::from_fn(|b| {
             let mb = &slot.mb_bands[b];
+            let base = 4 + b * 4;
+            let drv_off = tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, base));
+            let lvl_off =
+                tel.dest_offset(ModDestination::fx_bus_slot_param(bus_idx, slot_idx, base + 2));
             MbBandScopeSnapshot {
                 enabled: mb.enabled.value(),
                 solo: mb.solo.value(),
-                drive: mb.drive.value().clamp(0.0, 1.0),
-                level: mb.level.value(),
+                drive: (mb.drive.value() + drv_off).clamp(0.0, 1.0),
+                level: (mb.level.value() + lvl_off).clamp(0.0, 1.0),
             }
         }),
         pre,
         post,
         activity,
-    }
-}
-
-pub(crate) struct JSynMbXoverHost {
-    pub bus_idx: usize,
-    pub slot_idx: usize,
-    pub params: Arc<JSynPluginParams>,
-    pub gui_context: Arc<dyn GuiContext>,
-    pub mod_ui: Arc<ModUiState>,
-}
-
-impl MultibandXoverHost for JSynMbXoverHost {
-    fn xover_norms(&self) -> (f32, f32) {
-        let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
-        (slot.p1.value(), slot.p2.value())
-    }
-
-    fn begin_xover(&self, handle: usize) {
-        let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
-        let param = if handle == 0 { &slot.p1 } else { &slot.p2 };
-        ParamSetter::new(self.gui_context.as_ref()).begin_set_parameter(param);
-    }
-
-    fn set_xover(&self, handle: usize, norm: f32) {
-        let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
-        let param = if handle == 0 { &slot.p1 } else { &slot.p2 };
-        ParamSetter::new(self.gui_context.as_ref()).set_parameter(param, norm);
-    }
-
-    fn end_xover(&self, handle: usize) {
-        let slot = &self.params.fx_bus_slots(self.bus_idx)[self.slot_idx];
-        let param = if handle == 0 { &slot.p1 } else { &slot.p2 };
-        ParamSetter::new(self.gui_context.as_ref()).end_set_parameter(param);
-        let _ = (MB_XOVER_LOW_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM);
-    }
-
-    fn select_band_tab(&self, tab: u8) {
-        self.mod_ui.set_fx_mb_tab(self.bus_idx, self.slot_idx, tab);
     }
 }
 

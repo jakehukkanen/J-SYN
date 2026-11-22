@@ -1031,6 +1031,10 @@ led-toggle:checked:hover .switch-label {
   font-size: 7.5;
 }
 
+.fx-full-card .fx-unit-2x2 .knob-title {
+  font-size: 9.5;
+}
+
 .fx-rack-banner {
   background-color: #241f1a;
   border-width: 1px;

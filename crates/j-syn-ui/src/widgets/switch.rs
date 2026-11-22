@@ -54,6 +54,8 @@ impl LedToggleSwitch {
                 bold_label(cx, text_lens, "switch-label")
                     .width(Auto)
                     .height(Stretch(1.0))
+                    .top(Pixels(2.0))
+                    .bottom(Pixels(0.0))
                     .child_top(Stretch(1.0))
                     .child_bottom(Stretch(1.0))
                     .hoverable(false);

@@ -29,6 +29,7 @@ pub trait ModUiHost: Send + Sync + 'static {
     fn dragging_source(&self) -> ModMatrixSource;
     fn is_drop_target(&self, dest: ModDestination) -> bool;
     fn register_drop_rect(&self, dest: ModDestination, tab_tag: u8, bounds: BoundingBox);
+    fn unregister_drop_rect(&self, dest: ModDestination);
     fn slots_for_dest(&self, dest: ModDestination) -> ([ModSlot; 4], [usize; 4], usize);
     fn has_slots_for_dest(&self, dest: ModDestination) -> bool;
     fn primary_slot_for_dest(&self, dest: ModDestination) -> Option<(usize, ModSlot)>;

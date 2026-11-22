@@ -3306,6 +3306,32 @@ fn fx_multiband_dist_flat_xover_per_band_harmonics_solo_and_idle() {
     let (ml, mr) = solo_rack.process_buses_sample((0.1, -0.1), (0.0, 0.0), (0.0, 0.0), &sp, &mod_xov, 120.0, None);
     assert!(ml.is_finite() && mr.is_finite());
 
+    // Verify 16-param ModDestination round-trip + per-band drive/level modulation
+    for bus in 0..3 {
+        for slot in 0..8 {
+            for param in 0..16 {
+                let d = ModDestination::fx_bus_slot_param(bus, slot, param);
+                assert_eq!(d.fx_slot_param_coords(), Some((bus, slot, param)));
+            }
+        }
+    }
+    let mut mod_band = [0.0_f32; NUM_MOD_DESTS];
+    mod_band[ModDestination::fx_bus_slot_param(0, 0, 6).index()] = -0.5; // Low band level down
+    let mut mod_rms = 0.0_f64;
+    let mut base_rms = 0.0_f64;
+    let mut base_rack = FxRackState::new(sr);
+    let mut mod_rack = FxRackState::new(sr);
+    for n in 0..4000 {
+        let x = 0.4 * (2.0 * std::f32::consts::PI * 60.0 * n as f32 / sr).sin();
+        let (bl, _) = base_rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
+        let (ml2, _) = mod_rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &sp, &mod_band, 120.0, None);
+        if n >= 2000 {
+            base_rms += (bl as f64) * (bl as f64);
+            mod_rms += (ml2 as f64) * (ml2 as f64);
+        }
+    }
+    assert!(mod_rms < base_rms * 0.25, "Negative Low Level mod should attenuate output: mod={mod_rms} base={base_rms}");
+
     for _ in 0..1500 {
         let _ = solo_rack.process_buses_sample((0.0, 0.0), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
     }
