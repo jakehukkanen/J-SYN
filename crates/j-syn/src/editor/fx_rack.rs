@@ -1,5 +1,5 @@
-//! Parallel Dual-Bus Master FX Rack UI (`Bus A` & `Bus B`, `Sub Bus`, `MAIN` Bus Switcher,
-//! full `4×4` `FX` view, `ZStack` translucent floating overlays, and `MAIN | EQ` sub-tabs).
+//! 3-Lane Scrollable Master FX Rack UI (`Bus A`, `Bus B`, `Bus C`, `8` slots per lane,
+//! `200 px` variable-height FX Units, `ZStack` translucent floating overlays, and `Cmd/Ctrl + Click` collapse).
 
 use std::sync::Arc;
 

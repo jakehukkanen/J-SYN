@@ -245,7 +245,7 @@ fn main() -> Result<(), String> {
                                 ..FxSlotScopeSnapshot::default()
                             }
                         },
-                        tokens::KNOB_FX_UNIT,
+                        tokens::KNOB_FX_UNIT_2X2,
                     );
                 })
                 .class("hardware-module")

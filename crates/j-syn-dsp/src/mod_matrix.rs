@@ -1495,13 +1495,13 @@ impl ModDestination {
 
     pub fn name(self) -> &'static str {
         let idx = self as usize;
-        if idx >= 63 && idx < 191 {
+        if (63..191).contains(&idx) {
             return FX_MOD_DEST_NAMES[idx - 63];
         }
-        if idx >= 206 && idx < 270 {
+        if (206..270).contains(&idx) {
             return BUS_C_FX_MOD_DEST_NAMES[idx - 206];
         }
-        if idx >= 272 && idx < 464 {
+        if (272..464).contains(&idx) {
             return FX_EXT_MOD_DEST_NAMES[idx - 272];
         }
         match self {

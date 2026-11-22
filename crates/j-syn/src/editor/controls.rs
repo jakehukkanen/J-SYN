@@ -17,7 +17,7 @@ pub(crate) use j_syn_ui::controls::{
     build_knob_cell_with_readout, build_mini_pill_cell, build_module_header,
     build_param_readout_box, build_pitch_tuning_group, build_ratio_tuning_row,
     build_rotary_knob_with_opt_mod, build_ui_scale_dropdown, ArrowButton, ArrowButtonExt,
-    ArrowDir, CheckIcon, CollapseButton, CrossButton, PopupScrollCapture, ScrollDropdown,
+    ArrowDir, CheckIcon, CollapseButton, CrossButton, GearIcon, PopupScrollCapture, ScrollDropdown,
 };
 
 use super::{BottomTab, CenterStageTab, UiData, UiEvent};

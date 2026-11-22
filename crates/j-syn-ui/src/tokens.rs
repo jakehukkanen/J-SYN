@@ -1,5 +1,4 @@
 //! Central visual and layout design tokens for `J-SYN` and standalone FX plugins.
-#![allow(dead_code)]
 
 use j_syn_dsp::fx::FxType;
 
@@ -14,7 +13,6 @@ pub const SPACE_XS: f32 = 2.0;
 pub const SPACE_SM: f32 = 4.0;
 pub const SPACE_MD: f32 = 6.0;
 pub const SPACE_LG: f32 = 8.0;
-pub const SPACE_XL: f32 = 12.0;
 
 pub const CARD_PAD: f32 = 6.0;
 pub const HEADER_STRIP_H: f32 = 20.0;
@@ -22,18 +20,13 @@ pub const PILL_H: f32 = 18.0;
 pub const CONTROL_H: f32 = 20.0;
 pub const STEP_BTN_W: f32 = 16.0;
 pub const READOUT_H: f32 = 17.0;
-pub const RADIUS_CARD: f32 = 4.0;
 pub const RADIUS_PILL: f32 = 3.0;
-pub const BORDER_HAIRLINE: f32 = 1.0;
-pub const STROKE_TRACE: f32 = 1.5;
 
 pub const KNOB_OSC: f32 = 30.0;
 pub const KNOB_FLT: f32 = 30.0;
 pub const KNOB_STD: f32 = 28.0;
-pub const KNOB_FX_UNIT: f32 = 27.0;
 pub const KNOB_FX_UNIT_2X2: f32 = 46.0;
 pub const KNOB_COMPACT: f32 = 24.0;
-pub const KNOB_MINI: f32 = 18.0;
 pub const KNOB_HEADER: f32 = 36.0;
 
 pub const KNOB_TITLE_H: f32 = 14.0;
@@ -93,7 +86,6 @@ pub const FX_UNIT_2X2_BOTTOM_PAD: f32 = 6.0;
 // Standalone single-FX plugin shell metrics (built around FX_UNIT_W)
 pub const STANDALONE_FX_PAD: f32 = 12.0;
 pub const STANDALONE_FX_HEADER_H: f32 = 34.0;
-pub const STANDALONE_FX_CARD_W: f32 = 260.0;
 
 /// Variable scope height per effect unit so collapsed/simple/dense FX size proportionally inside scrollable lanes.
 #[inline]
@@ -117,11 +109,8 @@ pub const fn fx_unit_scope_height(fx_type: FxType) -> f32 {
 
 /// Card width for standalone single-FX plugins (`200 px` for all active units).
 #[inline]
-pub const fn standalone_fx_card_width(fx_type: FxType) -> f32 {
-    match fx_type {
-        FxType::Off => STANDALONE_FX_CARD_W,
-        _ => FX_UNIT_W,
-    }
+pub const fn standalone_fx_card_width(_fx_type: FxType) -> f32 {
+    FX_UNIT_W
 }
 
 /// Computes the deterministic logical window `(width, height)` for a standalone single-FX plugin.

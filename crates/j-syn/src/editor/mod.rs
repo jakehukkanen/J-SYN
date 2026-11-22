@@ -48,7 +48,7 @@ mod voice_tab;
 
 use controls::{
     bold_label, build_center_tab_button, build_dropdown_trigger_labels, build_header_knob_cell,
-    build_ui_scale_dropdown, ArrowButton, ArrowDir, CheckIcon, CrossButton,
+    build_ui_scale_dropdown, ArrowButton, ArrowDir, CheckIcon, CrossButton, GearIcon,
 };
 use filter_panel::build_dual_filter_section;
 use fx_rack::build_three_lane_fx_rack;
@@ -553,76 +553,6 @@ pub(crate) fn default_state() -> Arc<ViziaState> {
     ViziaState::new_with_default_scale_factor(|| (BASE_WIDTH, BASE_HEIGHT), scale)
 }
 
-struct GearIcon;
-
-impl GearIcon {
-    fn new<'a>(cx: &'a mut Context) -> Handle<'a, Self> {
-        Self.build(cx, |_| {})
-            .bind(UiData::gear_radius, |mut handle, _| handle.needs_redraw())
-    }
-}
-
-impl View for GearIcon {
-    fn element(&self) -> Option<&'static str> {
-        Some("gear-icon")
-    }
-
-    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        use nih_plug_vizia::vizia::vg;
-
-        let bounds = cx.bounds();
-        if bounds.w <= 2.0 || bounds.h <= 2.0 {
-            return;
-        }
-        let active = UiData::view_mode.get(cx) == MainViewMode::Settings;
-        let pal = theme::current_palette(cx);
-        let color = if active {
-            theme::vg_color(&pal.accent_primary, 255)
-        } else {
-            theme::vg_color(&pal.text_muted, 255)
-        };
-
-        let cx_p = bounds.x + bounds.w * 0.5;
-        let cy_p = bounds.y + bounds.h * 0.5;
-        let radius_ratio = UiData::gear_radius.get(cx).clamp(0.10, 0.60);
-        let r_outer = bounds.w.min(bounds.h) * radius_ratio;
-        let r_inner = r_outer * 0.68;
-        let r_hole = r_outer * 0.31;
-        let teeth = 6usize;
-
-        let mut gear = vg::Path::new();
-        for i in 0..teeth {
-            let base = (i as f32 / teeth as f32) * std::f32::consts::TAU;
-            let step = std::f32::consts::TAU / (teeth as f32 * 4.0);
-            let a0 = base - step * 1.15;
-            let a1 = base - step * 0.60;
-            let a2 = base + step * 0.60;
-            let a3 = base + step * 1.15;
-            let a4 = base + step * 2.00;
-
-            let p0 = (cx_p + r_inner * a0.cos(), cy_p + r_inner * a0.sin());
-            let p1 = (cx_p + r_outer * a1.cos(), cy_p + r_outer * a1.sin());
-            let p2 = (cx_p + r_outer * a2.cos(), cy_p + r_outer * a2.sin());
-            let p3 = (cx_p + r_inner * a3.cos(), cy_p + r_inner * a3.sin());
-            let p4 = (cx_p + r_inner * a4.cos(), cy_p + r_inner * a4.sin());
-            if i == 0 {
-                gear.move_to(p0.0, p0.1);
-            } else {
-                gear.line_to(p0.0, p0.1);
-            }
-            gear.line_to(p1.0, p1.1);
-            gear.line_to(p2.0, p2.1);
-            gear.line_to(p3.0, p3.1);
-            gear.line_to(p4.0, p4.1);
-        }
-        gear.close();
-        gear.circle(cx_p, cy_p, r_hole);
-        gear.solidity(vg::Solidity::Hole);
-
-        canvas.fill_path(&gear, &vg::Paint::color(color));
-    }
-}
-
 fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     HStack::new(cx, move |cx| {
         HStack::new(cx, move |cx| {
@@ -659,10 +589,12 @@ fn build_header_bar(cx: &mut Context, mod_ui: Arc<ModUiState>) {
                 cx,
                 |cx| cx.emit(UiEvent::SelectViewMode(MainViewMode::Settings)),
                 |cx| {
-                    GearIcon::new(cx)
-                        .width(Stretch(1.0))
-                        .height(Stretch(1.0))
-                        .hoverable(false)
+                    GearIcon::with_radius(cx, UiData::gear_radius, |cx| {
+                        UiData::gear_radius.get(cx).clamp(0.10, 0.60)
+                    })
+                    .class("view-switch-label")
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0))
                 },
             )
             .class("view-switch-btn")

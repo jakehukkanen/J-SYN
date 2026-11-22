@@ -1,5 +1,5 @@
 //! J-SYN adapter for `j_syn_ui::scopes` FX visualizers plus J-SYN-specific
-//! `SubClipperScope`, `InsertTransferScope`, and `MasterScope` views.
+//! `InsertTransferScope` and `MasterScope` views.
 
 use std::sync::Arc;
 
@@ -100,52 +100,6 @@ fn read_ring_snapshot(ring: &FxScopeRing) -> ([f32; FX_SCOPE_LEN], [f32; FX_SCOP
     let mut post = [0.0_f32; FX_SCOPE_LEN];
     let act = ring.read_snapshot(&mut pre, &mut post);
     (pre, post, act)
-}
-
-/// Compact clipper scope for the `SUB FX` banner showing pre-clip vs post-clip waveform.
-#[allow(dead_code)]
-pub(super) struct SubClipperScope {
-    params: Arc<JSynPluginParams>,
-    telemetry: Arc<ModUiTelemetry>,
-}
-
-#[allow(dead_code)]
-impl SubClipperScope {
-    pub(super) fn new<'a>(
-        cx: &'a mut Context,
-        params: Arc<JSynPluginParams>,
-        telemetry: Arc<ModUiTelemetry>,
-    ) -> Handle<'a, Self> {
-        Self { params, telemetry }.build(cx, |_| {})
-    }
-}
-
-impl View for SubClipperScope {
-    fn element(&self) -> Option<&'static str> {
-        Some("sub-clipper-scope")
-    }
-
-    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        event.map(|raw_param_event, _| {
-            if let RawParamEvent::ParametersChanged = raw_param_event {
-                cx.needs_redraw();
-            }
-        });
-    }
-
-    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        let bounds = cx.bounds();
-        if bounds.w <= 4.0 || bounds.h <= 4.0 {
-            return;
-        }
-        let dpx = cx.scale_factor();
-        let pal = theme::current_palette(cx);
-        let enabled = self.params.sub_bus.enabled.value();
-        let (pre, post, gr_act) = read_ring_snapshot(&self.telemetry.sub_scope);
-        j_syn_ui::scopes::paint_clipper_waveform(
-            canvas, bounds, dpx, &pre, &post, gr_act, 1.0, 1.25, enabled, &pal,
-        );
-    }
 }
 
 /// Compact transfer-curve visualizer for each per-voice Insert Shaper card (`INS 1` / `INS 2`).

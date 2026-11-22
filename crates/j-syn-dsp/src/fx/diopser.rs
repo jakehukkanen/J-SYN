@@ -25,7 +25,7 @@ pub fn diopser_freq_hz(norm: f32) -> f32 {
 #[inline]
 pub fn diopser_res_to_q(res: f32) -> f64 {
     let r = res.clamp(0.0, 1.0) as f64;
-    0.707_106_78 + r * r * 14.0
+    std::f64::consts::FRAC_1_SQRT_2 + r * r * 14.0
 }
 
 #[inline]

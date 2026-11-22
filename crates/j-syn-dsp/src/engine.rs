@@ -942,8 +942,8 @@ impl SynthEngine {
                 &modseq_phases,
                 &env_levels,
             );
-            for i in 0..2 {
-                let mf = crate::voice::apply_filter_modulation(&params.filters[i], i, &v.mod_offsets);
+            for (i, flt) in params.filters.iter().enumerate() {
+                let mf = crate::voice::apply_filter_modulation(flt, i, &v.mod_offsets);
                 let kt_semi = (v.current_midi_note - 60.0) * mf.keytrack.clamp(0.0, 1.0);
                 let fc = (mf.cutoff_hz * 2.0_f32.powf(kt_semi / 12.0)).clamp(20.0, 20_000.0);
                 self.telemetry
@@ -974,8 +974,8 @@ impl SynthEngine {
                 &modseq_phases,
                 &[0.0; 4],
             );
-            for i in 0..2 {
-                let mf = crate::voice::apply_filter_modulation(&params.filters[i], i, &idle_offsets);
+            for (i, flt) in params.filters.iter().enumerate() {
+                let mf = crate::voice::apply_filter_modulation(flt, i, &idle_offsets);
                 self.telemetry.store_filter_live(
                     i,
                     mf.cutoff_hz,

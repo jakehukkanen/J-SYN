@@ -72,8 +72,6 @@ pub(super) fn subtab_accent(sub: ModSeqSubTab) -> (u8, u8, u8) {
     src.color_rgb()
 }
 
-/// Interactive `femtovg` Performer/MSEG curve canvas with real-time playhead.
-
 fn build_labeled_dropdown<E, P, FMap>(
     cx: &mut Context,
     title: &'static str,

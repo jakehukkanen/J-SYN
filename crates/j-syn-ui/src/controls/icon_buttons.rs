@@ -460,11 +460,31 @@ impl View for CheckIcon {
 }
 
 /// Crisp centered 6-tooth vector cogwheel icon for settings buttons.
-pub struct GearIcon;
+pub struct GearIcon {
+    radius_fn: Box<dyn Fn(&mut DrawContext) -> f32>,
+}
 
 impl GearIcon {
     pub fn new<'a>(cx: &'a mut Context) -> Handle<'a, Self> {
-        Self.build(cx, |_| {}).hoverable(false)
+        Self {
+            radius_fn: Box::new(|_| 0.36),
+        }
+        .build(cx, |_| {})
+        .hoverable(false)
+    }
+
+    pub fn with_radius<'a, L, F>(cx: &'a mut Context, lens: L, radius_fn: F) -> Handle<'a, Self>
+    where
+        L: Lens,
+        <L as Lens>::Target: Data,
+        F: 'static + Fn(&mut DrawContext) -> f32,
+    {
+        Self {
+            radius_fn: Box::new(radius_fn),
+        }
+        .build(cx, |_| {})
+        .hoverable(false)
+        .bind(lens, |mut handle, _| handle.needs_redraw())
     }
 }
 
@@ -481,7 +501,8 @@ impl View for GearIcon {
         let color = resolve_glyph_color(cx);
         let cx_p = bounds.x + bounds.w * 0.5;
         let cy_p = bounds.y + bounds.h * 0.5;
-        let r_outer = bounds.w.min(bounds.h) * 0.36;
+        let radius_ratio = (self.radius_fn)(cx).clamp(0.10, 0.60);
+        let r_outer = bounds.w.min(bounds.h) * radius_ratio;
         let r_inner = r_outer * 0.68;
         let r_hole = r_outer * 0.31;
         let teeth = 6usize;

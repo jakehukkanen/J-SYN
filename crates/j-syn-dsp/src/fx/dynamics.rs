@@ -402,6 +402,12 @@ pub struct JSatClipperStereo {
     idle_samples: u32,
 }
 
+impl Default for JSatClipperStereo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JSatClipperStereo {
     pub fn new() -> Self {
         Self {
