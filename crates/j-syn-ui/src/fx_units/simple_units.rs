@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::FxType;
-use nih_plug::prelude::{BoolParam, Enum, EnumParam, FloatParam, GuiContext};
+use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
 
 use crate::controls::{bold_label, build_enum_dropdown, build_prefixed_enum_dropdown};
@@ -16,45 +16,10 @@ use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
 use crate::widgets::{KnobDimExt, RotaryKnob, ValueFormatter};
 
-use super::{
-    build_overlay_bool_pill, format_fx_slot_param_value, fx_slot_param_label, DistortionModeParam,
-    MB_DIST_MODE_ITEMS,
+use super::params::{
+    DiopserStagesParam, DistortionModeParam, DIOPSER_STAGE_ITEMS, MB_DIST_MODE_ITEMS,
 };
-
-#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiopserStagesParam {
-    #[name = "8"]
-    S8,
-    #[name = "16"]
-    S16,
-    #[name = "32"]
-    S32,
-    #[name = "64"]
-    S64,
-    #[name = "128"]
-    S128,
-}
-
-impl DiopserStagesParam {
-    #[inline]
-    pub const fn to_index(self) -> u8 {
-        match self {
-            Self::S8 => 0,
-            Self::S16 => 1,
-            Self::S32 => 2,
-            Self::S64 => 3,
-            Self::S128 => 4,
-        }
-    }
-}
-
-pub const DIOPSER_STAGE_ITEMS: &[(&str, DiopserStagesParam)] = &[
-    ("8", DiopserStagesParam::S8),
-    ("16", DiopserStagesParam::S16),
-    ("32", DiopserStagesParam::S32),
-    ("64", DiopserStagesParam::S64),
-    ("128", DiopserStagesParam::S128),
-];
+use super::{build_overlay_bool_pill, format_fx_slot_param_value, fx_slot_param_label};
 
 /// Shared equidistant `2×2` knob grid (`46 px` knobs at `W/3` & `2W/3`, `9.5 pt` titles)
 /// matching `docs/FX_UNIT_SPEC.md` §4.

@@ -29,7 +29,7 @@ pub use fx::{
     evaluate_tube_res_scope_response, filter_response_db_from_slot, flanger_delay_ms,
     flanger_feedback, flanger_phase_deg, flanger_rate_hz, format_tube_res_tune, format_utility_pan,
     fx_high_cut_hz, fx_low_cut_hz, limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms,
-    limiter_release_ms, mb_band_level_db, mb_band_magnitude_at_hz, mb_ordered_xover_hz,
+    limiter_lookahead_samples, limiter_release_ms, mb_band_level_db, mb_band_magnitude_at_hz, mb_ordered_xover_hz,
     mb_out_gain_db, mb_xover_high_hz, mb_xover_high_norm, mb_xover_low_hz, mb_xover_low_norm,
     sub_cutoff_hz_to_norm, sub_cutoff_norm_to_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
     tube_res_flt_width_oct, tube_res_lfo_rate_hz, tube_res_tune_hz, tube_res_tune_midi,

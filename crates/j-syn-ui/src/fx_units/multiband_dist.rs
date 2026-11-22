@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::ModDestination;
-use j_syn_dsp::{mb_ordered_xover_hz, DistortionMode, FxType};
-use nih_plug::prelude::{BoolParam, Enum, EnumParam, FloatParam, GuiContext, ParamSetter};
+use j_syn_dsp::{mb_ordered_xover_hz, FxType};
+use nih_plug::prelude::{BoolParam, EnumParam, FloatParam, GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 
 use crate::controls::{bold_label, build_enum_dropdown};
@@ -17,77 +17,8 @@ use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
 use crate::widgets::{KnobDimExt, LedToggleSwitch, RotaryKnob, ValueFormatter};
 
+use super::params::{DistortionModeParam, MB_DIST_MODE_ITEMS};
 use super::{format_fx_slot_param_value, format_hz, fx_slot_param_label, mb_band_default_norm};
-
-#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DistortionModeParam {
-    #[name = "Tube"]
-    Tube,
-    #[name = "Mech"]
-    Mech,
-    #[name = "Sine"]
-    Sine,
-    #[name = "Crush"]
-    Crush,
-    #[name = "Classic A"]
-    ClassicA,
-    #[name = "Classic B"]
-    ClassicB,
-    #[name = "Classic C"]
-    ClassicC,
-    #[name = "Diode A"]
-    DiodeA,
-    #[name = "Diode B"]
-    DiodeB,
-    #[name = "Linear Fold"]
-    LinearFold,
-    #[name = "Sine Fold"]
-    SineFold,
-    #[name = "Hard Clip"]
-    HardClip,
-    #[name = "Half Rect"]
-    HalfRectify,
-    #[name = "Full Rect"]
-    FullRectify,
-}
-
-impl From<DistortionModeParam> for DistortionMode {
-    fn from(v: DistortionModeParam) -> Self {
-        match v {
-            DistortionModeParam::Tube => Self::Tube,
-            DistortionModeParam::Mech => Self::Mech,
-            DistortionModeParam::Sine => Self::Sine,
-            DistortionModeParam::Crush => Self::Crush,
-            DistortionModeParam::ClassicA => Self::ClassicA,
-            DistortionModeParam::ClassicB => Self::ClassicB,
-            DistortionModeParam::ClassicC => Self::ClassicC,
-            DistortionModeParam::DiodeA => Self::DiodeA,
-            DistortionModeParam::DiodeB => Self::DiodeB,
-            DistortionModeParam::LinearFold => Self::LinearFold,
-            DistortionModeParam::SineFold => Self::SineFold,
-            DistortionModeParam::HardClip => Self::HardClip,
-            DistortionModeParam::HalfRectify => Self::HalfRectify,
-            DistortionModeParam::FullRectify => Self::FullRectify,
-        }
-    }
-}
-
-pub const MB_DIST_MODE_ITEMS: &[(&str, DistortionModeParam)] = &[
-    ("Tube", DistortionModeParam::Tube),
-    ("Mech", DistortionModeParam::Mech),
-    ("Sine", DistortionModeParam::Sine),
-    ("Crush", DistortionModeParam::Crush),
-    ("Classic A", DistortionModeParam::ClassicA),
-    ("Classic B", DistortionModeParam::ClassicB),
-    ("Classic C", DistortionModeParam::ClassicC),
-    ("Diode A", DistortionModeParam::DiodeA),
-    ("Diode B", DistortionModeParam::DiodeB),
-    ("Linear Fold", DistortionModeParam::LinearFold),
-    ("Sine Fold", DistortionModeParam::SineFold),
-    ("Hard Clip", DistortionModeParam::HardClip),
-    ("Half Rect", DistortionModeParam::HalfRectify),
-    ("Full Rect", DistortionModeParam::FullRectify),
-];
 
 /// Parameter projection trait for the shared `MB Dist` FX Unit view.
 /// Implemented as a tiny `Copy` marker/coordinate struct by both standalone `j-mbdist`

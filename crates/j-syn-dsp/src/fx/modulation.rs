@@ -404,7 +404,7 @@ impl PhaserStereo {
 }
 
 /// Tempo-synced stereo Delay (`MAIN` = `TIME, FEEDBK, MOD, MIX`, `EQ` = `LOW CUT, HIGH CUT, PING-PONG, WIDTH`).
-pub(crate) struct DelayStereo {
+pub struct DelayStereo {
     buf_l: Box<[f32]>,
     buf_r: Box<[f32]>,
     eq: EqStageStereo,
@@ -417,7 +417,7 @@ pub(crate) struct DelayStereo {
 }
 
 impl DelayStereo {
-    pub(crate) fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         let sr = sample_rate.max(1_000.0);
         let init_delay = (sr * 0.375).min((MAX_DELAY_SAMPLES - 4) as f32);
         Self {
@@ -457,7 +457,7 @@ impl DelayStereo {
     }
 
     #[inline]
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,

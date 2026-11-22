@@ -21,24 +21,34 @@ use crate::scopes::{fx_accent_rgb, FxSlotScopeSnapshot, FxSlotVisualizer};
 use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
 
+pub mod filter;
+pub mod limiter;
 pub mod multiband_dist;
+pub mod params;
 pub mod simple_units;
 pub mod standalone_shell;
+pub mod tube_res;
 
+pub use filter::{build_filter_fx_unit_body, FilterUnitParams};
+pub use limiter::{build_limiter_fx_unit_body, LimiterUnitParams};
 pub use multiband_dist::{
-    build_multiband_dist_fx_unit_body, DistortionModeParam, MultibandDistUnitParams,
-    MultibandTabHost, MB_DIST_MODE_ITEMS,
+    build_multiband_dist_fx_unit_body, MultibandDistUnitParams, MultibandTabHost,
+};
+pub use params::{
+    DiopserStagesParam, DistortionModeParam, FilterModeParam, FxFilterSlopeParam,
+    DIOPSER_STAGE_ITEMS, FX_FILTER_MODE_ITEMS, FX_FILTER_SLOPE_ITEMS, MB_DIST_MODE_ITEMS,
 };
 pub use simple_units::{
     build_clipper_fx_unit_body, build_diopser_fx_unit_body, build_distortion_fx_unit_body,
     build_four_knob_fx_unit_body, build_tabbed_fx_unit_body, ClipperUnitParams,
-    DiopserStagesParam, DiopserUnitParams, DistortionUnitParams, EightKnobUnitParams,
-    FourKnobUnitParams, FxSubTabHost, DIOPSER_STAGE_ITEMS,
+    DiopserUnitParams, DistortionUnitParams, EightKnobUnitParams, FourKnobUnitParams,
+    FxSubTabHost,
 };
 pub use standalone_shell::{
     build_standalone_fx_shell, create_standalone_fx_editor, standalone_default_state,
     StandaloneFxConfig, StandaloneFxHeaderSpec, StandaloneFxUiData, StandaloneShellEvent,
 };
+pub use tube_res::{build_tube_res_fx_unit_body, TubeResonatorUnitParams};
 
 #[inline]
 pub fn format_hz(hz: f32) -> String {

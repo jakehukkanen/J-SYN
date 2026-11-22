@@ -33,7 +33,8 @@ pub use self::diopser::{
     diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, DIOPSER_STAGE_COUNTS,
 };
 pub use self::limiter::{
-    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_release_ms,
+    limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_lookahead_samples,
+    limiter_release_ms,
 };
 pub use self::modulation::{
     evaluate_flanger_scope_response, flanger_delay_ms, flanger_feedback, flanger_phase_deg,
@@ -228,6 +229,8 @@ pub struct FxSlotParams {
     pub diopser_stages: u8,
     /// Enable the pre-resonator softening bandpass filter in `TUBE RES.` (default `true`).
     pub tube_res_filter_enabled: bool,
+    /// Enable 32-sample stepped ("Dirty") Pitch LFO in `TUBE RES.` (default `true`).
+    pub tube_res_dirty_lfo: bool,
     /// Invert left channel phase in `UTILITY` (default `false`).
     pub utility_inv_l: bool,
     /// Invert right channel phase in `UTILITY` (default `false`).
@@ -254,6 +257,7 @@ impl Default for FxSlotParams {
             filter_slope: FxFilterSlope::Db12,
             diopser_stages: 2,
             tube_res_filter_enabled: true,
+            tube_res_dirty_lfo: true,
             utility_inv_l: false,
             utility_inv_r: false,
             limiter_true_peak: false,
@@ -340,6 +344,7 @@ impl FxSlotParams {
             filter_slope: FxFilterSlope::Db12,
             diopser_stages: 2,
             tube_res_filter_enabled: true,
+            tube_res_dirty_lfo: true,
             utility_inv_l: false,
             utility_inv_r: false,
             limiter_true_peak: false,
@@ -516,24 +521,24 @@ pub(crate) fn butterworth_allpass_coeffs(sample_rate: f64, freq_hz: f64) -> Biqu
 }
 
 /// Full-parity multimode stereo Filter FX reusing per-voice ZDF SVF + Comb + ADAA Scream engine.
-struct FxFilterStereo {
+pub struct FxFilterStereo {
     state: FilterState,
     sample_rate: f32,
 }
 
 impl FxFilterStereo {
-    fn new(sample_rate: f32) -> Self {
+    pub fn new(sample_rate: f32) -> Self {
         Self {
             state: FilterState::new(2_500.0),
             sample_rate: sample_rate.max(1_000.0),
         }
     }
 
-    fn set_sample_rate(&mut self, sample_rate: f32) {
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate.max(1_000.0);
     }
 
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.state.reset();
     }
 
@@ -576,7 +581,7 @@ impl FxFilterStereo {
     }
 
     #[inline]
-    fn process(
+    pub fn process(
         &mut self,
         in_l: f32,
         in_r: f32,
@@ -706,7 +711,7 @@ impl StereoFxStage {
         eq: [f32; 4],
         eff_bands: &[MbDistBandParams; 3],
         tempo_bpm: f32,
-        engine_mode: EngineMode,
+        _engine_mode: EngineMode,
     ) -> (f32, f32, f32) {
         match slot.fx_type {
             FxType::Off => (in_l, in_r, 0.0),
@@ -725,7 +730,7 @@ impl StereoFxStage {
                 p,
                 eq,
                 slot.tube_res_filter_enabled,
-                engine_mode == EngineMode::Vintage2007,
+                slot.tube_res_dirty_lfo,
             ),
             FxType::Utility => self.utility.process(
                 in_l,

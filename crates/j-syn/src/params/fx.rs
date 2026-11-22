@@ -3,12 +3,14 @@
 use std::sync::Arc;
 
 use j_syn_dsp::{
-    FxBusTopology, FxFilterSlope, MbDistBandParams, SubBusParams, MB_BAND_LEVEL_DEFAULT_NORM,
+    FxBusTopology, MbDistBandParams, SubBusParams, MB_BAND_LEVEL_DEFAULT_NORM,
 };
-pub use j_syn_ui::fx_units::{DiopserStagesParam, DistortionModeParam};
+pub use j_syn_ui::fx_units::{
+    DiopserStagesParam, DistortionModeParam, FilterModeParam, FxFilterSlopeParam,
+};
 use nih_plug::prelude::*;
 
-use super::{bipolar_percentage_param, fx_level_param, FilterModeParam};
+use super::{bipolar_percentage_param, fx_level_param};
 
 #[derive(Params)]
 pub struct FxBusPluginParams {
@@ -183,36 +185,6 @@ impl From<FxTypeParam> for j_syn_dsp::FxType {
 }
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FxFilterSlopeParam {
-    #[name = "12 dB"]
-    Db12,
-    #[name = "24 dB"]
-    Db24,
-    #[name = "48 dB"]
-    Db48,
-}
-
-impl From<FxFilterSlopeParam> for FxFilterSlope {
-    fn from(v: FxFilterSlopeParam) -> Self {
-        match v {
-            FxFilterSlopeParam::Db12 => Self::Db12,
-            FxFilterSlopeParam::Db24 => Self::Db24,
-            FxFilterSlopeParam::Db48 => Self::Db48,
-        }
-    }
-}
-
-impl From<FxFilterSlope> for FxFilterSlopeParam {
-    fn from(v: FxFilterSlope) -> Self {
-        match v {
-            FxFilterSlope::Db12 => Self::Db12,
-            FxFilterSlope::Db24 => Self::Db24,
-            FxFilterSlope::Db48 => Self::Db48,
-        }
-    }
-}
-
-#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FxBusTopologyParam {
     #[name = "Parallel (A | B | C)"]
     Parallel,
@@ -345,6 +317,8 @@ pub struct FxSlotPluginParams {
     pub diopser_stages: EnumParam<DiopserStagesParam>,
     #[id = "fx_tr_flt"]
     pub tube_res_filter_enabled: BoolParam,
+    #[id = "fx_tr_dirty"]
+    pub tube_res_dirty_lfo: BoolParam,
     #[id = "fx_util_inv_l"]
     pub utility_inv_l: BoolParam,
     #[id = "fx_util_inv_r"]
@@ -385,6 +359,7 @@ impl FxSlotPluginParams {
             filter_slope: EnumParam::new("Filter Slope", FxFilterSlopeParam::Db12),
             diopser_stages: EnumParam::new("Dispersion Stages", DiopserStagesParam::S32),
             tube_res_filter_enabled: BoolParam::new("Tube Res. Filter", init.tube_res_filter_enabled),
+            tube_res_dirty_lfo: BoolParam::new("Tube Res. Dirty LFO", init.tube_res_dirty_lfo),
             utility_inv_l: BoolParam::new("Utility Inv L", init.utility_inv_l),
             utility_inv_r: BoolParam::new("Utility Inv R", init.utility_inv_r),
             limiter_true_peak: BoolParam::new("Limiter True Peak", init.limiter_true_peak),
@@ -436,6 +411,7 @@ impl FxSlotPluginParams {
             filter_slope: self.filter_slope.value().into(),
             diopser_stages: self.diopser_stages.value().to_index(),
             tube_res_filter_enabled: self.tube_res_filter_enabled.value(),
+            tube_res_dirty_lfo: self.tube_res_dirty_lfo.value(),
             utility_inv_l: self.utility_inv_l.value(),
             utility_inv_r: self.utility_inv_r.value(),
             limiter_true_peak: self.limiter_true_peak.value(),

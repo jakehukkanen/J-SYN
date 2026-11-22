@@ -9,9 +9,7 @@ use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::RawParamEvent;
 
-pub(crate) use j_syn_ui::scopes::{
-    fx_accent_rgb, FxSlotScopeSnapshot, FxSlotVisualizer, MbBandScopeSnapshot,
-};
+pub(crate) use j_syn_ui::scopes::{FxSlotScopeSnapshot, MbBandScopeSnapshot};
 
 use super::mod_bar::ModUiState;
 use super::scope::{paint_scope_bg, paint_scope_border};
@@ -73,7 +71,7 @@ pub(crate) fn slot_scope_snapshot(
         utility_inv_l: slot.utility_inv_l.value(),
         utility_inv_r: slot.utility_inv_r.value(),
         distortion_mode: slot.distortion_mode.value().into(),
-        dirty_lfo: !params.hq_mode.value(),
+        dirty_lfo: slot.tube_res_dirty_lfo.value(),
         mb_xover_p1: slot.p1.value(),
         mb_xover_p2: slot.p2.value(),
         mb_tab: mod_ui.fx_mb_tab(bus_idx, slot_idx),

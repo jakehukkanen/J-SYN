@@ -114,21 +114,12 @@ pub const fn fx_unit_scope_height(fx_type: FxType) -> f32 {
     }
 }
 
-/// Card width for standalone single-FX plugins (`200 px` for migrated units, `260 px` legacy).
+/// Card width for standalone single-FX plugins (`200 px` for all active units).
 #[inline]
 pub const fn standalone_fx_card_width(fx_type: FxType) -> f32 {
     match fx_type {
-        FxType::Utility
-        | FxType::JSatClipper
-        | FxType::Ott
-        | FxType::Phaser
-        | FxType::Distortion
-        | FxType::Diopser
-        | FxType::Chorus
-        | FxType::Reverb
-        | FxType::Flanger
-        | FxType::MultibandDist => FX_UNIT_W,
-        _ => STANDALONE_FX_CARD_W,
+        FxType::Off => STANDALONE_FX_CARD_W,
+        _ => FX_UNIT_W,
     }
 }
 
@@ -146,16 +137,21 @@ pub const fn standalone_fx_window_size(fx_type: FxType) -> (u32, u32) {
         // Plain 4-knob 2x2 grid (150 - 40 = 110)
         FxType::Utility | FxType::JSatClipper | FxType::Ott | FxType::Phaser => grid_2x2_delta,
         // 4-knob 2x2 grid + 20 px context dropdown strip (20 + 4 + 110 = 134)
-        FxType::Distortion | FxType::Diopser => ((CONTROL_H + SPACE_SM) as u32) + grid_2x2_delta,
-        // 8-knob 2-tab 2x2 grid + 18 px tab bar (18 + 4 + 110 = 132)
-        FxType::Chorus | FxType::Reverb | FxType::Flanger => {
-            ((PILL_H + SPACE_SM) as u32) + grid_2x2_delta
+        FxType::Distortion | FxType::Diopser | FxType::Filter => {
+            ((CONTROL_H + SPACE_SM) as u32) + grid_2x2_delta
         }
+        // 8-knob 2-tab 2x2 grid + 18 px tab bar (18 + 4 + 110 = 132)
+        FxType::Chorus
+        | FxType::Reverb
+        | FxType::Flanger
+        | FxType::Delay
+        | FxType::Limiter
+        | FxType::TubeResonator => ((PILL_H + SPACE_SM) as u32) + grid_2x2_delta,
         // Band tab bar (18 + 4) + context/mode strip (20 + 4) + 2x2 knob grid delta (150 - 40 = 110)
         FxType::MultibandDist => {
             ((PILL_H + SPACE_SM) as u32) + ((CONTROL_H + SPACE_SM) as u32) + grid_2x2_delta
         }
-        _ => 0,
+        FxType::Off => 0,
     };
     // Header bar (34) + chassis top/bottom padding (20) + card padding (12) + card header (18)
     // + 2 gaps (8) + scope + knob row (40) + extra_h + bottom margin
