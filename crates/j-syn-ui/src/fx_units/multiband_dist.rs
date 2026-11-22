@@ -252,7 +252,7 @@ fn build_mb_knob_cell<L, R, Params, U>(
             .class("knob-cell")
             .width(Stretch(1.0))
             .height(Auto)
-            .row_between(Pixels(1.0));
+            .row_between(Pixels(tokens::SPACE_XS));
         },
     );
 }
@@ -477,7 +477,7 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                     })
                     .class("knob-readout-box")
                     .width(Stretch(1.0))
-                    .height(Pixels(tokens::PILL_H));
+                    .height(Pixels(tokens::CONTROL_H));
                 } else {
                     let band = (mb_tab - 1) as usize;
                     HStack::new(cx, move |cx| {
@@ -503,11 +503,11 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                             MB_DIST_MODE_ITEMS,
                         )
                         .width(Stretch(1.0))
-                        .height(Pixels(tokens::PILL_H));
+                        .height(Pixels(tokens::CONTROL_H));
                     })
                     .col_between(Pixels(tokens::SPACE_SM))
                     .width(Stretch(1.0))
-                    .height(Pixels(tokens::PILL_H));
+                    .height(Pixels(tokens::CONTROL_H));
                 }
             },
         );
@@ -541,12 +541,16 @@ pub fn build_multiband_dist_fx_unit_body<L, R, Params, U, FScope>(
                         );
                     }
                 })
-                .col_between(Pixels(tokens::SPACE_MD))
+                .col_between(Pixels(0.0))
+                .child_left(Pixels(tokens::FX_UNIT_2X2_INSET_X))
+                .child_right(Pixels(tokens::FX_UNIT_2X2_INSET_X))
                 .width(Stretch(1.0))
                 .height(Auto);
             }
         })
-        .row_between(Pixels(tokens::SPACE_MD))
+        .row_between(Pixels(tokens::SPACE_LG))
+        .top(Pixels(tokens::SPACE_SM))
+        .bottom(Pixels(tokens::SPACE_SM))
         .width(Stretch(1.0))
         .height(Auto);
     })

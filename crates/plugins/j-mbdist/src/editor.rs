@@ -241,7 +241,7 @@ pub fn build_mbdist_ui(
                     .top(Stretch(1.0))
                     .bottom(Stretch(1.0));
                 bold_label(cx, "J-MBDIST", "header-title")
-                    .font_size(12.0)
+                    .font_size(11.5)
                     .width(Auto)
                     .height(Auto)
                     .top(Stretch(1.0))

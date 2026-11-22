@@ -485,7 +485,9 @@ fn build_fx_slot_header(
         .class("fx-move-label")
         .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 0))
         .width(Pixels(tokens::FX_UNIT_ARROW_W))
-        .height(Pixels(tokens::FX_UNIT_ARROW_H));
+        .height(Pixels(tokens::FX_UNIT_ARROW_H))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0));
 
         ArrowButton::new(
             cx,
@@ -508,7 +510,9 @@ fn build_fx_slot_header(
         .class("fx-move-label")
         .toggle_class("fx-move-disabled", UiData::mod_ui_rev.map(move |_| slot_idx == 7))
         .width(Pixels(tokens::FX_UNIT_ARROW_W))
-        .height(Pixels(tokens::FX_UNIT_ARROW_H));
+        .height(Pixels(tokens::FX_UNIT_ARROW_H))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0));
     })
     .col_between(Pixels(tokens::SPACE_XS))
     .height(Pixels(tokens::FX_UNIT_HEADER_H))
