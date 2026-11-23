@@ -31,6 +31,7 @@ fn torture_all_fx_types_stacks_sample_rates_and_subnormals() {
                 slot.params = FxSlotParams::default_params_for_type(fx_ty);
                 slot.eq_params = FxSlotParams::default_eq_params_for_type(fx_ty);
                 rp.buses[0].slots[0] = slot;
+                rack.prepare_for_params(&rp);
 
                 // 1) Drive with impulse + stereo sine burst
                 let burst_len = ((sr * 0.025) as usize).max(256);
@@ -228,6 +229,7 @@ fn torture_inserts_osc_pitch_modes_mod_slams_and_odd_block_splits() {
 
     let render_chunked = |chunk_size: usize| -> Vec<(f32, f32)> {
         let mut eng = Box::new(SynthEngine::new(48_000.0));
+        eng.prepare_fx_for_params(&base_params);
         eng.note_on(0, 60, 0.9, None, &base_params);
         let mut out = Vec::with_capacity(total_samples);
         let mut rendered = 0;
@@ -269,6 +271,7 @@ fn run_scenario(params: &SynthParams, sr: f32, note_len_s: f32, tail_len_s: f32)
     let tables = [wt, wt, wt, wt];
 
     let mut engine = Box::new(SynthEngine::new(sr));
+    engine.prepare_fx_for_params(params);
     let active_samples = (sr * note_len_s) as usize;
     let tail_samples = (sr * tail_len_s) as usize;
 

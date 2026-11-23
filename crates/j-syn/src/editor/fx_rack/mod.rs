@@ -1,28 +1,179 @@
-//! 3-Lane Scrollable Master FX Rack UI (`Bus A`, `Bus B`, `Bus C`, `8` slots per lane,
-//! `200 px` variable-height FX Units, `ZStack` translucent floating overlays, and `Cmd/Ctrl + Click` collapse).
+//! 3-Lane Scrollable Phase Plant-style Master FX Rack (`Bus A`, `Bus B`, `Bus C`,
+//! up to `30` active FX Units per lane = `90` total, drag-and-drop reorder/move/duplicate/delete,
+//! categorized FX Picker, per-lane Bypass & Mute, and mid-chain `+` insertion seams).
 
 use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::ModDestination;
-use j_syn_dsp::{FxBusTopology, FxType};
-use j_syn_ui::widgets::notify_scroll_lane_wheeled;
-use nih_plug::prelude::GuiContext;
+use j_syn_dsp::{FxBusTopology, FxType, NUM_FX_SLOTS};
+use j_syn_ui::widgets::{notify_scroll_lane_wheeled, LedToggleSwitch};
+use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
+use nih_plug_vizia::vizia::vg;
 
 use super::controls::{
     bold_label, build_dropdown_trigger_labels, build_flex_knob_cell_mod, ScrollDropdown,
 };
 use super::mod_bar::ModUiState;
-use super::{tokens, UiData, UiEvent};
+use super::{theme, tokens, UiData, UiEvent};
 use crate::{FxBusTopologyParam, JSynPluginParams};
 
 mod adapters;
 mod header;
-mod slot_ops;
+pub(super) mod slot_ops;
 
 use adapters::build_fx_unit_body;
+use super::fx_drag_overlay::FxDragState;
+use super::fx_picker_menu::FxPickerTarget;
 use header::build_fx_slot_header;
-use slot_ops::{lane_target_label, set_fx_bus_topology, slot_enabled_for_bus};
+use slot_ops::{lane_name, lane_target_label, set_fx_bus_topology, slot_enabled_for_bus};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct LaneOrderKey {
+    /// Each entry packs `(slot_idx as u16) | ((fx_type as u16) << 8)`.
+    entries: [u16; NUM_FX_SLOTS],
+    len: u8,
+}
+
+impl Data for LaneOrderKey {
+    fn same(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+impl LaneOrderKey {
+    fn from_params(params: &JSynPluginParams, bus_idx: usize) -> Self {
+        let order = params.reconciled_fx_rack_order();
+        let active = order.active_slots(bus_idx);
+        let slots = params.fx_bus_slots(bus_idx);
+        let mut entries = [0u16; NUM_FX_SLOTS];
+        let mut len = 0usize;
+        for &slot_u8 in active {
+            let s = slot_u8 as usize;
+            if s < NUM_FX_SLOTS && len < NUM_FX_SLOTS {
+                let ty = FxType::from(slots[s].fx_type.value()) as u16;
+                if ty != 0 {
+                    entries[len] = (s as u16) | (ty << 8);
+                    len += 1;
+                }
+            }
+        }
+        Self {
+            entries,
+            len: len as u8,
+        }
+    }
+}
+
+/// Transparent layout container that records the full 3-lane FX Wing bounds for drag-outside-to-delete.
+struct FxWingBoundsTracker {
+    drag_state: Arc<FxDragState>,
+}
+
+impl FxWingBoundsTracker {
+    fn new<'a, F>(cx: &'a mut Context, drag_state: Arc<FxDragState>, content: F) -> Handle<'a, Self>
+    where
+        F: FnOnce(&mut Context),
+    {
+        Self { drag_state }
+            .build(cx, content)
+            .layout_type(LayoutType::Row)
+    }
+}
+
+impl View for FxWingBoundsTracker {
+    fn element(&self) -> Option<&'static str> {
+        Some("fx-wing-bounds-tracker")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, _canvas: &mut Canvas) {
+        self.drag_state.register_wing_bounds(cx.bounds());
+    }
+}
+
+/// Transparent wrapper recording each lane's `ScrollView` viewport bounds and `Entity` for hit-testing & edge auto-scroll.
+struct FxLaneViewportTracker {
+    bus_idx: usize,
+    drag_state: Arc<FxDragState>,
+    scroll_entity: Entity,
+}
+
+impl FxLaneViewportTracker {
+    fn new<'a, F>(
+        cx: &'a mut Context,
+        bus_idx: usize,
+        drag_state: Arc<FxDragState>,
+        content: F,
+    ) -> Handle<'a, Self>
+    where
+        F: FnOnce(&mut Context) -> Entity,
+    {
+        let mut captured = Entity::null();
+        let handle = Self {
+            bus_idx,
+            drag_state,
+            scroll_entity: Entity::null(),
+        }
+        .build(cx, |cx| {
+            captured = content(cx);
+        })
+        .layout_type(LayoutType::Column);
+        handle.modify(|v| v.scroll_entity = captured)
+    }
+}
+
+impl View for FxLaneViewportTracker {
+    fn element(&self) -> Option<&'static str> {
+        Some("fx-lane-viewport-tracker")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, _canvas: &mut Canvas) {
+        self.drag_state
+            .register_lane_bounds(self.bus_idx, cx.bounds(), self.scroll_entity);
+    }
+}
+
+/// Transparent wrapper reporting each mounted FX card's live bounding box to `FxDragState`.
+struct FxCardBoundsTracker {
+    bus_idx: usize,
+    visual_pos: usize,
+    slot_idx: usize,
+    drag_state: Arc<FxDragState>,
+}
+
+impl FxCardBoundsTracker {
+    fn new<'a, F>(
+        cx: &'a mut Context,
+        bus_idx: usize,
+        visual_pos: usize,
+        slot_idx: usize,
+        drag_state: Arc<FxDragState>,
+        content: F,
+    ) -> Handle<'a, Self>
+    where
+        F: FnOnce(&mut Context),
+    {
+        Self {
+            bus_idx,
+            visual_pos,
+            slot_idx,
+            drag_state,
+        }
+        .build(cx, content)
+        .layout_type(LayoutType::Column)
+    }
+}
+
+impl View for FxCardBoundsTracker {
+    fn element(&self) -> Option<&'static str> {
+        Some("fx-card-bounds-tracker")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, _canvas: &mut Canvas) {
+        self.drag_state
+            .register_card_bounds(self.bus_idx, self.visual_pos, self.slot_idx, cx.bounds());
+    }
+}
 
 struct FxLaneScrollGuard;
 
@@ -51,6 +202,183 @@ impl View for FxLaneScrollGuard {
     }
 }
 
+/// Subtle hoverable `+` mid-chain insertion seam placed between consecutive FX cards.
+struct FxInsertSeam {
+    bus_idx: usize,
+    insert_pos: usize,
+    hovered: bool,
+}
+
+impl FxInsertSeam {
+    fn new(cx: &mut Context, bus_idx: usize, insert_pos: usize) -> Handle<'_, Self> {
+        Self {
+            bus_idx,
+            insert_pos,
+            hovered: false,
+        }
+        .build(cx, |_| {})
+        .width(Pixels(tokens::FX_UNIT_W))
+        .height(Pixels(tokens::FX_UNIT_SEAM_H))
+    }
+}
+
+impl View for FxInsertSeam {
+    fn element(&self) -> Option<&'static str> {
+        Some("fx-insert-seam")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseOver => {
+                self.hovered = true;
+                cx.needs_redraw();
+            }
+            WindowEvent::MouseOut => {
+                self.hovered = false;
+                cx.needs_redraw();
+            }
+            WindowEvent::MouseDown(MouseButton::Left) => {
+                let scale = cx.scale_factor().max(0.01);
+                cx.emit(UiEvent::ShowFxPicker(
+                    self.bus_idx,
+                    FxPickerTarget::InsertAt(self.insert_pos),
+                    cx.mouse().cursorx / scale,
+                    cx.mouse().cursory / scale,
+                ));
+                meta.consume();
+            }
+            _ => {}
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        if !self.hovered {
+            return;
+        }
+        let b = cx.bounds();
+        if b.w <= 4.0 || b.h <= 1.0 {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let pal = theme::current_palette(cx);
+        let (ar, ag, ab) = pal.accent_rgb();
+        let mid_y = b.y + b.h * 0.5;
+        let mid_x = b.x + b.w * 0.5;
+
+        let mut line = vg::Path::new();
+        line.move_to(b.x + 8.0 * dpx, mid_y);
+        line.line_to(b.x + b.w - 8.0 * dpx, mid_y);
+        let mut lp = vg::Paint::color(vg::Color::rgba(ar, ag, ab, 175));
+        lp.set_line_width(1.25 * dpx);
+        canvas.stroke_path(&line, &lp);
+
+        let badge_r = 5.5 * dpx;
+        let mut dot = vg::Path::new();
+        dot.circle(mid_x, mid_y, badge_r);
+        canvas.fill_path(&dot, &vg::Paint::color(theme::vg_color(&pal.surface_dark, 245)));
+        let mut border = vg::Paint::color(vg::Color::rgba(ar, ag, ab, 235));
+        border.set_line_width(1.1 * dpx);
+        canvas.stroke_path(&dot, &border);
+
+        let arm = 2.8 * dpx;
+        let mut plus = vg::Path::new();
+        plus.move_to(mid_x - arm, mid_y);
+        plus.line_to(mid_x + arm, mid_y);
+        plus.move_to(mid_x, mid_y - arm);
+        plus.line_to(mid_x, mid_y + arm);
+        let mut pp = vg::Paint::color(vg::Color::rgb(ar, ag, ab));
+        pp.set_line_width(1.25 * dpx);
+        canvas.stroke_path(&plus, &pp);
+    }
+}
+
+/// Click-anywhere empty lane area below the last FX card (left-click opens FX Picker, right-click opens Lane Menu).
+struct FxEmptyLaneZone {
+    bus_idx: usize,
+    insert_pos: usize,
+    can_add: bool,
+}
+
+impl FxEmptyLaneZone {
+    fn new(cx: &mut Context, bus_idx: usize, insert_pos: usize, can_add: bool) -> Handle<'_, Self> {
+        Self {
+            bus_idx,
+            insert_pos,
+            can_add,
+        }
+        .build(cx, |_| {})
+        .width(Pixels(tokens::FX_UNIT_W))
+        .height(Stretch(1.0))
+        .min_height(Pixels(72.0))
+    }
+}
+
+impl View for FxEmptyLaneZone {
+    fn element(&self) -> Option<&'static str> {
+        Some("fx-empty-lane-zone")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseDown(MouseButton::Left) if self.can_add => {
+                let scale = cx.scale_factor().max(0.01);
+                cx.emit(UiEvent::ShowFxPicker(
+                    self.bus_idx,
+                    FxPickerTarget::InsertAt(self.insert_pos),
+                    cx.mouse().cursorx / scale,
+                    cx.mouse().cursory / scale,
+                ));
+                meta.consume();
+            }
+            WindowEvent::MouseDown(MouseButton::Right) => {
+                let scale = cx.scale_factor().max(0.01);
+                cx.emit(UiEvent::ShowFxLaneMenu(
+                    self.bus_idx,
+                    cx.mouse().cursorx / scale,
+                    cx.mouse().cursory / scale,
+                ));
+                meta.consume();
+            }
+            _ => {}
+        });
+    }
+}
+
+/// Lane header row container that listens for right-click anywhere inside the header to open the Lane Context Menu.
+struct FxLaneHeaderRow {
+    bus_idx: usize,
+}
+
+impl FxLaneHeaderRow {
+    fn new<'a, F>(cx: &'a mut Context, bus_idx: usize, content: F) -> Handle<'a, Self>
+    where
+        F: FnOnce(&mut Context),
+    {
+        Self { bus_idx }
+            .build(cx, content)
+            .layout_type(LayoutType::Row)
+    }
+}
+
+impl View for FxLaneHeaderRow {
+    fn element(&self) -> Option<&'static str> {
+        Some("fx-lane-header-row")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| {
+            if let WindowEvent::MouseDown(MouseButton::Right) = window_event {
+                let scale = cx.scale_factor().max(0.01);
+                cx.emit(UiEvent::ShowFxLaneMenu(
+                    self.bus_idx,
+                    cx.mouse().cursorx / scale,
+                    cx.mouse().cursory / scale,
+                ));
+                meta.consume();
+            }
+        });
+    }
+}
 
 fn build_lane_route_dropdown(
     cx: &mut Context,
@@ -157,26 +485,85 @@ fn build_lane_header(
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
-    let title = match bus_idx {
-        0 => "BUS A",
-        1 => "BUS B",
-        _ => "BUS C",
-    };
+    let title = lane_name(bus_idx);
     let (lvl_dest, pan_dest) = match bus_idx {
         0 => (ModDestination::BusALevel, ModDestination::BusAPan),
         1 => (ModDestination::BusBLevel, ModDestination::BusBPan),
         _ => (ModDestination::BusCLevel, ModDestination::BusCPan),
     };
 
-    HStack::new(cx, move |cx| {
+    FxLaneHeaderRow::new(cx, bus_idx, move |cx| {
         let p_hdr = params.clone();
-        let g_hdr = gui_context;
+        let g_hdr = gui_context.clone();
+        let p_mute = params.clone();
+        let g_mute = gui_context;
+        let p_cnt = params.clone();
         VStack::new(cx, move |cx| {
-            bold_label(cx, title, "module-title")
-                .width(Stretch(1.0))
-                .height(Pixels(tokens::MACRO_HDR_H))
-                .child_top(Stretch(1.0))
-                .child_bottom(Stretch(1.0));
+            // Top row: BUS A/B/C + Bypass LED + Mute [M] + active count
+            HStack::new(cx, move |cx| {
+                bold_label(cx, title, "module-title")
+                    .width(Auto)
+                    .height(Stretch(1.0))
+                    .child_top(Stretch(1.0))
+                    .child_bottom(Stretch(1.0));
+
+                LedToggleSwitch::new(
+                    cx,
+                    UiData::params,
+                    move |p| p.fx_bus_enabled_param(bus_idx),
+                    "",
+                    "",
+                )
+                .width(Pixels(14.0))
+                .height(Pixels(14.0))
+                .top(Stretch(1.0))
+                .bottom(Stretch(1.0));
+
+                let p_m_press = p_mute.clone();
+                let g_m_press = g_mute.clone();
+                let p_m_chk = p_mute;
+                Button::new(
+                    cx,
+                    move |cx| {
+                        let setter = ParamSetter::new(g_m_press.as_ref());
+                        let param = p_m_press.fx_bus_muted_param(bus_idx);
+                        setter.begin_set_parameter(param);
+                        setter.set_parameter(param, !param.value());
+                        setter.end_set_parameter(param);
+                        cx.emit(UiEvent::ModUiChanged);
+                    },
+                    |cx| {
+                        bold_label(cx, "M", "fx-lane-mute-text")
+                            .child_space(Stretch(1.0))
+                            .hoverable(false)
+                    },
+                )
+                .class("fx-lane-mute-btn")
+                .checked(UiData::mod_ui_rev.map(move |_| p_m_chk.fx_bus_muted_param(bus_idx).value()))
+                .width(Pixels(tokens::FX_LANE_MUTE_W))
+                .height(Pixels(tokens::FX_LANE_MUTE_H))
+                .top(Stretch(1.0))
+                .bottom(Stretch(1.0));
+
+                let cnt_lens = UiData::mod_ui_rev.map(move |_| {
+                    let count = p_cnt.reconciled_fx_rack_order().len(bus_idx);
+                    if count > 0 {
+                        format!("{count}/{NUM_FX_SLOTS}")
+                    } else {
+                        String::new()
+                    }
+                });
+                bold_label(cx, cnt_lens, "fx-lane-count")
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0))
+                    .child_left(Stretch(1.0))
+                    .child_right(Pixels(2.0))
+                    .child_top(Stretch(1.0))
+                    .child_bottom(Stretch(1.0));
+            })
+            .col_between(Pixels(3.0))
+            .width(Stretch(1.0))
+            .height(Pixels(tokens::MACRO_HDR_H + 2.0));
 
             if bus_idx < 2 {
                 build_lane_route_dropdown(cx, bus_idx, p_hdr, g_hdr);
@@ -191,10 +578,8 @@ fn build_lane_header(
         .row_between(Pixels(tokens::SPACE_SM))
         .child_top(Stretch(1.0))
         .child_bottom(Stretch(1.0))
-        .width(Pixels(tokens::FX_LANE_ROUTE_COL_W))
+        .width(Stretch(1.0))
         .height(Stretch(1.0));
-
-        Element::new(cx).width(Stretch(1.0));
 
         let m_lvl = mod_ui.clone();
         HStack::new(cx, move |cx| {
@@ -237,78 +622,114 @@ fn build_lane_header(
 fn build_fx_unit_card(
     cx: &mut Context,
     bus_idx: usize,
+    visual_pos: usize,
     slot_idx: usize,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
+    let drag_ref = mod_ui.fx_drag.clone();
+    let drag_dim = mod_ui.fx_drag.clone();
     let p_dim = params.clone();
-    VStack::new(cx, move |cx| {
-        build_fx_slot_header(
-            cx,
-            bus_idx,
-            slot_idx,
-            params.clone(),
-            gui_context.clone(),
-            mod_ui.clone(),
-        );
+    FxCardBoundsTracker::new(cx, bus_idx, visual_pos, slot_idx, drag_ref, move |cx| {
+        VStack::new(cx, move |cx| {
+            build_fx_slot_header(
+                cx,
+                bus_idx,
+                visual_pos,
+                slot_idx,
+                params.clone(),
+                gui_context.clone(),
+                mod_ui.clone(),
+            );
 
-        let p_body = params.clone();
-        let g_body = gui_context.clone();
-        let m_body = mod_ui.clone();
-        let m_col_key = mod_ui.clone();
-        Binding::new(
-            cx,
-            UiData::root.map(move |data| {
-                (
-                    data.params.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() as usize,
-                    m_col_key.fx_collapsed(bus_idx, slot_idx),
-                )
-            }),
-            move |cx, slot_view_lens| {
-                let (fx_idx, is_collapsed) = slot_view_lens.get(cx);
-                let fx_type = FxType::from_index(fx_idx);
-                if fx_type == FxType::Off || is_collapsed {
-                    return;
-                }
-                let p_unit = p_body.clone();
-                let g_unit = g_body.clone();
-                let m_unit = m_body.clone();
-                build_fx_unit_body(
-                    cx,
-                    fx_type,
-                    bus_idx,
-                    slot_idx,
-                    p_unit,
-                    g_unit,
-                    m_unit,
-                );
-            },
-        );
+            let p_body = params.clone();
+            let g_body = gui_context.clone();
+            let m_body = mod_ui.clone();
+            let m_col_key = mod_ui.clone();
+            Binding::new(
+                cx,
+                UiData::root.map(move |data| {
+                    (
+                        data.params.fx_bus_slots(bus_idx)[slot_idx].fx_type.value() as usize,
+                        m_col_key.fx_collapsed(bus_idx, slot_idx),
+                    )
+                }),
+                move |cx, slot_view_lens| {
+                    let (fx_idx, is_collapsed) = slot_view_lens.get(cx);
+                    let fx_type = FxType::from_index(fx_idx);
+                    if fx_type == FxType::Off || is_collapsed {
+                        return;
+                    }
+                    build_fx_unit_body(
+                        cx,
+                        fx_type,
+                        bus_idx,
+                        slot_idx,
+                        p_body.clone(),
+                        g_body.clone(),
+                        m_body.clone(),
+                    );
+                },
+            );
+        })
+        .class("hardware-module")
+        .class("fx-full-card")
+        .toggle_class(
+            "module-disabled",
+            UiData::mod_ui_rev.map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
+        )
+        .toggle_class(
+            "fx-card-dragging",
+            UiData::mod_val_rev.map(move |_| drag_dim.is_dragging_source_move(bus_idx, slot_idx)),
+        )
+        .width(Pixels(tokens::FX_UNIT_W))
+        .height(Auto)
+        .row_between(Pixels(tokens::SPACE_SM));
     })
-    .class("hardware-module")
-    .class("fx-full-card")
-    .toggle_class(
-        "module-disabled",
-        UiData::mod_ui_rev.map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
-    )
     .width(Pixels(tokens::FX_UNIT_W))
-    .height(Auto)
-    .row_between(Pixels(tokens::SPACE_SM));
+    .height(Auto);
 }
 
-/// Right Wing: 3-lane scrollable FX Rack (`Bus A`, `Bus B`, `Bus C`, 8 slots each).
+fn build_add_effect_bar(cx: &mut Context, bus_idx: usize, insert_pos: usize) {
+    Button::new(
+        cx,
+        move |cx| {
+            let bounds = cx.bounds();
+            let scale = cx.scale_factor().max(0.01);
+            cx.emit(UiEvent::ShowFxPicker(
+                bus_idx,
+                FxPickerTarget::InsertAt(insert_pos),
+                bounds.x / scale,
+                (bounds.y + bounds.h + 4.0) / scale,
+            ));
+        },
+        |cx| {
+            bold_label(cx, "+ Add Effect", "fx-add-bar-label")
+                .child_space(Stretch(1.0))
+                .hoverable(false)
+        },
+    )
+    .class("fx-add-bar")
+    .width(Pixels(tokens::FX_UNIT_W))
+    .height(Pixels(tokens::FX_UNIT_ADD_BAR_H));
+}
+
+/// Right Wing: 3-lane Phase Plant-style scrollable FX Rack (`Bus A`, `Bus B`, `Bus C`, up to 30 active FX Units each).
 pub(crate) fn build_three_lane_fx_rack(
     cx: &mut Context,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
     mod_ui: Arc<ModUiState>,
 ) {
-    HStack::new(cx, move |cx| {
+    let drag_wing = mod_ui.fx_drag.clone();
+    FxWingBoundsTracker::new(cx, drag_wing, move |cx| {
         for bus_idx in 0..3 {
             let p_lane = params.clone();
             let g_lane = gui_context.clone();
             let m_lane = mod_ui.clone();
+            let p_byp = params.clone();
+            let p_mute = params.clone();
             VStack::new(cx, move |cx| {
                 build_lane_header(
                     cx,
@@ -318,27 +739,78 @@ pub(crate) fn build_three_lane_fx_rack(
                     m_lane.clone(),
                 );
 
-                ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
-                    FxLaneScrollGuard::new(cx, move |cx| {
-                        for slot_idx in 0..8 {
-                            build_fx_unit_card(
+                let drag_vp = m_lane.fx_drag.clone();
+                FxLaneViewportTracker::new(cx, bus_idx, drag_vp, move |cx| {
+                    let p_sv = p_lane.clone();
+                    let g_sv = g_lane.clone();
+                    let m_sv = m_lane.clone();
+                    ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
+                        let p_guard = p_sv.clone();
+                        let g_guard = g_sv.clone();
+                        let m_guard = m_sv.clone();
+                        FxLaneScrollGuard::new(cx, move |cx| {
+                            let p_bind = p_guard.clone();
+                            let g_bind = g_guard.clone();
+                            let m_bind = m_guard.clone();
+                            Binding::new(
                                 cx,
-                                bus_idx,
-                                slot_idx,
-                                p_lane.clone(),
-                                g_lane.clone(),
-                                m_lane.clone(),
+                                UiData::root.map(move |data| {
+                                    LaneOrderKey::from_params(&data.params, bus_idx)
+                                }),
+                                move |cx, key_lens| {
+                                    let key = key_lens.get(cx);
+                                    let count = key.len as usize;
+                                    m_bind.fx_drag.set_lane_card_count(bus_idx, count);
+
+                                    for (visual_pos, &entry) in
+                                        key.entries.iter().enumerate().take(count)
+                                    {
+                                        if visual_pos > 0 {
+                                            FxInsertSeam::new(cx, bus_idx, visual_pos);
+                                        }
+                                        let slot_idx = (entry & 0xFF) as usize;
+                                        build_fx_unit_card(
+                                            cx,
+                                            bus_idx,
+                                            visual_pos,
+                                            slot_idx,
+                                            p_bind.clone(),
+                                            g_bind.clone(),
+                                            m_bind.clone(),
+                                        );
+                                    }
+
+                                    let can_add = count < NUM_FX_SLOTS;
+                                    if can_add {
+                                        Element::new(cx)
+                                            .height(Pixels(tokens::SPACE_SM))
+                                            .width(Pixels(1.0))
+                                            .hoverable(false);
+                                        build_add_effect_bar(cx, bus_idx, count);
+                                    }
+                                    FxEmptyLaneZone::new(cx, bus_idx, count, can_add);
+                                },
                             );
-                        }
+                        })
+                        .child_right(Pixels(tokens::FX_LANE_SCROLL_GUTTER))
+                        .width(Stretch(1.0))
+                        .height(Auto);
                     })
-                    .row_between(Pixels(tokens::SPACE_SM))
-                    .child_right(Pixels(tokens::FX_LANE_SCROLL_GUTTER))
                     .width(Stretch(1.0))
-                    .height(Auto);
+                    .height(Stretch(1.0))
+                    .entity()
                 })
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
             })
+            .toggle_class(
+                "fx-lane-bypassed",
+                UiData::mod_ui_rev.map(move |_| !p_byp.fx_bus_enabled_param(bus_idx).value()),
+            )
+            .toggle_class(
+                "fx-lane-muted",
+                UiData::mod_ui_rev.map(move |_| p_mute.fx_bus_muted_param(bus_idx).value()),
+            )
             .row_between(Pixels(tokens::SPACE_SM))
             .width(Stretch(1.0))
             .height(Stretch(1.0));

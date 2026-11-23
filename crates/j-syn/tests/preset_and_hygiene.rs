@@ -155,14 +155,58 @@ fn frozen_current_v2_fixture_resolves_and_persists_cleanly() {
     assert_eq!(rec.written_label(&params, "flt_slope_1"), "24 dB");
     assert_eq!(macro_names[0], "OTT AMT");
 
-    // Capture -> JSON -> reload preserves mod_matrix, modseq_steps, macro_names, and param count
+    // Legacy v2 preset without `fx_rack_order` automatically builds explicit active lane order
+    let recalled_order = params.fx_rack_order.snapshot();
+    assert!(recalled_order.explicit);
+    assert_eq!(recalled_order.active_slots(0), &[0]);
+    assert_eq!(recalled_order.active_slots(1), &[0]);
+    assert_eq!(recalled_order.active_slots(2), &[0]);
+
+    // Capture -> JSON -> reload preserves mod_matrix, modseq_steps, fx_rack_order, macro_names, and captured params
     let captured = JSynPatch::capture("roundtrip", &params);
     let json = serde_json::to_string(&captured).expect("serialize captured patch");
     let reloaded: JSynPatch = serde_json::from_str(&json).expect("deserialize captured patch");
     assert_eq!(reloaded.mod_matrix, params.mod_matrix.snapshot());
     assert_eq!(reloaded.modseq_steps, params.modseq_steps.snapshot());
+    assert_eq!(reloaded.fx_rack_order, captured.fx_rack_order);
     assert_eq!(reloaded.macro_names[0], "OTT AMT");
-    assert_eq!(reloaded.params.len(), params.param_map().len());
+    assert_eq!(reloaded.params, captured.params);
+    assert!(
+        !reloaded.params.contains_key("fx_type_30"),
+        "Inactive extended slot 30 should be omitted from compact preset JSON"
+    );
+}
+
+#[test]
+fn phase_b_30_slot_mod_destination_and_fx_rack_order_serde_roundtrip() {
+    use j_syn_dsp::{FxRackOrder, ModDestination};
+
+    let cases = [
+        ("\"Fx1P1\"", ModDestination::fx_bus_slot_param(0, 0, 0)),
+        ("\"Fx8P4\"", ModDestination::fx_bus_slot_param(0, 7, 3)),
+        ("\"BusAFx1P5\"", ModDestination::fx_bus_slot_param(0, 0, 4)),
+        ("\"BusAFx30P16\"", ModDestination::fx_bus_slot_param(0, 29, 15)),
+        ("\"BusBFx8P16\"", ModDestination::fx_bus_slot_param(1, 7, 15)),
+        ("\"BusCFx30P1\"", ModDestination::fx_bus_slot_param(2, 29, 0)),
+        ("\"Filter1Cutoff\"", ModDestination::Filter1Cutoff),
+        ("\"BusCLevel\"", ModDestination::BusCLevel),
+    ];
+    for (json, expected) in cases {
+        let parsed: ModDestination = serde_json::from_str(json).expect("parse ModDestination");
+        assert_eq!(parsed, expected);
+        let encoded = serde_json::to_string(&parsed).expect("serialize ModDestination");
+        assert_eq!(encoded, json);
+    }
+
+    let mut order = FxRackOrder::empty_explicit();
+    assert!(order.insert_at(0, 0, 29));
+    assert!(order.insert_at(0, 0, 2));
+    assert!(order.insert_at(2, 0, 15));
+    let json = serde_json::to_string(&order).expect("serialize FxRackOrder");
+    let decoded: FxRackOrder = serde_json::from_str(&json).expect("deserialize FxRackOrder");
+    assert_eq!(decoded, order);
+    assert_eq!(decoded.active_slots(0), &[2, 29]);
+    assert_eq!(decoded.active_slots(2), &[15]);
 }
 
 #[test]

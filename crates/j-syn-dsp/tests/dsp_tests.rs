@@ -1579,9 +1579,16 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
     ] {
         assert_eq!(FxSlotParams::default_params_for_type(fx_ty)[3], 1.0);
     }
-    assert_eq!(ModDestination::fx_param(3, 1), ModDestination::Fx4P2);
-    assert!(ModDestination::Fx4P2.is_fx_slot(3));
-    assert!(!ModDestination::Fx4P2.is_fx_slot(2));
+    assert_eq!(
+        ModDestination::fx_param(3, 1),
+        ModDestination::FxSlotParam {
+            bus: 0,
+            slot: 3,
+            param: 1
+        }
+    );
+    assert!(ModDestination::fx_param(3, 1).is_fx_slot(3));
+    assert!(!ModDestination::fx_param(3, 1).is_fx_slot(2));
 
     let bank = WavetableBank::new();
     let sample_rate = 48_000.0;
@@ -1608,6 +1615,7 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
     }
 
     let mut eng = SynthEngine::new(sample_rate);
+    eng.prepare_fx_for_params(&init_params);
     eng.note_on(0, 57, 1.0, None, &init_params);
     let mut max_abs = 0.0_f32;
     for _ in 0..8_192 {
@@ -1643,13 +1651,14 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
         };
         p.mod_matrix.slots[0] = ModSlot {
             source: ModMatrixSource::ModWheel,
-            destination: ModDestination::Fx2P2,
+            destination: ModDestination::fx_param(1, 1),
             depth: 0.7,
             bipolar: false,
             enabled: true,
             ..ModSlot::default()
         };
         let mut e = SynthEngine::new(sample_rate);
+        e.prepare_fx_for_params(&p);
         e.set_mod_wheel(mod_wheel);
         e.note_on(0, 48, 1.0, None, &p);
         let mut pk = 0.0_f32;
@@ -2030,6 +2039,7 @@ fn fx_phaser_processes_stereo_and_idle_recovery() {
         params: [0.65, 0.85, 0.65, 1.0],
         ..FxSlotParams::default()
     };
+    rack.prepare_for_params(&rack_params);
     let deltas = [0.0_f32; NUM_MOD_DESTS];
     let tel = ModUiTelemetry::new();
 
@@ -2266,6 +2276,7 @@ fn fx_diopser_stages_stacking_dispersion_and_idle() {
             diopser_stages: stages_idx as u8,
             ..FxSlotParams::default()
         };
+        rack.prepare_for_params(&rp);
 
         // Transient impulse dispersion + clean decay to silence
         let mut max_abs = 0.0_f32;
@@ -2329,6 +2340,7 @@ fn fx_reverb_delay_chorus_eq_subtabs_and_bus_b_modulation() {
         eq_params: [0.0, 1.0, 1.0, 0.5], // Ping-Pong = 100%, Width = 100%
         ..FxSlotParams::default()
     };
+    rack.prepare_for_params(&rp);
 
     let mut right_energy = 0.0_f32;
     for i in 0..24_000 {
@@ -2361,6 +2373,7 @@ fn fx_reverb_delay_chorus_eq_subtabs_and_bus_b_modulation() {
             eq_params: [0.0, 1.0, predelay_norm, 0.5],
             ..FxSlotParams::default()
         };
+        r.prepare_for_params(&p);
         let mut d = [0.0_f32; NUM_MOD_DESTS];
         // Modulate Bus B Slot 2 Eq Param 0 (LOW CUT = P5)
         d[ModDestination::fx_bus_slot_param(1, 2, 4).index()] = mod_eq_cutoff;
@@ -2396,6 +2409,7 @@ fn fx_reverb_delay_chorus_eq_subtabs_and_bus_b_modulation() {
         eq_params: [0.4, 0.6, 0.8, 0.5],
         ..FxSlotParams::default()
     };
+    rc.prepare_for_params(&cp);
     let mut chorus_pk = 0.0_f32;
     for i in 0..2048 {
         let s = (i as f32 * 0.04).sin() * 0.4;
@@ -2542,6 +2556,7 @@ fn fx_tube_resonator_tune_filter_dirty_lfo_and_idle() {
 
     let run_burst = |params: &FxRackParams| -> Vec<f32> {
         let mut rack = FxRackState::new(48_000.0);
+        rack.prepare_for_params(params);
         let mut out = Vec::with_capacity(4096);
         for n in 0..4096 {
             let x = if n < 64 {
@@ -2604,6 +2619,7 @@ fn fx_tube_resonator_tune_filter_dirty_lfo_and_idle() {
 
     // Long silence should decay cleanly to idle without NaNs
     let mut rack = FxRackState::new(48_000.0);
+    rack.prepare_for_params(&base_params);
     let (l0, r0) = rack.process_buses_sample(
         (0.4, 0.4),
         (0.0, 0.0),
@@ -2749,6 +2765,7 @@ fn fx_utility_width_pan_gain_phase_invert_and_modulation() {
         ..FxSlotParams::default()
     };
     let mut rack = FxRackState::new(48_000.0);
+    rack.prepare_for_params(&params);
     let (ul, ur) = rack.process_buses_sample(
         (0.45, -0.25),
         (0.0, 0.0),
@@ -2763,6 +2780,7 @@ fn fx_utility_width_pan_gain_phase_invert_and_modulation() {
     // 3. Phase invert + 0% Width mono sum
     params.buses[0].slots[0].utility_inv_l = true;
     let mut rack_inv = FxRackState::new(48_000.0);
+    rack_inv.prepare_for_params(&params);
     let (il, ir) = rack_inv.process_buses_sample(
         (0.4, 0.4),
         (0.0, 0.0),
@@ -2778,6 +2796,7 @@ fn fx_utility_width_pan_gain_phase_invert_and_modulation() {
     params.buses[0].slots[0].utility_inv_l = false;
     params.buses[0].slots[0].params[0] = 0.0; // 0% Width
     let mut rack_mono = FxRackState::new(48_000.0);
+    rack_mono.prepare_for_params(&params);
     let (ml, mr) = rack_mono.process_buses_sample(
         (0.6, -0.2),
         (0.0, 0.0),
@@ -2794,6 +2813,7 @@ fn fx_utility_width_pan_gain_phase_invert_and_modulation() {
     let mut mod_gain = [0.0_f32; NUM_MOD_DESTS];
     mod_gain[ModDestination::fx_bus_slot_param(0, 0, 2).index()] = 0.25; // +~6.9 dB
     let mut rack_mod = FxRackState::new(48_000.0);
+    rack_mod.prepare_for_params(&params);
     let (gl, gr) = rack_mod.process_buses_sample(
         (0.1, 0.1),
         (0.0, 0.0),
@@ -2921,6 +2941,7 @@ fn fx_limiter_lookahead_scurve_transient_clipping_and_modulation() {
         params.buses[0].slots[0].params = [0.75, ceil_norm, la_norm, 1.0]; // +18 dB gain
         params.buses[0].slots[0].eq_params = FxSlotParams::default_eq_params_for_type(FxType::Limiter);
         params.buses[0].slots[0].limiter_true_peak = true;
+        rack.prepare_for_params(&params);
 
         for n in 0..4096 {
             let x = if n % 400 < 20 {
@@ -2955,6 +2976,7 @@ fn fx_limiter_lookahead_scurve_transient_clipping_and_modulation() {
         params.buses[0].slots[0].params = [0.0, 0.5, la_norm, 1.0]; // 0 dB gain, -9 dB ceil (~0.355)
         params.buses[0].slots[0].eq_params = [0.3, 0.1, 1.0, 0.0];
         params.buses[0].slots[0].limiter_true_peak = false;
+        rack.prepare_for_params(&params);
 
         let la_samples = (la_norm * 3.0 * 0.001 * sr).round() as usize;
         let spike_at = 500;
@@ -2994,6 +3016,7 @@ fn fx_limiter_lookahead_scurve_transient_clipping_and_modulation() {
     p_mix.buses[0].slots[0].enabled = true;
     p_mix.buses[0].slots[0].params = [0.0, 1.0, 1.0, 0.5]; // 0 dB gain, 0 dB ceil, 3.0 ms, 50% mix
     p_mix.buses[0].slots[0].eq_params = FxSlotParams::default_eq_params_for_type(FxType::Limiter);
+    rack_mix.prepare_for_params(&p_mix);
     let mut sq_in = 0.0_f32;
     let mut sq_out = 0.0_f32;
     for n in 0..2048 {
@@ -3027,6 +3050,7 @@ fn fx_limiter_lookahead_scurve_transient_clipping_and_modulation() {
     p_mod.buses[0].slots[0].enabled = true;
     p_mod.buses[0].slots[0].params = [0.0, 1.0, 0.5, 1.0];
     p_mod.buses[0].slots[0].eq_params = FxSlotParams::default_eq_params_for_type(FxType::Limiter);
+    rack_mod.prepare_for_params(&p_mod);
     for n in 0..1024 {
         let x = 0.1 * (2.0 * std::f32::consts::PI * 440.0 * n as f32 / sr).sin();
         let (l, r) = rack_mod.process_buses_sample(
@@ -3086,6 +3110,7 @@ fn distortion_all_modes_bounded_bias_asymmetry_linear_fold_and_idle() {
             params: [0.50, 0.75, 0.50, 1.0],
             ..FxSlotParams::default()
         };
+        rack.prepare_for_params(&p);
         let mut peak = 0.0_f32;
         for n in 0..1024 {
             let x = 0.6 * (2.0 * std::f32::consts::PI * 220.0 * n as f32 / sr).sin();
@@ -3188,6 +3213,7 @@ fn fx_multiband_dist_flat_xover_per_band_harmonics_solo_and_idle() {
 
         for freq_hz in [25.0_f32, 60.0, 150.0, 200.0, 650.0, 1500.0, 2500.0, 6000.0, 12000.0, 18000.0] {
             let mut rack = FxRackState::new(sr);
+            rack.prepare_for_params(&p);
             let mut rms_in_sq = 0.0_f64;
             let mut rms_out_sq = 0.0_f64;
             // Measure over an exact integer number of cycles after settling the 200 Hz LR4 phase response
@@ -3224,6 +3250,7 @@ fn fx_multiband_dist_flat_xover_per_band_harmonics_solo_and_idle() {
             mb_bands: bands,
             ..FxSlotParams::default()
         };
+        rack.prepare_for_params(&p);
         let n_fft = 8192;
         let settle = 4096;
         let mut out_buf = Vec::with_capacity(n_fft);
@@ -3290,6 +3317,7 @@ fn fx_multiband_dist_flat_xover_per_band_harmonics_solo_and_idle() {
         ],
         ..FxSlotParams::default()
     };
+    solo_rack.prepare_for_params(&sp);
     let mut high_rms = 0.0_f64;
     for n in 0..8000 {
         let x = 0.4 * (2.0 * std::f32::consts::PI * 8000.0 * n as f32 / sr).sin();
@@ -3320,7 +3348,9 @@ fn fx_multiband_dist_flat_xover_per_band_harmonics_solo_and_idle() {
     let mut mod_rms = 0.0_f64;
     let mut base_rms = 0.0_f64;
     let mut base_rack = FxRackState::new(sr);
+    base_rack.prepare_for_params(&sp);
     let mut mod_rack = FxRackState::new(sr);
+    mod_rack.prepare_for_params(&sp);
     for n in 0..4000 {
         let x = 0.4 * (2.0 * std::f32::consts::PI * 60.0 * n as f32 / sr).sin();
         let (bl, _) = base_rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &sp, &mod_zero, 120.0, None);
@@ -3362,6 +3392,7 @@ fn fx_flanger_high_feedback_polarity_stack_mod_and_idle() {
             eq_params: [fb_norm, 0.50, 0.0, 0.85],
             ..FxSlotParams::default()
         };
+        rack.prepare_for_params(&p);
         let mut peak = 0.0_f32;
         let mut rms_sq = 0.0_f64;
         for n in 0..8192 {
@@ -3405,6 +3436,7 @@ fn fx_flanger_high_feedback_polarity_stack_mod_and_idle() {
         eq_params: [0.8, 0.5, 0.0, 0.85],
         ..FxSlotParams::default()
     };
+    idle_rack.prepare_for_params(&ip);
     let (wl, wr) = idle_rack.process_buses_sample((0.4, -0.4), (0.0, 0.0), (0.0, 0.0), &ip, &mod_zero, 120.0, None);
     assert!(wl.is_finite() && wr.is_finite());
     for _ in 0..4500 {
@@ -3443,13 +3475,24 @@ fn fx_bus_c_8_slots_lane_routing_topologies_and_filter_bus_guards() {
     // 2. Verify ModDestination coordinates and modulation on Bus C slot 8 + BusCLevel/BusCPan + telemetry
     assert_eq!(
         ModDestination::fx_bus_slot_param(2, 0, 0),
-        ModDestination::BusCFx1P1
+        ModDestination::FxSlotParam {
+            bus: 2,
+            slot: 0,
+            param: 0
+        }
     );
     assert_eq!(
         ModDestination::fx_bus_slot_param(2, 7, 7),
-        ModDestination::BusCFx8P8
+        ModDestination::FxSlotParam {
+            bus: 2,
+            slot: 7,
+            param: 7
+        }
     );
-    assert_eq!(ModDestination::BusCFx8P8.fx_slot_param_coords(), Some((2, 7, 7)));
+    assert_eq!(
+        ModDestination::fx_bus_slot_param(2, 7, 7).fx_slot_param_coords(),
+        Some((2, 7, 7))
+    );
     assert_eq!(ModDestination::BusCLevel.name(), "BUS C LVL");
     assert_eq!(ModDestination::BusCPan.name(), "BUS C PAN");
 
@@ -3463,6 +3506,7 @@ fn fx_bus_c_8_slots_lane_routing_topologies_and_filter_bus_guards() {
         params: [0.5, 0.5, 0.5, 1.0],
         ..FxSlotParams::default()
     };
+    bus_c_rack.prepare_for_params(&bus_c_params);
     let (base_l, base_r) = bus_c_rack.process_buses_sample(
         (0.0, 0.0),
         (0.0, 0.0),
@@ -3475,7 +3519,7 @@ fn fx_bus_c_8_slots_lane_routing_topologies_and_filter_bus_guards() {
     assert!((base_l - 0.3).abs() < 1e-4 && (base_r - 0.3).abs() < 1e-4);
 
     let mut mod_bus_c = [0.0_f32; NUM_MOD_DESTS];
-    mod_bus_c[ModDestination::BusCFx8P1.index()] = -0.3; // Utility gain reduction
+    mod_bus_c[ModDestination::fx_bus_slot_param(2, 7, 0).index()] = -0.3; // Utility gain reduction
     mod_bus_c[ModDestination::BusCPan.index()] = 0.8; // Pan hard right
     let mut attenuated_l = 0.0_f32;
     let mut panned_r = 0.0_f32;
@@ -3641,4 +3685,112 @@ fn fx_clipper_pcm_stage_catches_oversampled_overshoots() {
             "PCM stage (knee={knee}) exceeded ceiling {ceil_lin}: {max_pcm_peak}"
         );
     }
+}
+
+#[test]
+fn phase_b_90_fx_units_order_bypass_mute_and_mod_serde() {
+    use j_syn_dsp::{
+        FxRackOrder, FxRackParams, FxRackState, FxSlotParams, FxType, ModDestination,
+        NUM_FX_SLOTS, NUM_MOD_DESTS,
+    };
+
+    assert_eq!(NUM_FX_SLOTS, 30);
+
+    // 1. Extended 30-slot ModDestination coordinate & index round-trip
+    for bus in 0..3 {
+        for slot in [0usize, 7, 8, 29] {
+            for param in [0usize, 3, 4, 15] {
+                let d = ModDestination::fx_bus_slot_param(bus, slot, param);
+                assert_eq!(d.fx_slot_param_coords(), Some((bus, slot, param)));
+                assert_eq!(ModDestination::from_index(d.index()), Some(d));
+            }
+        }
+    }
+    assert_eq!(
+        ModDestination::from_index(ModDestination::Filter1Cutoff.index()),
+        Some(ModDestination::Filter1Cutoff)
+    );
+    assert_eq!(
+        ModDestination::from_index(ModDestination::BusCLevel.index()),
+        Some(ModDestination::BusCLevel)
+    );
+
+    // 2. FxRackOrder operations (insert, move_within_lane, remove, reconcile)
+    let mut order = FxRackOrder::empty_explicit();
+    assert_eq!(order.first_free_slot(0), Some(0));
+    assert!(order.insert_at(0, 0, 0));
+    assert!(order.insert_at(0, 1, 1));
+    assert!(order.insert_at(0, 2, 2));
+    assert_eq!(order.active_slots(0), &[0, 1, 2]);
+    // Move pos 2 -> pos 0 => [2, 0, 1]
+    assert!(order.move_within_lane(0, 2, 0));
+    assert_eq!(order.active_slots(0), &[2, 0, 1]);
+    // Move pos 0 -> end (3) => [0, 1, 2]
+    assert!(order.move_within_lane(0, 0, 3));
+    assert_eq!(order.active_slots(0), &[0, 1, 2]);
+    // Remove slot 1 => [0, 2], first_free_slot == Some(1)
+    assert!(order.remove_slot(0, 1));
+    assert_eq!(order.active_slots(0), &[0, 2]);
+    assert_eq!(order.first_free_slot(0), Some(1));
+
+    // Reconcile drops inactive slot 2 and appends newly active slot 29
+    let mut rec = order;
+    rec.reconcile_with_active_mask([(1u32 << 0) | (1u32 << 29), 0, 0]);
+    assert_eq!(rec.active_slots(0), &[0, 29]);
+
+    // 3. Explicit order controls DSP execution order (Filter -> Distortion != Distortion -> Filter)
+    let sr = 48_000.0;
+    let zeros = [0.0_f32; NUM_MOD_DESTS];
+    let run_ordered = |order_slots: [u8; 2], lane_enabled: bool, lane_muted: bool| -> f32 {
+        let mut rack = FxRackState::new(sr);
+        let mut rp = FxRackParams::default();
+        rp.buses[0].enabled = lane_enabled;
+        rp.buses[0].muted = lane_muted;
+        // Slot 0: hard Distortion
+        rp.buses[0].slots[0] = FxSlotParams {
+            fx_type: FxType::Distortion,
+            enabled: true,
+            stack: 1,
+            params: [0.5, 0.95, 0.5, 1.0],
+            ..FxSlotParams::default()
+        };
+        // Slot 29 (30th slot!): Steep LP Filter at ~200 Hz
+        rp.buses[0].slots[29] = FxSlotParams {
+            fx_type: FxType::Filter,
+            enabled: true,
+            stack: 1,
+            params: [0.22, 0.2, 0.0, 1.0],
+            ..FxSlotParams::default()
+        };
+        rp.order = FxRackOrder::empty_explicit();
+        rp.order.insert_at(0, 0, order_slots[0] as usize);
+        rp.order.insert_at(0, 1, order_slots[1] as usize);
+        rack.prepare_for_params(&rp);
+
+        let mut high_diff = 0.0_f32;
+        let mut prev = 0.0_f32;
+        for i in 0..1024 {
+            let x = 0.5 * (std::f32::consts::TAU * 150.0 * i as f32 / sr).sin();
+            let (l, _) = rack.process_buses_sample((x, x), (0.0, 0.0), (0.0, 0.0), &rp, &zeros, 120.0, None);
+            if i > 256 {
+                high_diff += (l - prev).abs();
+            }
+            prev = l;
+        }
+        high_diff
+    };
+
+    // Distortion THEN LP Filter is smoother (lower derivative sum) than LP Filter THEN Distortion
+    let dist_then_lp = run_ordered([0, 29], true, false);
+    let lp_then_dist = run_ordered([29, 0], true, false);
+    assert!(
+        lp_then_dist > dist_then_lp * 1.15,
+        "Explicit FxRackOrder must govern DSP order: dist->lp={dist_then_lp}, lp->dist={lp_then_dist}"
+    );
+
+    // 4. Per-lane Bypass (`enabled = false`) passes dry signal; Mute (`muted = true`) silences lane
+    let bypassed = run_ordered([0, 29], false, false);
+    let muted = run_ordered([0, 29], true, true);
+    assert!(bypassed > 1.0, "Bypassed lane must still pass dry signal: {bypassed}");
+    assert_eq!(muted, 0.0, "Muted lane must output exact silence");
 }

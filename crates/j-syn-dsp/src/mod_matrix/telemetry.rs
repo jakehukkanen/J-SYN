@@ -2,7 +2,10 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use super::destinations::{ModDestination, ModMatrixSource, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS};
+use super::destinations::{
+    ModDestination, ModMatrixSource, FX_MOD_BUSES, FX_MOD_SLOTS_PER_BUS, NUM_ACTIVE_SOURCES,
+    NUM_MOD_DESTS,
+};
 
 pub const FX_SCOPE_LEN: usize = 256;
 
@@ -70,14 +73,14 @@ impl FxScopeRing {
 
 /// Lock-free atomic telemetry published by the audio thread for 60 Hz UI mod-ring animations.
 pub struct ModUiTelemetry {
-    pub dest_offsets: [AtomicU32; NUM_MOD_DESTS],
+    pub dest_offsets: Box<[AtomicU32]>,
     pub source_levels: [AtomicU32; NUM_ACTIVE_SOURCES],
     pub modseq_phases: [AtomicU32; 4],
     pub env_levels: [AtomicU32; 4],
     /// Post-modulation `[cutoff_hz, resonance, drive, aux]` for `FILTER 1` and `FILTER 2`.
     pub filter_live: [[AtomicU32; 4]; 2],
-    /// Lock-free FX scopes for `Bus A` (`0..8`), `Bus B` (`8..16`), and `Bus C` (`16..24`).
-    pub fx_scopes: [FxScopeRing; 24],
+    /// Lock-free FX scopes for `Bus A` (`0..30`), `Bus B` (`30..60`), and `Bus C` (`60..90`).
+    pub fx_scopes: Box<[FxScopeRing]>,
     /// Lock-free Sub Bus clipper scope (`pre_driven`, `post_clipped`, `clip_activity`).
     pub sub_scope: FxScopeRing,
     /// Lock-free Master Output / Limiter scope (`pre_limit`, `post_out`, `limit_activity`).
@@ -99,7 +102,10 @@ impl Default for ModUiTelemetry {
 impl ModUiTelemetry {
     pub fn new() -> Self {
         Self {
-            dest_offsets: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
+            dest_offsets: (0..NUM_MOD_DESTS)
+                .map(|_| AtomicU32::new(0.0_f32.to_bits()))
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
             source_levels: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             modseq_phases: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             env_levels: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
@@ -111,7 +117,10 @@ impl ModUiTelemetry {
                     AtomicU32::new(0.0_f32.to_bits()),
                 ]
             }),
-            fx_scopes: std::array::from_fn(|_| FxScopeRing::new()),
+            fx_scopes: (0..(FX_MOD_BUSES * FX_MOD_SLOTS_PER_BUS))
+                .map(|_| FxScopeRing::new())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
             sub_scope: FxScopeRing::new(),
             master_scope: FxScopeRing::new(),
             master_peak_l: AtomicU32::new(0.0_f32.to_bits()),
@@ -218,7 +227,8 @@ impl ModUiTelemetry {
 
     #[inline]
     pub fn fx_scope(&self, bus: usize, slot: usize) -> &FxScopeRing {
-        let idx = bus.min(2) * 8 + slot.min(7);
+        let idx = bus.min(FX_MOD_BUSES - 1) * FX_MOD_SLOTS_PER_BUS
+            + slot.min(FX_MOD_SLOTS_PER_BUS - 1);
         &self.fx_scopes[idx]
     }
 

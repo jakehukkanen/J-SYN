@@ -5,7 +5,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use j_syn_dsp::{ModMatrixState, ModSeqStepBank, Wavetable, WavetableBank};
+use j_syn_dsp::{
+    FxEngineSwapQueue, FxRackOrder, FxType, ModMatrixState, ModSeqStepBank, Wavetable,
+    WavetableBank, NUM_FX_BUSES, NUM_FX_SLOTS,
+};
 use nih_plug::params::internals::ParamPtr;
 use nih_plug::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -287,6 +290,11 @@ pub struct JSynPatch {
     #[serde(deserialize_with = "j_syn_dsp::serde_lenient::default_on_null")]
     pub modseq_steps: ModSeqStepBank,
     #[serde(
+        default,
+        deserialize_with = "j_syn_dsp::serde_lenient::default_on_null"
+    )]
+    pub fx_rack_order: FxRackOrder,
+    #[serde(
         default = "default_macro_names",
         deserialize_with = "deserialize_macro_names"
     )]
@@ -306,6 +314,7 @@ impl Default for JSynPatch {
             enum_names: BTreeMap::new(),
             mod_matrix: ModMatrixState::default(),
             modseq_steps: ModSeqStepBank::default(),
+            fx_rack_order: FxRackOrder::default(),
             macro_names: default_macro_names(),
             wavetable_paths: Default::default(),
         }
@@ -619,12 +628,69 @@ fn resolve_wavetable_path_in_dir(path_str: &str, wavetables_dir: Option<&str>) -
         .map(|entry| entry.path)
 }
 
+/// Parses a parameter ID belonging to an FX slot (`bus 0..3`, `slot 0..30`).
+fn parse_fx_slot_param_coords(id: &str) -> Option<(usize, usize)> {
+    let (bus, rest) = if let Some(r) = id.strip_prefix("bus_b_") {
+        (1usize, r)
+    } else if let Some(r) = id.strip_prefix("bus_c_") {
+        (2usize, r)
+    } else {
+        (0usize, id)
+    };
+    if !rest.starts_with("fx_") && !rest.starts_with("mb_") {
+        return None;
+    }
+    let idx_str = rest.rsplit('_').next()?;
+    let one_based = idx_str.parse::<usize>().ok()?;
+    if (1..=NUM_FX_SLOTS).contains(&one_based) {
+        Some((bus, one_based - 1))
+    } else {
+        None
+    }
+}
+
+/// Parses a `fx_type_<n>` / `bus_b_fx_type_<n>` / `bus_c_fx_type_<n>` parameter ID.
+fn parse_fx_type_param_coords(id: &str) -> Option<(usize, usize)> {
+    let (bus, num_str) = if let Some(r) = id.strip_prefix("fx_type_") {
+        (0usize, r)
+    } else if let Some(r) = id.strip_prefix("bus_b_fx_type_") {
+        (1usize, r)
+    } else {
+        let r = id.strip_prefix("bus_c_fx_type_")?;
+        (2usize, r)
+    };
+    let one_based = num_str.parse::<usize>().ok()?;
+    if (1..=NUM_FX_SLOTS).contains(&one_based) {
+        Some((bus, one_based - 1))
+    } else {
+        None
+    }
+}
+
+/// Provisions all active FX engines off the RT thread (e.g. immediately after loading a preset).
+pub fn provision_active_fx(params: &JSynPluginParams, swap_queue: &FxEngineSwapQueue) {
+    for bus in 0..NUM_FX_BUSES {
+        for (slot_idx, slot) in params.fx_bus_slots(bus).iter().enumerate() {
+            let fx_type = FxType::from(slot.fx_type.value());
+            let stack = slot.stack.value().clamp(1, 4) as usize;
+            swap_queue.provision_slot(bus, slot_idx, fx_type, stack);
+        }
+    }
+}
+
 impl JSynPatch {
     pub fn capture(name: impl Into<String>, params: &Arc<JSynPluginParams>) -> Self {
+        let active_masks = params.fx_active_masks();
         let mut param_values = BTreeMap::new();
         let mut plain_values = BTreeMap::new();
         let mut enum_names = BTreeMap::new();
         for (id, ptr, _) in params.param_map() {
+            // Keep preset files compact: omit inactive extended slots (9..=30) whose type is Off.
+            if let Some((bus, slot)) = parse_fx_slot_param_coords(&id) {
+                if slot >= 8 && ((active_masks[bus] >> (slot as u32)) & 1) == 0 {
+                    continue;
+                }
+            }
             // SAFETY: `ptr` comes from `params.param_map()` on a live `JSynPluginParams`.
             let (norm, plain, enum_name) = unsafe {
                 let n = ptr.unmodulated_normalized_value();
@@ -663,6 +729,7 @@ impl JSynPatch {
             enum_names,
             mod_matrix: params.mod_matrix.snapshot(),
             modseq_steps: params.modseq_steps.snapshot(),
+            fx_rack_order: params.reconciled_fx_rack_order(),
             macro_names,
             wavetable_paths,
         }
@@ -688,8 +755,14 @@ impl JSynPatch {
         gui_context: &Arc<dyn GuiContext>,
         bank: &Arc<WavetableBank>,
     ) -> [String; 8] {
+        let mut active_masks = [0u32; NUM_FX_BUSES];
         for (id, ptr, _) in params.param_map() {
             let norm = resolve_patch_param_norm(self, &id, ptr);
+            if let Some((bus, slot)) = parse_fx_type_param_coords(&id) {
+                if norm > 1e-4 {
+                    active_masks[bus] |= 1u32 << (slot as u32);
+                }
+            }
             // SAFETY: `ptr` belongs to `params` and is modified via `GuiContext`.
             unsafe {
                 gui_context.raw_begin_set_parameter(ptr);
@@ -699,6 +772,9 @@ impl JSynPatch {
         }
         params.mod_matrix.store_value(self.mod_matrix);
         params.modseq_steps.store_value(self.modseq_steps);
+        let mut order = self.fx_rack_order;
+        order.reconcile_with_active_mask(active_masks);
+        params.fx_rack_order.store_value(order);
 
         if let Ok(mut guard) = params.macro_names.lock() {
             *guard = self.macro_names.clone();

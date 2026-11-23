@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use j_syn_dsp::{
-    FxBusTopology, MbDistBandParams, SubBusParams, MB_BAND_LEVEL_DEFAULT_NORM,
+    FxBusTopology, MbDistBandParams, SubBusParams, MB_BAND_LEVEL_DEFAULT_NORM, NUM_FX_SLOTS,
 };
 pub use j_syn_ui::fx_units::{
     DiopserStagesParam, DistortionModeParam, FilterModeParam, FxFilterSlopeParam,
@@ -14,6 +14,12 @@ use super::{bipolar_percentage_param, fx_level_param};
 
 #[derive(Params)]
 pub struct FxBusPluginParams {
+    #[id = "en"]
+    pub enabled: BoolParam,
+
+    #[id = "mute"]
+    pub muted: BoolParam,
+
     #[id = "lvl"]
     pub level: FloatParam,
 
@@ -21,23 +27,27 @@ pub struct FxBusPluginParams {
     pub pan: FloatParam,
 
     #[nested(array, group = "Slots")]
-    pub slots: [FxSlotPluginParams; 8],
+    pub slots: [Box<FxSlotPluginParams>; NUM_FX_SLOTS],
 }
 
 impl FxBusPluginParams {
     pub fn new_bus_b() -> Self {
         Self {
+            enabled: BoolParam::new("Bus B Enabled", true),
+            muted: BoolParam::new("Bus B Mute", false),
             level: fx_level_param("Bus B Level"),
             pan: bipolar_percentage_param("Bus B Pan", 0.0),
-            slots: std::array::from_fn(FxSlotPluginParams::new_slot),
+            slots: std::array::from_fn(|i| Box::new(FxSlotPluginParams::new_slot(i))),
         }
     }
 
     pub fn new_bus_c() -> Self {
         Self {
+            enabled: BoolParam::new("Bus C Enabled", true),
+            muted: BoolParam::new("Bus C Mute", false),
             level: fx_level_param("Bus C Level"),
             pan: bipolar_percentage_param("Bus C Pan", 0.0),
-            slots: std::array::from_fn(FxSlotPluginParams::new_slot),
+            slots: std::array::from_fn(|i| Box::new(FxSlotPluginParams::new_slot(i))),
         }
     }
 }

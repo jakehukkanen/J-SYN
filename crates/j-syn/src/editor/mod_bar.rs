@@ -8,11 +8,13 @@ use j_syn_dsp::mod_matrix::{
     ModDestination, ModMatrixSource, ModSlot, ModUiTelemetry, NUM_MOD_DESTS, NUM_MOD_SLOTS,
 };
 use j_syn_dsp::modseq::ModSeqStepShape;
+use j_syn_dsp::{FxEngineSwapQueue, FxType, NUM_FX_BUSES, NUM_FX_SLOTS};
 use j_syn_ui::ModUiHost;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 
 use super::controls::bold_label;
+use super::fx_drag_overlay::FxDragState;
 use super::modseq_tab::ModSeqSubTab;
 use super::{theme, BottomTab, UiEvent};
 use crate::JSynPluginParams;
@@ -34,15 +36,17 @@ pub(crate) fn bottom_tab_tag(tab: BottomTab) -> u8 {
 pub(crate) struct ModUiState {
     pub params: Arc<JSynPluginParams>,
     pub telemetry: Arc<ModUiTelemetry>,
+    pub fx_swap_queue: Arc<FxEngineSwapQueue>,
+    pub fx_drag: Arc<FxDragState>,
     dragging_source: AtomicU8,
     active_mod_source: AtomicU8,
     hover_dest: AtomicU16,
     active_bottom_tab: AtomicU8,
     active_modseq_subtab: AtomicU8,
     active_view_mode: AtomicU8,
-    fx_eq_mask: AtomicU32,
-    fx_collapsed_mask: AtomicU32,
-    mb_dist_tab: [[AtomicU8; 8]; 3],
+    fx_eq_mask: [AtomicU32; NUM_FX_BUSES],
+    fx_collapsed_mask: [AtomicU32; NUM_FX_BUSES],
+    mb_dist_tab: [[AtomicU8; NUM_FX_SLOTS]; NUM_FX_BUSES],
     inspected_dest: AtomicU16,
     inspected_slot: AtomicU8,
     active_stamp: AtomicU8,
@@ -51,23 +55,29 @@ pub(crate) struct ModUiState {
     external_sync_rev: AtomicU64,
     last_external_sync_rev: AtomicU64,
     pending_preset_name: Mutex<Option<String>>,
-    drop_rects: Mutex<[(f32, f32, f32, f32, u8); NUM_MOD_DESTS]>,
+    drop_rects: Mutex<Box<[(f32, f32, f32, f32, u8); NUM_MOD_DESTS]>>,
 }
 
 impl ModUiState {
-    pub fn new(params: Arc<JSynPluginParams>, telemetry: Arc<ModUiTelemetry>) -> Self {
+    pub fn new(
+        params: Arc<JSynPluginParams>,
+        telemetry: Arc<ModUiTelemetry>,
+        fx_swap_queue: Arc<FxEngineSwapQueue>,
+    ) -> Self {
         let initial_mask = Self::compute_enabled_mask(&params);
         Self {
             params,
             telemetry,
+            fx_swap_queue,
+            fx_drag: Arc::new(FxDragState::new()),
             dragging_source: AtomicU8::new(0),
             active_mod_source: AtomicU8::new(ModMatrixSource::ModSeq1 as u8),
             hover_dest: AtomicU16::new(UNSET_DEST),
             active_bottom_tab: AtomicU8::new(bottom_tab_tag(BottomTab::ModSeq)),
             active_modseq_subtab: AtomicU8::new(0),
             active_view_mode: AtomicU8::new(0),
-            fx_eq_mask: AtomicU32::new(0),
-            fx_collapsed_mask: AtomicU32::new(0),
+            fx_eq_mask: std::array::from_fn(|_| AtomicU32::new(0)),
+            fx_collapsed_mask: std::array::from_fn(|_| AtomicU32::new(0)),
             mb_dist_tab: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU8::new(0))),
             inspected_dest: AtomicU16::new(UNSET_DEST),
             inspected_slot: AtomicU8::new(UNSET_U8),
@@ -77,7 +87,7 @@ impl ModUiState {
             external_sync_rev: AtomicU64::new(0),
             last_external_sync_rev: AtomicU64::new(0),
             pending_preset_name: Mutex::new(None),
-            drop_rects: Mutex::new([(0.0, 0.0, 0.0, 0.0, UNSET_U8); NUM_MOD_DESTS]),
+            drop_rects: Mutex::new(Box::new([(0.0, 0.0, 0.0, 0.0, UNSET_U8); NUM_MOD_DESTS])),
         }
     }
 
@@ -132,8 +142,22 @@ impl ModUiState {
         Self::fnv1a_mix(&mut h, params.routing.inserts[1].mode.value() as u64);
         Self::fnv1a_mix(&mut h, params.sub_bus.enabled.value() as u64);
         Self::fnv1a_mix(&mut h, params.fx_bus_topology.value() as u64);
-        for bus in 0..3 {
+        let order = params.fx_rack_order.snapshot();
+        Self::fnv1a_mix(&mut h, order.explicit as u64);
+        for bus in 0..NUM_FX_BUSES {
+            Self::fnv1a_mix(&mut h, params.fx_bus_enabled_param(bus).value() as u64);
+            Self::fnv1a_mix(&mut h, params.fx_bus_muted_param(bus).value() as u64);
+            let active_slots = order.active_slots(bus);
+            Self::fnv1a_mix(&mut h, active_slots.len() as u64);
+            for &s in active_slots {
+                Self::fnv1a_mix(&mut h, s as u64);
+            }
             for fx in params.fx_bus_slots(bus) {
+                let ty = FxType::from(fx.fx_type.value());
+                if ty == FxType::Off {
+                    Self::fnv1a_mix(&mut h, 0);
+                    continue;
+                }
                 let packed = (fx.enabled.value() as u64)
                     | ((fx.fx_type.value() as u64) << 1)
                     | ((fx.stack.value().clamp(1, 4) as u64) << 6)
@@ -147,11 +171,13 @@ impl ModUiState {
                     | ((fx.distortion_mode.value() as u64) << 23)
                     | ((fx.clipper_pcm.value() as u64) << 27);
                 Self::fnv1a_mix(&mut h, packed);
-                for mb in &fx.mb_bands {
-                    let mb_packed = (mb.enabled.value() as u64)
-                        | ((mb.solo.value() as u64) << 1)
-                        | ((mb.mode.value() as u64) << 2);
-                    Self::fnv1a_mix(&mut h, mb_packed);
+                if ty == FxType::MultibandDist {
+                    for mb in &fx.mb_bands {
+                        let mb_packed = (mb.enabled.value() as u64)
+                            | ((mb.solo.value() as u64) << 1)
+                            | ((mb.mode.value() as u64) << 2);
+                        Self::fnv1a_mix(&mut h, mb_packed);
+                    }
                 }
             }
         }
@@ -285,70 +311,77 @@ impl ModUiState {
 
     #[inline]
     pub fn fx_eq_subtab(&self, bus: usize, slot: usize) -> bool {
-        let bit = (bus.min(2) * 8 + (slot & 7)) as u32;
-        ((self.fx_eq_mask.load(Ordering::Relaxed) >> bit) & 1) != 0
+        let b = bus.min(NUM_FX_BUSES - 1);
+        let s = slot.min(NUM_FX_SLOTS - 1) as u32;
+        ((self.fx_eq_mask[b].load(Ordering::Relaxed) >> s) & 1) != 0
     }
 
     pub fn set_fx_eq_subtab(&self, bus: usize, slot: usize, is_eq: bool) {
-        let bit = 1_u32 << ((bus.min(2) * 8 + (slot & 7)) as u32);
+        let b = bus.min(NUM_FX_BUSES - 1);
+        let bit = 1_u32 << (slot.min(NUM_FX_SLOTS - 1) as u32);
         if is_eq {
-            self.fx_eq_mask.fetch_or(bit, Ordering::Relaxed);
+            self.fx_eq_mask[b].fetch_or(bit, Ordering::Relaxed);
         } else {
-            self.fx_eq_mask.fetch_and(!bit, Ordering::Relaxed);
+            self.fx_eq_mask[b].fetch_and(!bit, Ordering::Relaxed);
         }
-    }
-
-    pub fn swap_fx_eq_subtab(&self, bus: usize, slot_a: usize, slot_b: usize) {
-        let a = self.fx_eq_subtab(bus, slot_a);
-        let b = self.fx_eq_subtab(bus, slot_b);
-        self.set_fx_eq_subtab(bus, slot_a, b);
-        self.set_fx_eq_subtab(bus, slot_b, a);
     }
 
     #[inline]
     pub fn fx_collapsed(&self, bus: usize, slot: usize) -> bool {
-        let bit = (bus.min(2) * 8 + (slot & 7)) as u32;
-        ((self.fx_collapsed_mask.load(Ordering::Relaxed) >> bit) & 1) != 0
+        let b = bus.min(NUM_FX_BUSES - 1);
+        let s = slot.min(NUM_FX_SLOTS - 1) as u32;
+        ((self.fx_collapsed_mask[b].load(Ordering::Relaxed) >> s) & 1) != 0
     }
 
     pub fn set_fx_collapsed(&self, bus: usize, slot: usize, collapsed: bool) {
-        let bit = 1_u32 << ((bus.min(2) * 8 + (slot & 7)) as u32);
+        let b = bus.min(NUM_FX_BUSES - 1);
+        let bit = 1_u32 << (slot.min(NUM_FX_SLOTS - 1) as u32);
         if collapsed {
-            self.fx_collapsed_mask.fetch_or(bit, Ordering::Relaxed);
+            self.fx_collapsed_mask[b].fetch_or(bit, Ordering::Relaxed);
         } else {
-            self.fx_collapsed_mask.fetch_and(!bit, Ordering::Relaxed);
+            self.fx_collapsed_mask[b].fetch_and(!bit, Ordering::Relaxed);
         }
     }
 
     pub fn toggle_fx_collapsed(&self, bus: usize, slot: usize) -> bool {
-        let bit = 1_u32 << ((bus.min(2) * 8 + (slot & 7)) as u32);
-        let prev = self.fx_collapsed_mask.fetch_xor(bit, Ordering::Relaxed);
+        let b = bus.min(NUM_FX_BUSES - 1);
+        let bit = 1_u32 << (slot.min(NUM_FX_SLOTS - 1) as u32);
+        let prev = self.fx_collapsed_mask[b].fetch_xor(bit, Ordering::Relaxed);
         (prev & bit) == 0
     }
 
-    pub fn swap_fx_collapsed(&self, bus: usize, slot_a: usize, slot_b: usize) {
-        let a = self.fx_collapsed(bus, slot_a);
-        let b = self.fx_collapsed(bus, slot_b);
-        self.set_fx_collapsed(bus, slot_a, b);
-        self.set_fx_collapsed(bus, slot_b, a);
+    pub fn set_lane_collapsed(&self, bus: usize, collapsed: bool) {
+        let b = bus.min(NUM_FX_BUSES - 1);
+        let mask = if collapsed {
+            (1u32 << (NUM_FX_SLOTS as u32)) - 1
+        } else {
+            0
+        };
+        self.fx_collapsed_mask[b].store(mask, Ordering::Relaxed);
     }
 
     #[inline]
     pub fn fx_mb_tab(&self, bus: usize, slot: usize) -> u8 {
-        self.mb_dist_tab[bus.min(2)][slot & 7]
+        self.mb_dist_tab[bus.min(NUM_FX_BUSES - 1)][slot.min(NUM_FX_SLOTS - 1)]
             .load(Ordering::Relaxed)
             .min(3)
     }
 
     pub fn set_fx_mb_tab(&self, bus: usize, slot: usize, tab: u8) {
-        self.mb_dist_tab[bus.min(2)][slot & 7].store(tab.min(3), Ordering::Relaxed);
+        self.mb_dist_tab[bus.min(NUM_FX_BUSES - 1)][slot.min(NUM_FX_SLOTS - 1)]
+            .store(tab.min(3), Ordering::Relaxed);
     }
 
-    pub fn swap_fx_mb_tab(&self, bus: usize, slot_a: usize, slot_b: usize) {
-        let a = self.fx_mb_tab(bus, slot_a);
-        let b = self.fx_mb_tab(bus, slot_b);
-        self.set_fx_mb_tab(bus, slot_a, b);
-        self.set_fx_mb_tab(bus, slot_b, a);
+    pub fn copy_fx_ui_state(
+        &self,
+        from_bus: usize,
+        from_slot: usize,
+        to_bus: usize,
+        to_slot: usize,
+    ) {
+        self.set_fx_eq_subtab(to_bus, to_slot, self.fx_eq_subtab(from_bus, from_slot));
+        self.set_fx_collapsed(to_bus, to_slot, self.fx_collapsed(from_bus, from_slot));
+        self.set_fx_mb_tab(to_bus, to_slot, self.fx_mb_tab(from_bus, from_slot));
     }
 
     fn hit_test_cursor(&self, x: f32, y: f32) -> Option<usize> {
@@ -1000,10 +1033,16 @@ impl View for ModSourcePill {
 }
 
 /// Starts the single 60 Hz UI redraw & structural-state polling timer (`16 ms`)
-/// for live mod-ring, scope, and playhead animations.
+/// for live mod-ring, scope, playhead animations, FX engine garbage draining, and drag auto-scroll.
 pub(crate) fn start_ui_redraw_timer(cx: &mut Context, mod_ui: Arc<ModUiState>) {
     let timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
         if matches!(action, TimerAction::Tick(_)) {
+            mod_ui.fx_swap_queue.drain_garbage();
+            if let Some((scroll_entity, dy)) =
+                mod_ui.fx_drag.edge_scroll_target(cx.scale_factor())
+            {
+                cx.emit_to(scroll_entity, WindowEvent::MouseScroll(0.0, dy));
+            }
             if mod_ui.poll_enabled_mask_changed() {
                 cx.emit(UiEvent::ModUiChanged);
             }
@@ -1024,7 +1063,8 @@ mod tests {
     fn active_mod_source_filters_visible_and_editable_arc_cleanly() {
         let params = Arc::new(JSynPluginParams::default());
         let telemetry = Arc::new(ModUiTelemetry::new());
-        let ui = ModUiState::new(params, telemetry);
+        let swap_queue = Arc::new(FxEngineSwapQueue::new(48_000.0));
+        let ui = ModUiState::new(params, telemetry, swap_queue);
 
         // Assign two different sources (Env2 + ModSeq1) to the same destination
         ui.assign_drop(ModMatrixSource::Env2, ModDestination::Filter1Cutoff)

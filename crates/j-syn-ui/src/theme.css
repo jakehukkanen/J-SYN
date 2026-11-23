@@ -1079,3 +1079,201 @@ scrollview:checked > scrollbar:active .thumb {
   font-size: 10.5;
   font-weight: normal;
 }
+
+/* Phase B: Phase Plant-style FX Wing, Drag Handles, Mute Toggle, Picker & Context Menus */
+
+.fx-title-handle {
+  background-color: transparent;
+  border-width: 1px;
+  border-color: transparent;
+  border-radius: 3px;
+  child-left: 4px;
+  child-right: 4px;
+  child-top: 0px;
+  child-bottom: 0px;
+}
+
+.fx-title-handle:hover {
+  background-color: #322a23;
+  border-color: #52463d;
+}
+
+.fx-title-text {
+  font-size: 9.5;
+  font-weight: bold;
+  color: #f3e6d3;
+}
+
+.hardware-module.module-disabled .fx-title-text {
+  color: #6b6157;
+}
+
+.fx-card-dragging {
+  opacity: 0.35;
+}
+
+.fx-lane-bypassed .fx-full-card {
+  opacity: 0.58;
+}
+
+.fx-lane-muted {
+  opacity: 0.42;
+}
+
+.fx-lane-mute-btn {
+  background-color: #29221c;
+  border-width: 1px;
+  border-color: #4c4036;
+  border-radius: 3px;
+  child-space: 1s;
+}
+
+.fx-lane-mute-btn:hover {
+  background-color: #3c3229;
+  border-color: #f5b349;
+}
+
+.fx-lane-mute-btn:checked {
+  background-color: #6b3530;
+  border-color: #ff6b6b;
+}
+
+.fx-lane-mute-text {
+  font-size: 8;
+  font-weight: bold;
+  color: #a99582;
+}
+
+.fx-lane-mute-btn:checked .fx-lane-mute-text {
+  color: #ffe3de;
+}
+
+.fx-lane-count {
+  font-size: 7.5;
+  font-weight: bold;
+  color: #84786c;
+}
+
+.fx-add-bar {
+  background-color: #211c17;
+  border-width: 1px;
+  border-color: #463b32;
+  border-radius: 4px;
+  child-space: 1s;
+}
+
+.fx-add-bar:hover {
+  background-color: #312923;
+  border-color: #f5b349;
+}
+
+.fx-add-bar-label {
+  font-size: 9;
+  font-weight: bold;
+  color: #a99582;
+}
+
+.fx-add-bar:hover .fx-add-bar-label {
+  color: #ffd382;
+}
+
+.fx-picker-popover {
+  background-color: #211c17;
+  border-width: 1px;
+  border-color: #f5b349;
+  border-radius: 4px;
+  child-left: 6px;
+  child-right: 6px;
+  child-top: 6px;
+  child-bottom: 6px;
+}
+
+.fx-picker-cat-header {
+  font-size: 8;
+  font-weight: bold;
+  color: #f5b349;
+  child-left: 3px;
+}
+
+.fx-picker-item {
+  background-color: #29221c;
+  border-width: 1px;
+  border-color: #3f352e;
+  border-radius: 3px;
+  child-left: 6px;
+  child-right: 4px;
+  child-top: 0px;
+  child-bottom: 0px;
+}
+
+.fx-picker-item:hover {
+  background-color: #3c3229;
+  border-color: #f5b349;
+}
+
+.fx-picker-item-text {
+  font-size: 9;
+  font-weight: bold;
+  color: #f3e6d3;
+}
+
+.fx-picker-item:hover .fx-picker-item-text {
+  color: #fff6e6;
+}
+
+.fx-ctx-menu {
+  background-color: #211c17;
+  border-width: 1px;
+  border-color: #f5b349;
+  border-radius: 4px;
+  child-left: 5px;
+  child-right: 5px;
+  child-top: 5px;
+  child-bottom: 5px;
+}
+
+.fx-ctx-item {
+  background-color: transparent;
+  border-width: 1px;
+  border-color: transparent;
+  border-radius: 3px;
+  child-left: 6px;
+  child-right: 6px;
+  child-top: 0px;
+  child-bottom: 0px;
+}
+
+.fx-ctx-item:hover {
+  background-color: #372e27;
+  border-color: #5c4e43;
+}
+
+.fx-ctx-item-danger {
+  background-color: transparent;
+  border-width: 1px;
+  border-color: transparent;
+  border-radius: 3px;
+  child-left: 6px;
+  child-right: 6px;
+  child-top: 0px;
+  child-bottom: 0px;
+}
+
+.fx-ctx-item-danger:hover {
+  background-color: #6b3530;
+  border-color: #ff6b6b;
+}
+
+.fx-ctx-item-text {
+  font-size: 9;
+  font-weight: bold;
+  color: #f3e6d3;
+}
+
+.fx-ctx-item-danger:hover .fx-ctx-item-text {
+  color: #ffe3de;
+}
+
+.fx-ctx-sep {
+  background-color: #463b32;
+}

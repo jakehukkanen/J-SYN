@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use j_syn_dsp::mod_matrix::{ModMatrixSource, ModSlot, ALL_MOD_DESTINATIONS};
+use j_syn_dsp::mod_matrix::{
+    ModDestination, ModMatrixSource, ModSlot, BASE_MOD_DESTINATIONS,
+};
+use j_syn_dsp::NUM_FX_BUSES;
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
@@ -290,13 +293,33 @@ fn build_matrix_row(
                 ScrollView::new(cx, 0.0, 0.0, false, true, move |cx| {
                     let ui_dst_inner = ui_dst_list.clone();
                     VStack::new(cx, move |cx| {
-                        for dest in ALL_MOD_DESTINATIONS {
+                        for dest in BASE_MOD_DESTINATIONS {
                             let ui_set = ui_dst_inner.clone();
-                            bold_label(cx, dest.name(), "dropdown-item").on_press(move |cx| {
+                            let name = dest.name();
+                            bold_label(cx, name.as_ref(), "dropdown-item").on_press(move |cx| {
                                 ui_set.set_slot_destination_at(slot_idx, dest);
                                 cx.emit(UiEvent::ModUiChanged);
                                 cx.emit(PopupEvent::Close);
                             });
+                        }
+                        let order = ui_dst_inner.params.reconciled_fx_rack_order();
+                        for bus in 0..NUM_FX_BUSES {
+                            for &slot_u8 in order.active_slots(bus) {
+                                let fx_slot = slot_u8 as usize;
+                                for param_idx in 0..8 {
+                                    let dest =
+                                        ModDestination::fx_bus_slot_param(bus, fx_slot, param_idx);
+                                    let ui_set = ui_dst_inner.clone();
+                                    let name = dest.name();
+                                    bold_label(cx, name.as_ref(), "dropdown-item").on_press(
+                                        move |cx| {
+                                            ui_set.set_slot_destination_at(slot_idx, dest);
+                                            cx.emit(UiEvent::ModUiChanged);
+                                            cx.emit(PopupEvent::Close);
+                                        },
+                                    );
+                                }
+                            }
                         }
                     })
                     .class("dropdown-scroll-content");

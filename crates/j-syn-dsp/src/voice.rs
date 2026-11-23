@@ -2,13 +2,13 @@ use crate::envelope::{AdsrParams, AmpAdsr};
 use crate::filter::{
     cutoff_hz_to_norm, cutoff_norm_to_hz, FilterParams, FilterState, FilterSvfCore,
 };
-use crate::fx::{FxBusParams, FxBusTopology, FxSlotParams, SubBusParams};
+use crate::fx::{FxBusParams, FxBusTopology, FxRackOrder, FxSlotParams, SubBusParams};
 use crate::insert::{
     DirectDest, FilterBusDest, FilterRouting, InsertPosition, InsertShaperState, RoutingParams,
     VoiceFeedbackState,
 };
 use crate::mod_matrix::{
-    ModDestination, ModMatrixState, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS,
+    ModDestination, ModMatrixState, NUM_ACTIVE_SOURCES, NUM_VOICE_MOD_DESTS,
 };
 use crate::modseq::{ModSeqParams, ModSeqRetrig, ModSeqState, ModSeqStepBank};
 use crate::noise::{NoiseParams, NoiseState};
@@ -48,6 +48,32 @@ impl VoiceBusOutput {
     }
 }
 
+/// Lightweight per-sample smoothed overrides passed into `Voice` / `TailVoice` so `SynthEngine`
+/// never copies the ~18 KB `SynthParams` struct per audio sample.
+#[derive(Debug, Clone, Copy)]
+pub struct VoiceControlOverrides {
+    pub osc_wt_pos: [f32; 4],
+    pub osc_mod_depth: [f32; 4],
+    pub osc_warp_amount: [f32; 4],
+    pub filter_cutoff_hz: [f32; 2],
+    pub filter_res: [f32; 2],
+    pub filter_drive: [f32; 2],
+}
+
+impl VoiceControlOverrides {
+    #[inline]
+    pub fn from_params(params: &SynthParams) -> Self {
+        Self {
+            osc_wt_pos: std::array::from_fn(|i| params.oscs[i].wt_pos),
+            osc_mod_depth: std::array::from_fn(|i| params.oscs[i].mod_depth),
+            osc_warp_amount: std::array::from_fn(|i| params.oscs[i].warp_amount),
+            filter_cutoff_hz: std::array::from_fn(|i| params.filters[i].cutoff_hz),
+            filter_res: std::array::from_fn(|i| params.filters[i].resonance),
+            filter_drive: std::array::from_fn(|i| params.filters[i].drive),
+        }
+    }
+}
+
 /// Snapshot of all synthesizer DSP parameters for a processing block.
 #[derive(Debug, Clone, Copy)]
 pub struct SynthParams {
@@ -75,6 +101,7 @@ pub struct SynthParams {
     pub fx_bus_b: FxBusParams,
     pub fx_bus_c: FxBusParams,
     pub fx_bus_topology: FxBusTopology,
+    pub fx_rack_order: FxRackOrder,
     pub sub_bus: SubBusParams,
     pub tempo_bpm: f32,
     pub dc_blocker: bool,
@@ -112,20 +139,27 @@ impl Default for SynthParams {
             macros: [0.0; 8],
             fx_bus_a: FxBusParams {
                 slots: init_slots,
+                enabled: true,
+                muted: false,
                 level: 1.0,
                 pan: 0.0,
             },
             fx_bus_b: FxBusParams {
                 slots: init_slots,
+                enabled: true,
+                muted: false,
                 level: 1.0,
                 pan: 0.0,
             },
             fx_bus_c: FxBusParams {
                 slots: init_slots,
+                enabled: true,
+                muted: false,
                 level: 1.0,
                 pan: 0.0,
             },
             fx_bus_topology: FxBusTopology::Parallel,
+            fx_rack_order: FxRackOrder::default(),
             sub_bus: SubBusParams::default(),
             tempo_bpm: 120.0,
             dc_blocker: true,
@@ -214,15 +248,20 @@ fn run_inserts_at(
 #[inline]
 fn apply_osc_modulation(
     osc_p: &OscParams,
+    overrides: &VoiceControlOverrides,
     idx: usize,
-    mod_offsets: &[f32; NUM_MOD_DESTS],
+    mod_offsets: &[f32; NUM_VOICE_MOD_DESTS],
 ) -> OscParams {
     let mut out = *osc_p;
-    out.wt_pos = (out.wt_pos + mod_offsets[ModDestination::osc_wt_pos(idx).index()]).clamp(0.0, 1.0);
+    out.wt_pos =
+        (overrides.osc_wt_pos[idx] + mod_offsets[ModDestination::osc_wt_pos(idx).index()])
+            .clamp(0.0, 1.0);
     out.warp_amount =
-        (out.warp_amount + mod_offsets[ModDestination::osc_warp(idx).index()]).clamp(0.0, 1.0);
+        (overrides.osc_warp_amount[idx] + mod_offsets[ModDestination::osc_warp(idx).index()])
+            .clamp(0.0, 1.0);
     out.mod_depth =
-        (out.mod_depth + mod_offsets[ModDestination::osc_mod_depth(idx).index()]).clamp(0.0, 1.0);
+        (overrides.osc_mod_depth[idx] + mod_offsets[ModDestination::osc_mod_depth(idx).index()])
+            .clamp(0.0, 1.0);
     out.pan = (out.pan + mod_offsets[ModDestination::osc_pan(idx).index()] * 2.0).clamp(-1.0, 1.0);
     out.level = (out.level + mod_offsets[ModDestination::osc_level(idx).index()]).clamp(0.0, 1.0);
     out.pitch_semitones = (out.pitch_semitones
@@ -246,7 +285,7 @@ fn apply_osc_modulation(
 #[inline]
 fn apply_noise_modulation(
     noise: &NoiseParams,
-    mod_offsets: &[f32; NUM_MOD_DESTS],
+    mod_offsets: &[f32; NUM_VOICE_MOD_DESTS],
 ) -> NoiseParams {
     let mut out = *noise;
     out.color =
@@ -260,7 +299,7 @@ fn apply_noise_modulation(
 pub fn apply_filter_modulation(
     flt: &FilterParams,
     idx: usize,
-    mod_offsets: &[f32; NUM_MOD_DESTS],
+    mod_offsets: &[f32],
 ) -> FilterParams {
     let mut out = *flt;
     let d_cut = mod_offsets[ModDestination::filter_cutoff(idx).index()];
@@ -277,9 +316,23 @@ pub fn apply_filter_modulation(
 }
 
 #[inline]
+fn apply_filter_modulation_with_overrides(
+    flt: &FilterParams,
+    overrides: &VoiceControlOverrides,
+    idx: usize,
+    mod_offsets: &[f32; NUM_VOICE_MOD_DESTS],
+) -> FilterParams {
+    let mut base = *flt;
+    base.cutoff_hz = overrides.filter_cutoff_hz[idx];
+    base.resonance = overrides.filter_res[idx];
+    base.drive = overrides.filter_drive[idx];
+    apply_filter_modulation(&base, idx, mod_offsets)
+}
+
+#[inline]
 fn apply_routing_modulation(
     routing: &RoutingParams,
-    mod_offsets: &[f32; NUM_MOD_DESTS],
+    mod_offsets: &[f32; NUM_VOICE_MOD_DESTS],
 ) -> RoutingParams {
     let mut out = *routing;
     for i in 0..4 {
@@ -379,7 +432,8 @@ fn process_voice_bus<F: StereoFilterStage>(
     inserts_aux: &mut [InsertShaperState; 2],
     feedback: &mut VoiceFeedbackState,
     params: &SynthParams,
-    mod_offsets: &[f32; NUM_MOD_DESTS],
+    overrides: &VoiceControlOverrides,
+    mod_offsets: &[f32; NUM_VOICE_MOD_DESTS],
     tables: [&Wavetable; 4],
     effective_note: f32,
     sample_rate: f32,
@@ -395,7 +449,7 @@ fn process_voice_bus<F: StereoFilterStage>(
     let mut bus_out = VoiceBusOutput::default();
 
     let mod_oscs: [OscParams; 4] =
-        std::array::from_fn(|i| apply_osc_modulation(&params.oscs[i], i, mod_offsets));
+        std::array::from_fn(|i| apply_osc_modulation(&params.oscs[i], overrides, i, mod_offsets));
     let mut osc_active = [false; 4];
     for i in 0..4 {
         if mod_oscs[i].enabled && mod_oscs[i].level > 0.0001 {
@@ -494,8 +548,8 @@ fn process_voice_bus<F: StereoFilterStage>(
 
     // Voice Feedback Bus (1-sample delayed post-filter output back into pre-filter sum)
     let (fb_l, fb_r) = feedback.read_feedback(mod_routing.feedback_amount, sample_rate);
-    let mod_flt0 = apply_filter_modulation(&params.filters[0], 0, mod_offsets);
-    let mod_flt1 = apply_filter_modulation(&params.filters[1], 1, mod_offsets);
+    let mod_flt0 = apply_filter_modulation_with_overrides(&params.filters[0], overrides, 0, mod_offsets);
+    let mod_flt1 = apply_filter_modulation_with_overrides(&params.filters[1], overrides, 1, mod_offsets);
 
     f1_l += fb_l;
     f1_r += fb_r;
@@ -696,8 +750,8 @@ pub struct Voice {
     pub amp_env: AmpAdsr,
     pub mod_envs: [AmpAdsr; 3],
     pub modseqs: [ModSeqState; 4],
-    pub mod_offsets: [f32; NUM_MOD_DESTS],
-    pub target_mod_offsets: [f32; NUM_MOD_DESTS],
+    pub mod_offsets: [f32; NUM_VOICE_MOD_DESTS],
+    pub target_mod_offsets: [f32; NUM_VOICE_MOD_DESTS],
     pub last_sources: [f32; NUM_ACTIVE_SOURCES],
     pub osc_out: [f32; 4],
     pub prev_osc_out: [f32; 4],
@@ -743,8 +797,8 @@ impl Voice {
             amp_env: AmpAdsr::new(),
             mod_envs: [AmpAdsr::new(); 3],
             modseqs: [ModSeqState::new(); 4],
-            mod_offsets: [0.0; NUM_MOD_DESTS],
-            target_mod_offsets: [0.0; NUM_MOD_DESTS],
+            mod_offsets: [0.0; NUM_VOICE_MOD_DESTS],
+            target_mod_offsets: [0.0; NUM_VOICE_MOD_DESTS],
             last_sources: [0.0; NUM_ACTIVE_SOURCES],
             osc_out: [0.0; 4],
             prev_osc_out: [0.0; 4],
@@ -771,8 +825,8 @@ impl Voice {
         for ms in &mut self.modseqs {
             ms.reset();
         }
-        self.mod_offsets = [0.0; NUM_MOD_DESTS];
-        self.target_mod_offsets = [0.0; NUM_MOD_DESTS];
+        self.mod_offsets = [0.0; NUM_VOICE_MOD_DESTS];
+        self.target_mod_offsets = [0.0; NUM_VOICE_MOD_DESTS];
         self.last_sources = [0.0; NUM_ACTIVE_SOURCES];
         self.osc_out = [0.0; 4];
         self.prev_osc_out = [0.0; 4];
@@ -867,12 +921,12 @@ impl Voice {
         self.last_sources = sources;
         params
             .mod_matrix
-            .evaluate_destinations(&self.last_sources, &mut self.target_mod_offsets);
+            .evaluate_voice_destinations(&self.last_sources, &mut self.target_mod_offsets);
 
         if snap {
             self.mod_offsets = self.target_mod_offsets;
         } else {
-            for i in 0..NUM_MOD_DESTS {
+            for i in 0..NUM_VOICE_MOD_DESTS {
                 self.mod_offsets[i] += (self.target_mod_offsets[i] - self.mod_offsets[i]) * 0.25;
             }
         }
@@ -883,6 +937,20 @@ impl Voice {
     pub fn process_sample(
         &mut self,
         params: &SynthParams,
+        tables: [&Wavetable; 4],
+        sample_rate: f32,
+        pitch_bend_semitones: f32,
+    ) -> VoiceBusOutput {
+        let overrides = VoiceControlOverrides::from_params(params);
+        self.process_sample_with_overrides(params, &overrides, tables, sample_rate, pitch_bend_semitones)
+    }
+
+    /// Processes 1 stereo sample using smoothed control-rate overrides without copying `SynthParams`.
+    #[inline]
+    pub fn process_sample_with_overrides(
+        &mut self,
+        params: &SynthParams,
+        overrides: &VoiceControlOverrides,
         tables: [&Wavetable; 4],
         sample_rate: f32,
         pitch_bend_semitones: f32,
@@ -944,6 +1012,7 @@ impl Voice {
             &mut self.inserts_aux,
             &mut self.feedback,
             params,
+            overrides,
             &self.mod_offsets,
             tables,
             effective_note,
@@ -969,7 +1038,7 @@ pub struct TailVoice {
     pub inserts: [InsertShaperState; 2],
     pub inserts_aux: [InsertShaperState; 2],
     pub feedback: VoiceFeedbackState,
-    pub mod_offsets: [f32; NUM_MOD_DESTS],
+    pub mod_offsets: [f32; NUM_VOICE_MOD_DESTS],
     pub osc_out: [f32; 4],
     pub prev_osc_out: [f32; 4],
 }
@@ -1000,7 +1069,7 @@ impl TailVoice {
             inserts: [InsertShaperState::new(), InsertShaperState::new()],
             inserts_aux: [InsertShaperState::new(), InsertShaperState::new()],
             feedback: VoiceFeedbackState::new(),
-            mod_offsets: [0.0; NUM_MOD_DESTS],
+            mod_offsets: [0.0; NUM_VOICE_MOD_DESTS],
             osc_out: [0.0; 4],
             prev_osc_out: [0.0; 4],
         }
@@ -1010,7 +1079,7 @@ impl TailVoice {
         self.active = false;
         self.fade_remaining = 0;
         self.amp_at_steal = 0.0;
-        self.mod_offsets = [0.0; NUM_MOD_DESTS];
+        self.mod_offsets = [0.0; NUM_VOICE_MOD_DESTS];
         self.osc_out = [0.0; 4];
         self.prev_osc_out = [0.0; 4];
         self.noise.reset();
@@ -1053,6 +1122,19 @@ impl TailVoice {
         sample_rate: f32,
         pitch_bend_semitones: f32,
     ) -> VoiceBusOutput {
+        let overrides = VoiceControlOverrides::from_params(params);
+        self.process_sample_with_overrides(params, &overrides, tables, sample_rate, pitch_bend_semitones)
+    }
+
+    #[inline]
+    pub fn process_sample_with_overrides(
+        &mut self,
+        params: &SynthParams,
+        overrides: &VoiceControlOverrides,
+        tables: [&Wavetable; 4],
+        sample_rate: f32,
+        pitch_bend_semitones: f32,
+    ) -> VoiceBusOutput {
         if !self.active || self.fade_remaining == 0 {
             self.active = false;
             return VoiceBusOutput::default();
@@ -1075,6 +1157,7 @@ impl TailVoice {
             &mut self.inserts_aux,
             &mut self.feedback,
             params,
+            overrides,
             &self.mod_offsets,
             tables,
             effective_note,
