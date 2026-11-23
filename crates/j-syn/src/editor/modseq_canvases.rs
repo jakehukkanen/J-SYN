@@ -84,9 +84,9 @@ impl ModSeqCurveCanvas {
         let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
         let radius = 9.0 * scale.max(1.0);
         let mut best: Option<(usize, f32)> = None;
-        for i in 0..n {
-            let px = x0 + mseg.nodes[i].time_x * w;
-            let py = y0 + (1.0 - mseg.nodes[i].level_y) * h;
+        for (i, node) in mseg.nodes.iter().enumerate().take(n) {
+            let px = x0 + node.time_x * w;
+            let py = y0 + (1.0 - node.level_y) * h;
             let d = (x - px).hypot(y - py);
             if d <= radius && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((i, d));
@@ -364,8 +364,8 @@ impl View for ModSeqCurveCanvas {
                         };
                         let tx = nx.clamp(0.02, 0.98);
                         let mut insert_at = n - 1;
-                        for i in 1..n {
-                            if tx < mseg.nodes[i].time_x {
+                        for (i, node) in mseg.nodes.iter().enumerate().take(n).skip(1) {
+                            if tx < node.time_x {
                                 insert_at = i;
                                 break;
                             }
@@ -571,9 +571,9 @@ impl View for ModSeqCurveCanvas {
                 hdl.circle(mx, my, 2.3 * dpx);
                 canvas.fill_path(&hdl, &vg::Paint::color(vg::Color::rgba(255, 211, 130, 175)));
             }
-            for i in 0..n {
-                let nx = x0 + mseg.nodes[i].time_x * w;
-                let ny = y0 + (1.0 - mseg.nodes[i].level_y) * h;
+            for node in mseg.nodes.iter().take(n) {
+                let nx = x0 + node.time_x * w;
+                let ny = y0 + (1.0 - node.level_y) * h;
                 let mut ring = vg::Path::new();
                 ring.circle(nx, ny, 3.6 * dpx);
                 canvas.fill_path(&ring, &vg::Paint::color(vg::Color::rgb(ar, ag, ab)));

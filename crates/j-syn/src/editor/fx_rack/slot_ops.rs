@@ -242,13 +242,13 @@ pub(super) fn set_fx_slot_type_with_defaults(
     if prev != val {
         let ty: FxType = val.into();
         let defs = j_syn_dsp::FxSlotParams::default_params_for_type(ty);
-        for (p, def_v) in slot.params_array().into_iter().zip(defs.into_iter()) {
+        for (p, def_v) in slot.params_array().into_iter().zip(defs) {
             setter.begin_set_parameter(p);
             setter.set_parameter(p, def_v);
             setter.end_set_parameter(p);
         }
         let eq_defs = j_syn_dsp::FxSlotParams::default_eq_params_for_type(ty);
-        for (p, def_v) in slot.eq_params_array().into_iter().zip(eq_defs.into_iter()) {
+        for (p, def_v) in slot.eq_params_array().into_iter().zip(eq_defs) {
             setter.begin_set_parameter(p);
             setter.set_parameter(p, def_v);
             setter.end_set_parameter(p);
@@ -297,9 +297,6 @@ pub(super) fn set_fx_slot_type_with_defaults(
         mod_ui.set_fx_collapsed(bus_idx, slot_idx, false);
     }
 }
-
-/// Hover-passthrough `ZStack` overlay over an FX card header that illuminates with a subtle
-/// accent tint + rim whenever the pointer hovers the header while holding `Cmd` or `Ctrl`.
 
 pub(super) fn set_fx_bus_topology(
     params: &JSynPluginParams,

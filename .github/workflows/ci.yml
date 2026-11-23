@@ -1,0 +1,323 @@
+name: CI & Plugin Smoke Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-skip:
+    name: Check Skip & Scope
+    runs-on: ubuntu-22.04
+    outputs:
+      skip: ${{ steps.eval.outputs.skip }}
+      validate_standalone: ${{ steps.eval.outputs.validate_standalone }}
+      added_rs: ${{ steps.eval.outputs.added_rs }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Evaluate skip-ci flag and changed paths
+        id: eval
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HAS_SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'skip-ci') }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          SKIP="false"
+          VALIDATE_STANDALONE="false"
+          ADDED_RS=""
+
+          if [[ "$HAS_SKIP_LABEL" == "true" ]]; then
+            echo "Skipping heavy CI: PR carries 'skip-ci' label."
+            SKIP="true"
+          elif echo "$COMMIT_MSG" | grep -qiE '\[skip-j-syn-ci\]|\[skip ci\]|\[ci skip\]'; then
+            echo "Skipping heavy CI: commit/PR title requests skip."
+            SKIP="true"
+          fi
+
+          if [[ "$EVENT_NAME" == "pull_request" && -n "$BASE_SHA" && -n "$HEAD_SHA" ]]; then
+            CHANGED_FILES="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
+
+            if [[ -n "$CHANGED_FILES" ]]; then
+              NON_DOC_FILES="$(echo "$CHANGED_FILES" | grep -vE '(\.md$|^docs/|^\.github/copilot-instructions\.md$|^\.github/instructions/)' || true)"
+              if [[ -z "$NON_DOC_FILES" ]]; then
+                echo "Skipping heavy CI: docs/instructions-only PR."
+                SKIP="true"
+              fi
+              if echo "$CHANGED_FILES" | grep -qE '^(crates/plugins/|crates/j-syn-ui/src/fx_units/)'; then
+                VALIDATE_STANDALONE="true"
+              fi
+              ADDED_RS="$(git diff --diff-filter=A --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E '\.rs$' | tr '\n' ' ' || true)"
+            fi
+          elif [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            VALIDATE_STANDALONE="true"
+          fi
+
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+          echo "validate_standalone=$VALIDATE_STANDALONE" >> "$GITHUB_OUTPUT"
+          echo "added_rs=$ADDED_RS" >> "$GITHUB_OUTPUT"
+
+  lint-and-test:
+    name: Lint, Format & Unit Tests
+    needs: check-skip
+    if: needs.check-skip.outputs.skip != 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux audio & GUI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libjack-jackd2-dev \
+            libgl1-mesa-dev \
+            libwayland-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-dri2-0-dev \
+            libxcb-icccm4-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-shape0-dev \
+            libxcb-util-dev \
+            libxcb-xfixes0-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting on newly added Rust files
+        env:
+          ADDED_RS: ${{ needs.check-skip.outputs.added_rs }}
+        run: |
+          if [[ -n "$ADDED_RS" ]]; then
+            EXISTING=()
+            for f in $ADDED_RS; do
+              if [[ -f "$f" ]]; then
+                EXISTING+=("$f")
+              fi
+            done
+            if [[ ${#EXISTING[@]} -gt 0 ]]; then
+              echo "Checking rustfmt on newly added files: ${EXISTING[*]}"
+              rustfmt --edition 2024 --check "${EXISTING[@]}"
+            fi
+          else
+            echo "No newly added .rs files to format-check."
+          fi
+
+      - name: Run Clippy (zero project warnings)
+        run: |
+          cargo clippy --workspace --all-targets -- \
+            -D warnings \
+            -A semicolon_in_expressions_from_macros \
+            -A semicolon_in_expressions_from_non_local_macros \
+            -A clippy::collapsible_if \
+            -A clippy::collapsible_match \
+            -A clippy::clone_on_copy \
+            -A clippy::field_reassign_with_default \
+            -A clippy::too_many_arguments \
+            -A clippy::type_complexity
+
+      - name: Run workspace unit & hygiene tests
+        run: cargo test --workspace
+
+  dsp-smoke:
+    name: DSP Real-Time & Smoke Suite
+    needs: check-skip
+    if: needs.check-skip.outputs.skip != 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run audio-thread zero-allocation guard (assert_no_alloc)
+        run: cargo test --release -p j-syn-dsp --test rt_no_alloc
+
+      - name: Run exhaustive DSP torture & scenario smoke suite
+        run: cargo test --release -p j-syn-dsp --test smoke_ci
+
+  plugin-validation:
+    name: Plugin Validation (CLAP & VST3)
+    needs: check-skip
+    if: needs.check-skip.outputs.skip != 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux audio, GUI & xvfb dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl \
+            unzip \
+            xvfb \
+            libasound2-dev \
+            libjack-jackd2-dev \
+            libgl1-mesa-dev \
+            libgl1-mesa-dri \
+            libwayland-dev \
+            libx11-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-dri2-0-dev \
+            libxcb-icccm4-dev \
+            libxcb-keysyms1-dev \
+            libxcb-randr0-dev \
+            libxcb-shape0-dev \
+            libxcb-util-dev \
+            libxcb-xfixes0-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            pkg-config
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache clap-validator and pluginval tools
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.j-syn-ci-tools
+          key: j-syn-validators-ubuntu-22.04-v2
+
+      - name: Install clap-validator and pluginval
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ~/.j-syn-ci-tools/clap-validator ~/.j-syn-ci-tools/pluginval
+          CLAP_URL="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/free-audio/clap-validator/releases/latest \
+            | python3 -c 'import json,sys; assets=json.load(sys.stdin)["assets"]; print(next(a["browser_download_url"] for a in assets if "ubuntu" in a["name"].lower() and a["name"].endswith(".zip")))')"
+          curl -fsSL "$CLAP_URL" -o /tmp/clap-validator.zip
+          unzip -oq /tmp/clap-validator.zip -d ~/.j-syn-ci-tools/clap-validator
+          for tgz in ~/.j-syn-ci-tools/clap-validator/*.tar.gz; do
+            if [[ -f "$tgz" ]]; then
+              tar -xzf "$tgz" -C ~/.j-syn-ci-tools/clap-validator
+            fi
+          done
+          CLAP_BIN="$(find ~/.j-syn-ci-tools/clap-validator -type f -name 'clap-validator' | head -n1)"
+          if [[ -z "$CLAP_BIN" ]]; then
+            echo "::error::Could not locate clap-validator binary after extraction:"
+            find ~/.j-syn-ci-tools/clap-validator -maxdepth 4
+            exit 1
+          fi
+          cp "$CLAP_BIN" ~/.j-syn-ci-tools/clap-validator-bin
+          chmod +x ~/.j-syn-ci-tools/clap-validator-bin
+
+          curl -fsSL "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip" -o /tmp/pluginval.zip
+          unzip -oq /tmp/pluginval.zip -d ~/.j-syn-ci-tools/pluginval
+          PV_BIN="$(find ~/.j-syn-ci-tools/pluginval -type f -name 'pluginval' | head -n1)"
+          if [[ -z "$PV_BIN" ]]; then
+            echo "::error::Could not locate pluginval binary after extraction:"
+            find ~/.j-syn-ci-tools/pluginval -maxdepth 4
+            exit 1
+          fi
+          cp "$PV_BIN" ~/.j-syn-ci-tools/pluginval-bin
+          chmod +x ~/.j-syn-ci-tools/pluginval-bin
+
+      - name: Bundle J-SYN CLAP & VST3
+        run: cargo xtask bundle j-syn --release
+
+      - name: Validate J-SYN.clap with clap-validator
+        # Upstream nih-plug (de42101) CLAP ext_state_load bugs:
+        # 1. state-invalid-random: unchecked Vec::with_capacity(u64) OOM-aborts on random bytes.
+        # 2. state-reproducibility-*: missing host_params.rescan(CLAP_PARAM_RESCAN_VALUES) on load (#279).
+        # All other 32 clap-validator tests (audio, notes, params, fuzzing, transport) stay enforced.
+        run: |
+          xvfb-run -a ~/.j-syn-ci-tools/clap-validator-bin validate \
+            --exclude '^state-invalid-random$' \
+            --exclude '^state-reproducibility-' \
+            target/bundled/j-syn.clap
+
+      - name: Validate J-SYN.vst3 with pluginval (strictness 8)
+        run: |
+          xvfb-run -a ~/.j-syn-ci-tools/pluginval-bin \
+            --validate-in-process \
+            --strictness-level 8 \
+            --skip-gui-tests \
+            target/bundled/j-syn.vst3
+
+      - name: Bundle & validate standalone FX CLAP plugins (main / FX changes)
+        if: needs.check-skip.outputs.validate_standalone == 'true'
+        run: |
+          cargo xtask bundle-all --release
+          for clap in target/bundled/j-*.clap; do
+            if [[ "$clap" == "target/bundled/j-syn.clap" ]]; then
+              continue
+            fi
+            echo "Validating $clap ..."
+            xvfb-run -a ~/.j-syn-ci-tools/clap-validator-bin validate \
+              --exclude '^state-invalid-random$' \
+              --exclude '^state-reproducibility-' \
+              "$clap"
+          done
+
+  ci-gate:
+    name: CI Gate
+    if: always()
+    needs: [check-skip, lint-and-test, dsp-smoke, plugin-validation]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Verify CI status or explicit skip-ci
+        env:
+          SKIP: ${{ needs.check-skip.outputs.skip }}
+          LINT_RES: ${{ needs.lint-and-test.result }}
+          SMOKE_RES: ${{ needs.dsp-smoke.result }}
+          VAL_RES: ${{ needs.plugin-validation.result }}
+        run: |
+          if [[ "$SKIP" == "true" ]]; then
+            echo "CI Gate passed (skip-ci active)."
+            exit 0
+          fi
+          echo "Results -> lint-and-test: $LINT_RES, dsp-smoke: $SMOKE_RES, plugin-validation: $VAL_RES"
+          if [[ "$LINT_RES" == "success" && "$SMOKE_RES" == "success" && "$VAL_RES" == "success" ]]; then
+            exit 0
+          fi
+          echo "::error::One or more CI jobs failed or were cancelled."
+          exit 1

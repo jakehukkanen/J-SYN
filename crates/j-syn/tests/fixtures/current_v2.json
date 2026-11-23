@@ -1,0 +1,55 @@
+{
+  "version": 2,
+  "name": "Frozen Current v2 Reference",
+  "plugin_version": "0.4.1",
+  "params": {
+    "master_vol": 0.8,
+    "dc_blocker": 1.0,
+    "master_limiter": 1.0,
+    "mpe_en": 1.0,
+    "fx_en_1": 1.0,
+    "fx_p1_1": 0.75,
+    "fx_p2_1": 0.4,
+    "bus_b_fx_en_1": 1.0,
+    "bus_c_fx_en_1": 1.0
+  },
+  "plain_params": {
+    "master_vol": 0.0,
+    "mpe_pb": 48.0,
+    "fx_stack_1": 2.0
+  },
+  "enum_names": {
+    "fx_bus_topo": "A+B -> C",
+    "fx_type_1": "OTT",
+    "bus_b_fx_type_1": "Dispersion",
+    "bus_c_fx_type_1": "Limiter",
+    "flt_mode_1": "Scream",
+    "flt_slope_1": "24 dB"
+  },
+  "mod_matrix": {
+    "slots": [
+      {
+        "source": "ModSeq1",
+        "destination": "Filter1Cutoff",
+        "depth": 0.6,
+        "bipolar": true,
+        "enabled": true,
+        "bypassed": false,
+        "aux_source": "ModWheel",
+        "curve": 0.25
+      },
+      {
+        "source": "Macro1",
+        "destination": "Fx1P1",
+        "depth": -0.35,
+        "bipolar": false,
+        "enabled": true,
+        "bypassed": false,
+        "aux_source": "None",
+        "curve": 0.0
+      }
+    ]
+  },
+  "macro_names": ["OTT AMT", "SWEEP", "MACRO 3", "MACRO 4", "MACRO 5", "MACRO 6", "MACRO 7", "MACRO 8"],
+  "wavetable_paths": ["", "", "", ""]
+}

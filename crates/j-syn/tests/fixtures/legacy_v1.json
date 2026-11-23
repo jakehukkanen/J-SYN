@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "Frozen Legacy v1 Reference",
+  "params": {
+    "master_vol": 0.75,
+    "dc_blocker": 1.0,
+    "master_limiter": 1.0,
+    "flt_slope_1": 0.25,
+    "fx_diop_s_1": 0.5,
+    "fx_type_1": 0.5555556,
+    "fx_type_2": 0.22222222,
+    "fx_p1_2": 0.2,
+    "fx_type_3": 1.0,
+    "bus_b_fx_type_1": 0.6666667
+  },
+  "enum_names": {
+    "fx_bus_topo": "Serial (A -> B)",
+    "f1_out_bus": "Sub",
+    "ins_mode_1": "Tube -> Mech",
+    "ins_pos_1": "Pre-F1"
+  },
+  "mod_matrix": {
+    "slots": [
+      {
+        "source": "Env2",
+        "destination": "Filter1Cutoff",
+        "depth": 0.45,
+        "bipolar": false,
+        "enabled": true,
+        "bypassed": false,
+        "aux_source": "None",
+        "curve": 0.0
+      }
+    ]
+  },
+  "macro_names": ["CUTOFF", "GRIT", "SPACE", "PUNCH", "MACRO 5", "MACRO 6", "MACRO 7", "MACRO 8"],
+  "wavetable_paths": ["", "", "", ""]
+}

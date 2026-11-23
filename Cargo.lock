@@ -2274,6 +2274,7 @@ name = "j-syn-dsp"
 version = "0.4.1"
 dependencies = [
  "arc-swap",
+ "assert_no_alloc",
  "hound",
  "rustfft",
  "serde",

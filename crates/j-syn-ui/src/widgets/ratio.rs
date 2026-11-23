@@ -156,7 +156,7 @@ impl RatioDragBox {
     }
 
     fn format_tooltip_text(&self) -> String {
-        if let (Some(md), Some(ref mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
+        if let (Some(md), Some(mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
             let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
             format_mod_range_tooltip(base_norm, mb, md, |n, _| {
                 self.param_base.normalized_value_to_string(n, true)

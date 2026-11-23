@@ -190,11 +190,10 @@ pub(super) fn build_modseq_tab(
                                                                         as usize;
                                                                     let mut bank =
                                                                         p_fill.modseq_steps.snapshot();
-                                                                    for i in 0..n {
-                                                                        bank.seqs[seq_idx][i] =
-                                                                            ModSeqStep::stamped(
-                                                                                shape, 1.0, 0.0,
-                                                                            );
+                                                                    for step in bank.seqs[seq_idx].iter_mut().take(n) {
+                                                                        *step = ModSeqStep::stamped(
+                                                                            shape, 1.0, 0.0,
+                                                                        );
                                                                     }
                                                                     p_fill.modseq_steps.store_value(bank);
                                                                     cx.needs_redraw();

@@ -1043,7 +1043,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
     use j_syn_dsp::{
         evaluate_adsr_preview, evaluate_modseq_curve, ModDestination, ModMatrixSource,
         ModSeqPlayMode, ModSeqRetrig, ModSeqShapePreset, ModSeqSyncMode, ModSlot, SynthEngine,
-        SynthParams, WavetableBank, MAX_MODSEQ_STEPS, NUM_MOD_SLOTS,
+        SynthParams, WavetableBank, MAX_MODSEQ_STEPS,
     };
 
     let bank = WavetableBank::new();
@@ -1055,8 +1055,8 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
     params.amp_attack_s = 0.001;
     params.filters[0].enabled = false;
     params.oscs[0].level = 0.25;
-    for i in 0..NUM_MOD_SLOTS {
-        params.mod_matrix.slots[i] = ModSlot {
+    for slot in &mut params.mod_matrix.slots {
+        *slot = ModSlot {
             source: ModMatrixSource::ModWheel,
             destination: ModDestination::Osc1Level,
             depth: 0.01,
