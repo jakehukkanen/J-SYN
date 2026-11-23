@@ -190,7 +190,7 @@ impl ParamStepPill {
     }
 
     fn format_tooltip_text(&self) -> Option<String> {
-        if let (Some(md), Some(ref mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
+        if let (Some(md), Some(mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
             let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
             Some(format_mod_range_tooltip(base_norm, mb, md, |n, _| {
                 self.param_base.normalized_value_to_string(n, true)
@@ -580,8 +580,7 @@ fn draw_mod_overlay(
         canvas.stroke_path(&hl, &p);
     }
 
-    let (slots, _indices, count) = mb.mod_ui.slots_for_dest(mb.dest);
-    if count == 0 {
+    if !mb.mod_ui.has_slots_for_dest(mb.dest) {
         return;
     }
     let base_norm = param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
@@ -590,7 +589,13 @@ fn draw_mod_overlay(
     let bar_y = bounds.y + bounds.h - 2.6 * dpx;
     let bar_h = 2.0 * dpx;
 
-    for slot in slots.iter().take(count) {
+    // Subtle recessed track whenever any modulator targets this control
+    let mut track = vg::Path::new();
+    track.rounded_rect(bar_x, bar_y, bar_w, bar_h, 1.0 * dpx);
+    canvas.fill_path(&track, &vg::Paint::color(theme::vg_color(&pal.knob_track, 210)));
+
+    let active_slot = mb.mod_ui.active_slot_for_dest(mb.dest).map(|(_, s)| s);
+    if let Some(slot) = active_slot {
         let (sr, sg, sb) = if slot.bypassed {
             theme::hex_to_rgb(&pal.text_dim)
         } else {
@@ -599,7 +604,10 @@ fn draw_mod_overlay(
         let alpha = if slot.bypassed { 75 } else { 225 };
         let (lo, hi) = if slot.bipolar {
             let span = slot.depth.abs();
-            ((base_norm - span).clamp(0.0, 1.0), (base_norm + span).clamp(0.0, 1.0))
+            (
+                (base_norm - span).clamp(0.0, 1.0),
+                (base_norm + span).clamp(0.0, 1.0),
+            )
         } else {
             let tgt = (base_norm + slot.depth).clamp(0.0, 1.0);
             (base_norm.min(tgt), base_norm.max(tgt))
@@ -620,7 +628,13 @@ fn draw_mod_overlay(
     let live_norm = (base_norm + mb.mod_ui.dest_offset(mb.dest)).clamp(0.0, 1.0);
     let mut tick = vg::Path::new();
     tick.circle(bar_x + live_norm * bar_w, bar_y + bar_h * 0.5, 1.8 * dpx);
-    canvas.fill_path(&tick, &vg::Paint::color(theme::vg_color(&pal.text_bright, 255)));
+    canvas.fill_path(
+        &tick,
+        &vg::Paint::color(theme::vg_color(
+            &pal.text_bright,
+            if active_slot.is_some() { 255 } else { 200 },
+        )),
+    );
 }
 
 /// Hover-passthrough `ZStack` overlay over `[OCT | SEMI | FINE]` that owns the unified
@@ -783,7 +797,7 @@ impl PitchDragBox {
     }
 
     fn format_tooltip_text(&self) -> String {
-        if let (Some(md), Some(ref mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
+        if let (Some(md), Some(mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
             let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
             format_mod_range_tooltip(base_norm, mb, md, |n, _| {
                 self.param_base.normalized_value_to_string(n, true)

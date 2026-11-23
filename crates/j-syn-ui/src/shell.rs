@@ -27,11 +27,13 @@ pub fn register_fonts(cx: &mut Context) {
 /// Standalone FX plugins without a modulation matrix simply pass `None` for `ModTargetBinding`.
 pub trait ModUiHost: Send + Sync + 'static {
     fn dragging_source(&self) -> ModMatrixSource;
+    fn active_mod_source(&self) -> ModMatrixSource;
     fn is_drop_target(&self, dest: ModDestination) -> bool;
     fn register_drop_rect(&self, dest: ModDestination, tab_tag: u8, bounds: BoundingBox);
     fn unregister_drop_rect(&self, dest: ModDestination);
     fn slots_for_dest(&self, dest: ModDestination) -> ([ModSlot; 4], [usize; 4], usize);
     fn has_slots_for_dest(&self, dest: ModDestination) -> bool;
+    fn active_slot_for_dest(&self, dest: ModDestination) -> Option<(usize, ModSlot)>;
     fn primary_slot_for_dest(&self, dest: ModDestination) -> Option<(usize, ModSlot)>;
     fn focus_slot(&self, dest: ModDestination, slot_idx: usize);
     fn adjust_slot_depth(&self, slot_idx: usize, new_depth: f32);

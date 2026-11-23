@@ -445,7 +445,7 @@ pub fn load_all_themes() -> Vec<ThemePalette> {
                     }
                 }
             }
-            custom.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            custom.sort_by_key(|a| a.name.to_lowercase());
             for pal in custom {
                 if let Some(existing) =
                     themes.iter_mut().find(|t| t.name.eq_ignore_ascii_case(&pal.name))

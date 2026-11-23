@@ -260,7 +260,7 @@ impl RotaryKnob {
     }
 
     fn format_tooltip_text(&self) -> String {
-        if let (Some(md), Some(ref mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
+        if let (Some(md), Some(mb)) = (self.mod_depth_drag, self.mod_binding.as_ref()) {
             let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
             format_mod_range_tooltip(base_norm, mb, md, |n, off| {
                 self.format_norm_value(n, off)
@@ -786,10 +786,10 @@ impl View for RotaryKnob {
         ptr_paint.set_line_cap(vg::LineCap::Round);
         canvas.stroke_path(&ptr_path, &ptr_paint);
 
-        // Radial modulation collar on a separated recessed outer track + end-cap tick
+        // Radial modulation collar: always show recessed track + live combined dot when modulated,
+        // and draw the colored range arc + end-cap tick exclusively for the active modulation pill.
         if let Some(ref mb) = self.mod_binding {
-            let (slots, _indices, count) = mb.mod_ui.slots_for_dest(mb.dest);
-            if count > 0 {
+            if mb.mod_ui.has_slots_for_dest(mb.dest) {
                 let mut mod_track = vg::Path::new();
                 mod_track.arc(
                     center_x,
@@ -805,7 +805,9 @@ impl View for RotaryKnob {
                 canvas.stroke_path(&mod_track, &mod_track_paint);
 
                 let base_norm = self.param_base.unmodulated_normalized_value().clamp(0.0, 1.0);
-                for slot in slots.iter().take(count) {
+                let active_slot = mb.mod_ui.active_slot_for_dest(mb.dest).map(|(_, s)| s);
+
+                if let Some(slot) = active_slot {
                     let arc_active = is_enabled && !slot.bypassed;
                     let (sr, sg, sb) = if arc_active {
                         theme::mod_source_rgb(&pal, slot.source)
@@ -868,7 +870,7 @@ impl View for RotaryKnob {
                         canvas.stroke_path(&mpath, &mpaint);
                     }
 
-                    // Bright radial end-cap tick marking modulation endpoint
+                    // Bright radial end-cap tick marking active source's modulation endpoint
                     let cap_angle = start_angle + target_norm * sweep_angle;
                     let tx0 = center_x + cap_angle.cos() * (mod_ring_r - 2.2 * dpx);
                     let ty0 = center_y + cap_angle.sin() * (mod_ring_r - 2.2 * dpx);
@@ -890,10 +892,11 @@ impl View for RotaryKnob {
                 let live_offset = mb.mod_ui.dest_offset(mb.dest);
                 let live_norm = (base_norm + live_offset).clamp(0.0, 1.0);
                 let live_angle = start_angle + live_norm * sweep_angle;
-                let (dr, dg, db) = if is_enabled {
-                    theme::mod_source_rgb(&pal, slots[0].source)
-                } else {
-                    theme::hex_to_rgb(&pal.text_dim)
+                let (dr, dg, db) = match active_slot {
+                    Some(slot) if is_enabled && !slot.bypassed => {
+                        theme::mod_source_rgb(&pal, slot.source)
+                    }
+                    _ => theme::hex_to_rgb(&pal.text_muted),
                 };
                 let lx = center_x + live_angle.cos() * mod_ring_r;
                 let ly = center_y + live_angle.sin() * mod_ring_r;
@@ -902,7 +905,7 @@ impl View for RotaryKnob {
                 canvas.fill_path(
                     &dot,
                     &vg::Paint::color(if is_enabled {
-                        theme::vg_color(&pal.text_bright, 255)
+                        theme::vg_color(&pal.text_bright, if active_slot.is_some() { 255 } else { 205 })
                     } else {
                         theme::vg_color(&pal.text_dim, 165)
                     }),

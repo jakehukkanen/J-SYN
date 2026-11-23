@@ -165,7 +165,7 @@ fn collect_dir_entries(
             });
         }
     }
-    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    files.sort_by_key(|a| a.name.to_lowercase());
     subdirs.sort_by(|a, b| {
         a.file_name()
             .and_then(|s| s.to_str())
@@ -418,17 +418,16 @@ fn legacy_distortion_slot_keys(id: &str) -> Option<(String, String, String)> {
             format!("bus_b_fx_dist_m_{suffix}"),
             format!("bus_b_fx_p1_{suffix}"),
         ))
-    } else if let Some(suffix) = id
-        .strip_prefix("fx_dist_m_")
-        .or_else(|| id.strip_prefix("fx_p1_"))
-    {
-        Some((
-            format!("fx_type_{suffix}"),
-            format!("fx_dist_m_{suffix}"),
-            format!("fx_p1_{suffix}"),
-        ))
     } else {
-        None
+        id.strip_prefix("fx_dist_m_")
+            .or_else(|| id.strip_prefix("fx_p1_"))
+            .map(|suffix| {
+                (
+                    format!("fx_type_{suffix}"),
+                    format!("fx_dist_m_{suffix}"),
+                    format!("fx_p1_{suffix}"),
+                )
+            })
     }
 }
 

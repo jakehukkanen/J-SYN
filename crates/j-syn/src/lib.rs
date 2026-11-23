@@ -10,7 +10,7 @@ use nih_plug::prelude::*;
 
 pub mod editor;
 mod params;
-mod presets;
+pub mod presets;
 
 pub use params::*;
 

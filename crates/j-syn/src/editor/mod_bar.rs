@@ -35,6 +35,7 @@ pub(crate) struct ModUiState {
     pub params: Arc<JSynPluginParams>,
     pub telemetry: Arc<ModUiTelemetry>,
     dragging_source: AtomicU8,
+    active_mod_source: AtomicU8,
     hover_dest: AtomicU16,
     active_bottom_tab: AtomicU8,
     active_modseq_subtab: AtomicU8,
@@ -60,6 +61,7 @@ impl ModUiState {
             params,
             telemetry,
             dragging_source: AtomicU8::new(0),
+            active_mod_source: AtomicU8::new(ModMatrixSource::ModSeq1 as u8),
             hover_dest: AtomicU16::new(UNSET_DEST),
             active_bottom_tab: AtomicU8::new(bottom_tab_tag(BottomTab::ModSeq)),
             active_modseq_subtab: AtomicU8::new(0),
@@ -183,11 +185,45 @@ impl ModUiState {
     }
 
     pub fn set_modseq_subtab(&self, sub: ModSeqSubTab) {
-        let code = match sub {
-            ModSeqSubTab::MSeq(i) => (i as u8).min(3),
-            ModSeqSubTab::Env(i) => 4 + (i as u8).min(3),
+        let (code, src) = match sub {
+            ModSeqSubTab::MSeq(i) => {
+                let idx = i.min(3);
+                (
+                    idx as u8,
+                    match idx {
+                        0 => ModMatrixSource::ModSeq1,
+                        1 => ModMatrixSource::ModSeq2,
+                        2 => ModMatrixSource::ModSeq3,
+                        _ => ModMatrixSource::ModSeq4,
+                    },
+                )
+            }
+            ModSeqSubTab::Env(i) => {
+                let idx = i.min(3);
+                (
+                    4 + idx as u8,
+                    match idx {
+                        0 => ModMatrixSource::Env1,
+                        1 => ModMatrixSource::Env2,
+                        2 => ModMatrixSource::Env3,
+                        _ => ModMatrixSource::Env4,
+                    },
+                )
+            }
         };
         self.active_modseq_subtab.store(code, Ordering::Relaxed);
+        self.set_active_mod_source(src);
+    }
+
+    #[inline]
+    pub fn active_mod_source(&self) -> ModMatrixSource {
+        ModMatrixSource::from_u8(self.active_mod_source.load(Ordering::Relaxed))
+    }
+
+    pub fn set_active_mod_source(&self, src: ModMatrixSource) {
+        if src != ModMatrixSource::None {
+            self.active_mod_source.store(src as u8, Ordering::Relaxed);
+        }
     }
 
     #[inline]
@@ -216,6 +252,7 @@ impl ModUiState {
 
     pub fn start_drag(&self, src: ModMatrixSource) {
         self.dragging_source.store(src as u8, Ordering::Relaxed);
+        self.set_active_mod_source(src);
         self.hover_dest.store(UNSET_DEST, Ordering::Relaxed);
     }
 
@@ -362,6 +399,7 @@ impl ModUiState {
         let mut mat = self.params.mod_matrix.snapshot();
         let slot_idx = mat.assign_or_update(src, dest, 0.25)?;
         self.params.mod_matrix.store_value(mat);
+        self.set_active_mod_source(src);
         self.inspected_dest
             .store(dest.index() as u16, Ordering::Relaxed);
         self.inspected_slot.store(slot_idx as u8, Ordering::Relaxed);
@@ -370,7 +408,7 @@ impl ModUiState {
 
     /// Collects up to 4 active modulation slots targeting `dest` for ring/bar rendering.
     pub fn slots_for_dest(&self, dest: ModDestination) -> ([ModSlot; 4], [usize; 4], usize) {
-        let mat = self.params.mod_matrix.snapshot();
+        let mat = self.params.mod_matrix.0.load();
         let mut out_slots = [ModSlot::default(); 4];
         let mut out_indices = [0usize; 4];
         let mut count = 0usize;
@@ -390,23 +428,28 @@ impl ModUiState {
 
     #[inline]
     pub fn has_slots_for_dest(&self, dest: ModDestination) -> bool {
-        self.slots_for_dest(dest).2 > 0
+        let mat = self.params.mod_matrix.0.load();
+        mat.slots
+            .iter()
+            .any(|s| s.enabled && s.source != ModMatrixSource::None && s.destination == dest)
     }
 
-    pub fn primary_slot_for_dest(&self, dest: ModDestination) -> Option<(usize, ModSlot)> {
-        let mat = self.params.mod_matrix.snapshot();
-        let inspected = self.inspected_slot.load(Ordering::Relaxed) as usize;
-        if inspected < NUM_MOD_SLOTS {
-            let s = mat.slots[inspected];
-            if s.enabled && s.source != ModMatrixSource::None && s.destination == dest {
-                return Some((inspected, s));
-            }
+    /// Returns the active modulation slot targeting `dest` for the currently focused source pill.
+    pub fn active_slot_for_dest(&self, dest: ModDestination) -> Option<(usize, ModSlot)> {
+        let active_src = self.active_mod_source();
+        if active_src == ModMatrixSource::None {
+            return None;
         }
+        let mat = self.params.mod_matrix.0.load();
         mat.slots
             .iter()
             .enumerate()
-            .find(|(_, s)| s.enabled && s.source != ModMatrixSource::None && s.destination == dest)
+            .find(|(_, s)| s.enabled && s.source == active_src && s.destination == dest)
             .map(|(idx, s)| (idx, *s))
+    }
+
+    pub fn primary_slot_for_dest(&self, dest: ModDestination) -> Option<(usize, ModSlot)> {
+        self.active_slot_for_dest(dest)
     }
 
     pub fn focus_slot(&self, dest: ModDestination, slot_idx: usize) {
@@ -685,6 +728,11 @@ impl ModUiHost for ModUiState {
     }
 
     #[inline]
+    fn active_mod_source(&self) -> ModMatrixSource {
+        ModUiState::active_mod_source(self)
+    }
+
+    #[inline]
     fn is_drop_target(&self, dest: ModDestination) -> bool {
         ModUiState::is_drop_target(self, dest)
     }
@@ -704,6 +752,10 @@ impl ModUiHost for ModUiState {
     #[inline]
     fn has_slots_for_dest(&self, dest: ModDestination) -> bool {
         ModUiState::has_slots_for_dest(self, dest)
+    }
+
+    fn active_slot_for_dest(&self, dest: ModDestination) -> Option<(usize, ModSlot)> {
+        ModUiState::active_slot_for_dest(self, dest)
     }
 
     fn primary_slot_for_dest(&self, dest: ModDestination) -> Option<(usize, ModSlot)> {
@@ -854,6 +906,7 @@ impl View for ModSourcePill {
         let pal = theme::current_palette(cx);
         let (r, g, b) = theme::mod_source_rgb(&pal, self.source);
         let is_dragging = self.mod_ui.dragging_source() == self.source;
+        let is_arc_active = self.mod_ui.active_mod_source() == self.source;
         let is_active_tab = self.mod_ui.is_source_tab_active(self.source);
         let is_hovered = self.hovered;
         let level = self.mod_ui.telemetry.source_level(self.source).clamp(0.0, 1.0);
@@ -861,10 +914,14 @@ impl View for ModSourcePill {
         let mut bg = vg::Path::new();
         bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 3.0 * dpx);
         let fill = if is_dragging {
-            vg::Color::rgba(r, g, b, 90)
-        } else if is_active_tab {
+            vg::Color::rgba(r, g, b, 105)
+        } else if is_arc_active {
             let (mr, mg, mb) = theme::hex_to_rgb(&pal.surface_hover);
-            let (tr, tg, tb) = theme::lerp_rgb((mr, mg, mb), (r, g, b), 0.16);
+            let (tr, tg, tb) = theme::lerp_rgb((mr, mg, mb), (r, g, b), 0.26);
+            vg::Color::rgb(tr, tg, tb)
+        } else if is_active_tab {
+            let (mr, mg, mb) = theme::hex_to_rgb(&pal.surface_mid);
+            let (tr, tg, tb) = theme::lerp_rgb((mr, mg, mb), (r, g, b), 0.12);
             vg::Color::rgb(tr, tg, tb)
         } else if is_hovered {
             theme::vg_color(&pal.surface_hover, 255)
@@ -872,6 +929,21 @@ impl View for ModSourcePill {
             theme::vg_color(&pal.surface_mid, 255)
         };
         canvas.fill_path(&bg, &vg::Paint::color(fill));
+
+        // Subtle inner glow frame on the currently active modulation source pill
+        if is_arc_active || is_dragging {
+            let mut glow = vg::Path::new();
+            glow.rounded_rect(
+                bounds.x + 0.8 * dpx,
+                bounds.y + 0.8 * dpx,
+                (bounds.w - 1.6 * dpx).max(1.0),
+                (bounds.h - 1.6 * dpx).max(1.0),
+                2.5 * dpx,
+            );
+            let mut glow_paint = vg::Paint::color(vg::Color::rgba(r, g, b, 68));
+            glow_paint.set_line_width(2.2 * dpx);
+            canvas.stroke_path(&glow, &glow_paint);
+        }
 
         // Live telemetry bottom activity bar
         if level > 0.01 {
@@ -888,7 +960,13 @@ impl View for ModSourcePill {
         }
 
         // Left colored badge accent + subtle outline
-        let stripe_w = if is_active_tab { 3.0 * dpx } else { 2.2 * dpx };
+        let stripe_w = if is_arc_active {
+            3.2 * dpx
+        } else if is_active_tab {
+            2.6 * dpx
+        } else {
+            2.0 * dpx
+        };
         let mut stripe = vg::Path::new();
         stripe.rounded_rect(
             bounds.x + 1.5 * dpx,
@@ -899,14 +977,24 @@ impl View for ModSourcePill {
         );
         canvas.fill_path(&stripe, &vg::Paint::color(vg::Color::rgb(r, g, b)));
 
-        let mut border = vg::Paint::color(if is_dragging || is_active_tab {
+        let mut border = vg::Paint::color(if is_dragging || is_arc_active {
             vg::Color::rgb(r, g, b)
         } else if is_hovered {
             vg::Color::rgba(r, g, b, 195)
+        } else if is_active_tab {
+            vg::Color::rgba(r, g, b, 135)
         } else {
-            vg::Color::rgba(r, g, b, 90)
+            vg::Color::rgba(r, g, b, 85)
         });
-        border.set_line_width((if is_active_tab { 1.35 } else { 1.0 }) * dpx);
+        border.set_line_width(
+            (if is_arc_active || is_dragging {
+                1.65
+            } else if is_active_tab {
+                1.15
+            } else {
+                1.0
+            }) * dpx,
+        );
         canvas.stroke_path(&bg, &border);
     }
 }
@@ -926,5 +1014,53 @@ pub(crate) fn start_ui_redraw_timer(cx: &mut Context, mod_ui: Arc<ModUiState>) {
         }
     });
     cx.start_timer(timer);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_mod_source_filters_visible_and_editable_arc_cleanly() {
+        let params = Arc::new(JSynPluginParams::default());
+        let telemetry = Arc::new(ModUiTelemetry::new());
+        let ui = ModUiState::new(params, telemetry);
+
+        // Assign two different sources (Env2 + ModSeq1) to the same destination
+        ui.assign_drop(ModMatrixSource::Env2, ModDestination::Filter1Cutoff)
+            .expect("assign Env2");
+        ui.assign_drop(ModMatrixSource::ModSeq1, ModDestination::Filter1Cutoff)
+            .expect("assign ModSeq1");
+
+        // Last drop (ModSeq1) is active
+        assert_eq!(ui.active_mod_source(), ModMatrixSource::ModSeq1);
+        let (_, active_ms1) = ui
+            .active_slot_for_dest(ModDestination::Filter1Cutoff)
+            .expect("ModSeq1 slot active");
+        assert_eq!(active_ms1.source, ModMatrixSource::ModSeq1);
+        assert_eq!(
+            ui.primary_slot_for_dest(ModDestination::Filter1Cutoff)
+                .map(|(_, s)| s.source),
+            Some(ModMatrixSource::ModSeq1)
+        );
+
+        // Switching active pill to Env2 switches arc & collar editing to Env2
+        ui.set_active_mod_source(ModMatrixSource::Env2);
+        let (_, active_e2) = ui
+            .active_slot_for_dest(ModDestination::Filter1Cutoff)
+            .expect("Env2 slot active");
+        assert_eq!(active_e2.source, ModMatrixSource::Env2);
+
+        // Switching to an unrouted pill (Macro1) keeps has_slots_for_dest true (Option A track+dot)
+        // while returning None for active_slot_for_dest / primary_slot_for_dest
+        ui.set_active_mod_source(ModMatrixSource::Macro1);
+        assert!(ui.has_slots_for_dest(ModDestination::Filter1Cutoff));
+        assert!(ui
+            .active_slot_for_dest(ModDestination::Filter1Cutoff)
+            .is_none());
+        assert!(ui
+            .primary_slot_for_dest(ModDestination::Filter1Cutoff)
+            .is_none());
+    }
 }
 
