@@ -1,11 +1,13 @@
 //! Shared plugin UI shell state (`UiShellState`), modulation host trait (`ModUiHost`),
 //! cross-plugin events (`UiKitEvent`), font registration, tooltip overlay, and macOS resize hook.
 
+use std::cell::Cell;
 use std::sync::{Arc, RwLock};
 
 use j_syn_dsp::mod_matrix::{ModDestination, ModMatrixSource, ModSlot};
 use nih_plug::prelude::{GuiContext, ParamPtr, PluginApi, PluginState};
 use nih_plug_vizia::vizia::prelude::*;
+use nih_plug_vizia::vizia::vg;
 
 use crate::controls::bold_label;
 use crate::theme::{self, DynamicCssSource, ThemePalette};
@@ -21,6 +23,19 @@ pub fn register_fonts(cx: &mut Context) {
     cx.add_font_mem(PLUS_JAKARTA_REGULAR_TTF);
     cx.add_font_mem(PLUS_JAKARTA_BOLD_TTF);
     cx.set_default_font(&["Plus Jakarta Sans"]);
+}
+
+/// Lazily registers `Plus Jakarta Sans Bold` on a `femtovg` `Canvas` and caches its `FontId`.
+pub fn ensure_canvas_bold_font(
+    canvas: &mut Canvas,
+    cached: &Cell<Option<vg::FontId>>,
+) -> Option<vg::FontId> {
+    if let Some(id) = cached.get() {
+        return Some(id);
+    }
+    let id = canvas.add_font_mem(PLUS_JAKARTA_BOLD_TTF).ok()?;
+    cached.set(Some(id));
+    Some(id)
 }
 
 /// Plugin-agnostic modulation UI host trait implemented by full synths like `J-SYN`.

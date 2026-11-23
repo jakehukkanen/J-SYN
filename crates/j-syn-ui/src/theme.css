@@ -1081,7 +1081,7 @@ scrollview:checked > scrollbar:active .thumb {
   font-weight: normal;
 }
 
-/* Phase B: Phase Plant-style FX Wing, Drag Handles, Mute Toggle, Picker & Context Menus */
+/* Modular Drag-and-Drop FX Wing, Drag Handles, Mute Toggle, Picker & Context Menus */
 
 .fx-title-handle {
   background-color: transparent;

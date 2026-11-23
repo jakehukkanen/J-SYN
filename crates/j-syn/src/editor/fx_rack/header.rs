@@ -1,4 +1,4 @@
-//! Minimalist Phase Plant-style FX Unit title bar:
+//! Minimalist FX Unit title bar:
 //! `[Bypass LED] [Title / Drag Handle] [STK Pill] [Collapse Chevron]`.
 
 use std::sync::Arc;

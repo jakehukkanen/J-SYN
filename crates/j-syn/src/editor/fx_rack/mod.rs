@@ -1,7 +1,8 @@
-//! 3-Lane Scrollable Phase Plant-style Master FX Rack (`Bus A`, `Bus B`, `Bus C`,
+//! 3-Lane Scrollable Modular Master FX Rack (`Bus A`, `Bus B`, `Bus C`,
 //! up to `30` active FX Units per lane = `90` total, drag-and-drop reorder/move/duplicate/delete,
 //! categorized FX Picker, per-lane Bypass & Mute, and mid-chain `+` insertion seams).
 
+use std::cell::Cell;
 use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::ModDestination;
@@ -294,8 +295,8 @@ impl View for FxInsertSeam {
 
 /// Hover-only empty lane area below the last FX card:
 /// - Invisible at rest (zero visual clutter)
-/// - Hovering the empty lane shows a darker rounded highlight box in the next slot position
-/// - Hovering directly over that box brightens the highlight + translucent `"Insert FX..."` label
+/// - Hovering the empty lane displays a single lit-up rounded box with translucent `"Insert FX..."`
+///   text whose vertical center tracks the mouse cursor (clamped inside the empty lane bounds)
 /// - Left-click anywhere in the empty lane opens the categorized FX Picker; right-click opens the Lane Menu.
 struct FxEmptyLaneZone {
     bus_idx: usize,
@@ -303,7 +304,8 @@ struct FxEmptyLaneZone {
     can_add: bool,
     is_lane_empty: bool,
     hovered_zone: bool,
-    hovered_box: bool,
+    cursor_y: f32,
+    bold_font: Cell<Option<vg::FontId>>,
 }
 
 impl FxEmptyLaneZone {
@@ -325,7 +327,8 @@ impl FxEmptyLaneZone {
             can_add,
             is_lane_empty,
             hovered_zone: false,
-            hovered_box: false,
+            cursor_y: 0.0,
+            bold_font: Cell::new(None),
         }
         .build(cx, |_| {})
         .width(Pixels(tokens::FX_UNIT_W))
@@ -340,19 +343,18 @@ impl FxEmptyLaneZone {
         } else {
             6.0 * dpx
         };
+        let bottom_pad = 4.0 * dpx;
         let target_h = if self.is_lane_empty {
             tokens::FX_UNIT_EMPTY_SLOT_H
         } else {
             tokens::FX_UNIT_TRAILING_SLOT_H
         } * dpx;
-        let max_h = (bounds.h - top_pad - 4.0 * dpx).max(32.0 * dpx);
-        (bounds.x, bounds.y + top_pad, bounds.w, target_h.min(max_h))
-    }
-
-    #[inline]
-    fn point_in_box(&self, bounds: BoundingBox, dpx: f32, x: f32, y: f32) -> bool {
-        let (bx, by, bw, bh) = self.highlight_box_rect(bounds, dpx);
-        x >= bx && x <= bx + bw && y >= by && y <= by + bh
+        let max_h = (bounds.h - top_pad - bottom_pad).max(32.0 * dpx);
+        let bh = target_h.min(max_h);
+        let min_y = bounds.y + top_pad;
+        let max_y = (bounds.y + bounds.h - bh - bottom_pad).max(min_y);
+        let by = (self.cursor_y - bh * 0.5).clamp(min_y, max_y);
+        (bounds.x, by, bounds.w, bh)
     }
 }
 
@@ -365,24 +367,17 @@ impl View for FxEmptyLaneZone {
         event.map(|window_event, meta| match window_event {
             WindowEvent::MouseOver => {
                 self.hovered_zone = true;
-                self.hovered_box = self.point_in_box(
-                    cx.bounds(),
-                    cx.scale_factor(),
-                    cx.mouse().cursorx,
-                    cx.mouse().cursory,
-                );
+                self.cursor_y = cx.mouse().cursory;
                 cx.needs_redraw();
             }
-            WindowEvent::MouseMove(x, y) if self.hovered_zone => {
-                let next_box = self.point_in_box(cx.bounds(), cx.scale_factor(), *x, *y);
-                if next_box != self.hovered_box {
-                    self.hovered_box = next_box;
+            WindowEvent::MouseMove(_, y) if self.hovered_zone => {
+                if (self.cursor_y - *y).abs() > 0.25 {
+                    self.cursor_y = *y;
                     cx.needs_redraw();
                 }
             }
             WindowEvent::MouseOut => {
                 self.hovered_zone = false;
-                self.hovered_box = false;
                 cx.needs_redraw();
             }
             WindowEvent::MouseDown(MouseButton::Left) if self.can_add => {
@@ -421,34 +416,24 @@ impl View for FxEmptyLaneZone {
         let pal = theme::current_palette(cx);
         let base_rgb = theme::hex_to_rgb(&pal.surface_hover);
         let (ar, ag, ab) = pal.accent_rgb();
+        let (fr, fg, fb) = theme::lerp_rgb(base_rgb, (ar, ag, ab), 0.22);
 
-        let (fill_col, border_col, border_w, text_col) = if self.hovered_box {
-            let (fr, fg, fb) = theme::lerp_rgb(base_rgb, (ar, ag, ab), 0.22);
-            (
-                vg::Color::rgba(fr, fg, fb, 155),
-                vg::Color::rgba(ar, ag, ab, 215),
-                1.35 * dpx,
-                theme::vg_color(&pal.text_bright, 195),
-            )
-        } else {
-            let (fr, fg, fb) = theme::lerp_rgb(base_rgb, (ar, ag, ab), 0.08);
-            (
-                vg::Color::rgba(fr, fg, fb, 72),
-                vg::Color::rgba(ar, ag, ab, 92),
-                1.0 * dpx,
-                theme::vg_color(&pal.text_muted, 110),
-            )
-        };
+        let fill_col = vg::Color::rgba(fr, fg, fb, 155);
+        let border_col = vg::Color::rgba(ar, ag, ab, 215);
+        let text_col = theme::vg_color(&pal.text_bright, 195);
 
         let mut rect = vg::Path::new();
         rect.rounded_rect(bx, by, bw, bh, 5.0 * dpx);
         canvas.fill_path(&rect, &vg::Paint::color(fill_col));
 
         let mut stroke = vg::Paint::color(border_col);
-        stroke.set_line_width(border_w);
+        stroke.set_line_width(1.35 * dpx);
         canvas.stroke_path(&rect, &stroke);
 
         let mut text_paint = vg::Paint::color(text_col);
+        if let Some(font_id) = j_syn_ui::shell::ensure_canvas_bold_font(canvas, &self.bold_font) {
+            text_paint.set_font(&[font_id]);
+        }
         text_paint.set_font_size(11.0 * dpx);
         text_paint.set_text_align(vg::Align::Center);
         text_paint.set_text_baseline(vg::Baseline::Middle);
@@ -806,7 +791,7 @@ fn build_fx_unit_card(
     .height(Auto);
 }
 
-/// Right Wing: 3-lane Phase Plant-style scrollable FX Rack (`Bus A`, `Bus B`, `Bus C`, up to 30 active FX Units each).
+/// Right Wing: 3-lane scrollable modular FX Rack (`Bus A`, `Bus B`, `Bus C`, up to 30 active FX Units each).
 pub(crate) fn build_three_lane_fx_rack(
     cx: &mut Context,
     params: Arc<JSynPluginParams>,

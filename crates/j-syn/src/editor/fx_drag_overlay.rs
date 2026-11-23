@@ -1,5 +1,6 @@
 //! Shared FX card drag-and-drop state and top-level translucent ghost / insertion-bar overlay.
 
+use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 
 use j_syn_dsp::{FxType, NUM_FX_BUSES, NUM_FX_SLOTS};
@@ -257,19 +258,23 @@ fn compute_drop_target_locked(
 /// and floating translucent FX card header ghost during drag-and-drop.
 pub(crate) struct FxDragOverlay {
     drag_state: Arc<FxDragState>,
+    bold_font: Cell<Option<vg::FontId>>,
 }
 
 impl FxDragOverlay {
     pub(crate) fn new(cx: &mut Context, drag_state: Arc<FxDragState>) -> Handle<'_, Self> {
-        Self { drag_state }
-            .build(cx, |_| {})
-            .position_type(PositionType::SelfDirected)
-            .left(Pixels(0.0))
-            .top(Pixels(0.0))
-            .width(Stretch(1.0))
-            .height(Stretch(1.0))
-            .z_index(380)
-            .hoverable(false)
+        Self {
+            drag_state,
+            bold_font: Cell::new(None),
+        }
+        .build(cx, |_| {})
+        .position_type(PositionType::SelfDirected)
+        .left(Pixels(0.0))
+        .top(Pixels(0.0))
+        .width(Stretch(1.0))
+        .height(Stretch(1.0))
+        .z_index(380)
+        .hoverable(false)
     }
 }
 
@@ -394,6 +399,9 @@ impl View for FxDragOverlay {
         };
 
         let mut text_paint = vg::Paint::color(text_col);
+        if let Some(font_id) = j_syn_ui::shell::ensure_canvas_bold_font(canvas, &self.bold_font) {
+            text_paint.set_font(&[font_id]);
+        }
         text_paint.set_font_size(10.0 * dpx);
         text_paint.set_text_align(vg::Align::Center);
         text_paint.set_text_baseline(vg::Baseline::Middle);

@@ -1,4 +1,4 @@
-//! Phase Plant-style FX Unit operations: add, insert, replace, remove, intra-lane reorder
+//! Modular FX Unit operations: add, insert, replace, remove, intra-lane reorder
 //! (`FxRackOrder` splice), cross-lane move, Alt+Drag duplicate (with `ModMatrix` cloning),
 //! reset, and lane bulk actions.
 
