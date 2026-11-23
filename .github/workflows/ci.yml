@@ -223,25 +223,42 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.j-syn-ci-tools
-          key: j-syn-validators-ubuntu-22.04-v1
+          key: j-syn-validators-ubuntu-22.04-v2
 
       - name: Install clap-validator and pluginval
         if: steps.tools-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p ~/.j-syn-ci-tools
+          mkdir -p ~/.j-syn-ci-tools/clap-validator ~/.j-syn-ci-tools/pluginval
           CLAP_URL="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
             https://api.github.com/repos/free-audio/clap-validator/releases/latest \
             | python3 -c 'import json,sys; assets=json.load(sys.stdin)["assets"]; print(next(a["browser_download_url"] for a in assets if "ubuntu" in a["name"].lower() and a["name"].endswith(".zip")))')"
           curl -fsSL "$CLAP_URL" -o /tmp/clap-validator.zip
           unzip -oq /tmp/clap-validator.zip -d ~/.j-syn-ci-tools/clap-validator
-          find ~/.j-syn-ci-tools/clap-validator -type f -name clap-validator -exec cp {} ~/.j-syn-ci-tools/clap-validator-bin \;
+          for tgz in ~/.j-syn-ci-tools/clap-validator/*.tar.gz; do
+            if [[ -f "$tgz" ]]; then
+              tar -xzf "$tgz" -C ~/.j-syn-ci-tools/clap-validator
+            fi
+          done
+          CLAP_BIN="$(find ~/.j-syn-ci-tools/clap-validator -type f -name 'clap-validator' | head -n1)"
+          if [[ -z "$CLAP_BIN" ]]; then
+            echo "::error::Could not locate clap-validator binary after extraction:"
+            find ~/.j-syn-ci-tools/clap-validator -maxdepth 4
+            exit 1
+          fi
+          cp "$CLAP_BIN" ~/.j-syn-ci-tools/clap-validator-bin
           chmod +x ~/.j-syn-ci-tools/clap-validator-bin
 
           curl -fsSL "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip" -o /tmp/pluginval.zip
           unzip -oq /tmp/pluginval.zip -d ~/.j-syn-ci-tools/pluginval
-          find ~/.j-syn-ci-tools/pluginval -type f -name pluginval -exec cp {} ~/.j-syn-ci-tools/pluginval-bin \;
+          PV_BIN="$(find ~/.j-syn-ci-tools/pluginval -type f -name 'pluginval' | head -n1)"
+          if [[ -z "$PV_BIN" ]]; then
+            echo "::error::Could not locate pluginval binary after extraction:"
+            find ~/.j-syn-ci-tools/pluginval -maxdepth 4
+            exit 1
+          fi
+          cp "$PV_BIN" ~/.j-syn-ci-tools/pluginval-bin
           chmod +x ~/.j-syn-ci-tools/pluginval-bin
 
       - name: Bundle J-SYN CLAP & VST3

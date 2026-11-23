@@ -3,10 +3,13 @@
 
 use std::path::Path;
 
+#[cfg(target_os = "macos")]
 use glow::HasContext;
+#[cfg(target_os = "macos")]
 use nih_plug_vizia::vizia::backend::{BackendContext, WindowDescription};
 use nih_plug_vizia::vizia::image::RgbaImage;
 use nih_plug_vizia::vizia::prelude::*;
+#[cfg(target_os = "macos")]
 use nih_plug_vizia::vizia::vg;
 
 /// Renders a Vizia UI tree offscreen into a PNG file at `out_path` without opening any OS window.
