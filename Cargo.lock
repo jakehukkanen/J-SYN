@@ -2135,7 +2135,7 @@ checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
 name = "j-chorus"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2145,7 +2145,7 @@ dependencies = [
 
 [[package]]
 name = "j-clipper"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2155,7 +2155,7 @@ dependencies = [
 
 [[package]]
 name = "j-delay"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2165,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "j-dispersion"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2175,7 +2175,7 @@ dependencies = [
 
 [[package]]
 name = "j-dist"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2185,7 +2185,7 @@ dependencies = [
 
 [[package]]
 name = "j-filter"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2195,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "j-flanger"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2205,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "j-limiter"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2215,7 +2215,7 @@ dependencies = [
 
 [[package]]
 name = "j-mbdist"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "j-ott"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2237,7 +2237,7 @@ dependencies = [
 
 [[package]]
 name = "j-phaser"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2247,7 +2247,7 @@ dependencies = [
 
 [[package]]
 name = "j-reverb"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2257,7 +2257,7 @@ dependencies = [
 
 [[package]]
 name = "j-syn"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "arc-swap",
  "j-syn-dsp",
@@ -2271,7 +2271,7 @@ dependencies = [
 
 [[package]]
 name = "j-syn-dsp"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "arc-swap",
  "hound",
@@ -2281,7 +2281,7 @@ dependencies = [
 
 [[package]]
 name = "j-syn-ui"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "cgl",
  "glow",
@@ -2296,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "j-tuberes"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -2306,7 +2306,7 @@ dependencies = [
 
 [[package]]
 name = "j-utility"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "j-syn-dsp",
  "j-syn-ui",
@@ -5445,7 +5445,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.4.1"
 dependencies = [
  "cargo_metadata",
  "nih_plug_xtask",
