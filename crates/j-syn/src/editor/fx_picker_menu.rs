@@ -48,6 +48,40 @@ pub(crate) struct FxOverlayMenuState {
     pub rev: u64,
 }
 
+const OUTER_CHROME_H: f32 = 14.0; // 6px top + 6px bottom padding + 2x 1px border
+const OUTER_ROW_GAP: f32 = 2.0;
+const HEADER_H: f32 = 18.0;
+const SEP_H: f32 = 5.0; // 1px line + 2px top + 2px bottom
+const CAT_HEADER_H: f32 = 18.0; // generous headroom for Plus Jakarta Sans Bold ascenders
+const CAT_TOP_GAP: f32 = 4.0; // extra spacing above categories after the first
+const PICKER_ITEM_H: f32 = 21.0;
+const COL_ROW_GAP: f32 = 3.0;
+const CTX_ITEM_H: f32 = 20.0;
+const HEIGHT_SAFETY_CUSHION: f32 = 6.0;
+const VIEWPORT_MARGIN_X: f32 = 8.0;
+const VIEWPORT_MARGIN_BOTTOM: f32 = 10.0;
+const UNIT_CTX_ITEM_COUNT: usize = 10;
+const UNIT_CTX_SEP_COUNT: usize = 3;
+const LANE_CTX_ITEM_COUNT: usize = 6;
+const LANE_CTX_SEP_COUNT: usize = 3;
+
+#[inline]
+fn picker_column_height(categories: &[FxPickerCategory]) -> f32 {
+    let num_cats = categories.len();
+    let num_items: usize = categories.iter().map(|c| c.items.len()).sum();
+    let total_rows = num_cats + num_items;
+    let gaps = total_rows.saturating_sub(1) as f32 * COL_ROW_GAP;
+    let inter_cat_pad = num_cats.saturating_sub(1) as f32 * CAT_TOP_GAP;
+    num_cats as f32 * CAT_HEADER_H + num_items as f32 * PICKER_ITEM_H + gaps + inter_cat_pad
+}
+
+#[inline]
+fn stacked_ctx_height(num_items: usize, num_seps: usize) -> f32 {
+    let total_children = 1 + num_seps + num_items;
+    let gaps = total_children.saturating_sub(1) as f32 * OUTER_ROW_GAP;
+    OUTER_CHROME_H + HEADER_H + num_seps as f32 * SEP_H + num_items as f32 * CTX_ITEM_H + gaps
+}
+
 impl FxOverlayMenuState {
     #[inline]
     pub fn is_visible(&self) -> bool {
@@ -63,13 +97,47 @@ impl FxOverlayMenuState {
     }
 
     #[inline]
-    fn est_height(&self) -> f32 {
+    fn exact_height(&self) -> f32 {
         match self.kind {
-            FxOverlayMenuKind::Picker { .. } => 246.0,
-            FxOverlayMenuKind::UnitContext { .. } => 264.0,
-            FxOverlayMenuKind::LaneContext { .. } => 176.0,
+            FxOverlayMenuKind::Picker { .. } => {
+                let left_h = picker_column_height(FX_PICKER_LEFT_COL);
+                let right_h = picker_column_height(FX_PICKER_RIGHT_COL);
+                OUTER_CHROME_H + HEADER_H + SEP_H + 2.0 * OUTER_ROW_GAP + left_h.max(right_h)
+            }
+            FxOverlayMenuKind::UnitContext { .. } => {
+                stacked_ctx_height(UNIT_CTX_ITEM_COUNT, UNIT_CTX_SEP_COUNT)
+            }
+            FxOverlayMenuKind::LaneContext { .. } => {
+                stacked_ctx_height(LANE_CTX_ITEM_COUNT, LANE_CTX_SEP_COUNT)
+            }
             FxOverlayMenuKind::None => 0.0,
         }
+    }
+
+    #[inline]
+    fn est_height(&self) -> f32 {
+        let exact = self.exact_height();
+        if exact > 0.0 {
+            exact + HEIGHT_SAFETY_CUSHION
+        } else {
+            0.0
+        }
+    }
+
+    #[inline]
+    fn clamped_left(&self) -> f32 {
+        let w = self.menu_width();
+        self.anchor_x
+            .clamp(6.0, (BASE_WIDTH as f32 - w - VIEWPORT_MARGIN_X).max(6.0))
+    }
+
+    #[inline]
+    fn clamped_top(&self) -> f32 {
+        let h = self.est_height();
+        self.anchor_y.clamp(
+            6.0,
+            (BASE_HEIGHT as f32 - h - VIEWPORT_MARGIN_BOTTOM).max(6.0),
+        )
     }
 }
 
@@ -89,12 +157,16 @@ fn build_picker_column(
     mod_ui: Arc<ModUiState>,
 ) {
     VStack::new(cx, move |cx| {
-        for cat in categories {
-            bold_label(cx, cat.title, "fx-picker-cat-header")
+        for (cat_idx, cat) in categories.iter().enumerate() {
+            let mut hdr = bold_label(cx, cat.title, "fx-picker-cat-header")
                 .width(Stretch(1.0))
-                .height(Pixels(14.0))
+                .height(Pixels(CAT_HEADER_H))
                 .child_top(Stretch(1.0))
                 .child_bottom(Stretch(1.0));
+            if cat_idx > 0 {
+                hdr = hdr.top(Pixels(CAT_TOP_GAP));
+            }
+            let _ = hdr;
 
             for &(label, fx_ty) in cat.items {
                 let p = params.clone();
@@ -125,11 +197,11 @@ fn build_picker_column(
                 )
                 .class("fx-picker-item")
                 .width(Stretch(1.0))
-                .height(Pixels(21.0));
+                .height(Pixels(PICKER_ITEM_H));
             }
         }
     })
-    .row_between(Pixels(3.0))
+    .row_between(Pixels(COL_ROW_GAP))
     .width(Stretch(1.0))
     .height(Auto);
 }
@@ -153,7 +225,7 @@ where
         "fx-ctx-item"
     })
     .width(Stretch(1.0))
-    .height(Pixels(20.0));
+    .height(Pixels(CTX_ITEM_H));
 }
 
 fn build_ctx_sep(cx: &mut Context) {
@@ -207,7 +279,9 @@ pub(crate) fn build_fx_overlay_menu(
                     };
                     bold_label(cx, &header, "mod-context-header")
                         .width(Stretch(1.0))
-                        .height(Pixels(16.0));
+                        .height(Pixels(HEADER_H))
+                        .child_top(Stretch(1.0))
+                        .child_bottom(Stretch(1.0));
                     build_ctx_sep(cx);
 
                     let p_col = p_bind.clone();
@@ -243,7 +317,9 @@ pub(crate) fn build_fx_overlay_menu(
                     let hdr = format!("{}  ({})", fx_ty.label().to_uppercase(), lane_name(bus));
                     bold_label(cx, &hdr, "mod-context-header")
                         .width(Stretch(1.0))
-                        .height(Pixels(16.0));
+                        .height(Pixels(HEADER_H))
+                        .child_top(Stretch(1.0))
+                        .child_bottom(Stretch(1.0));
                     build_ctx_sep(cx);
 
                     let p_dup = p_bind.clone();
@@ -353,7 +429,9 @@ pub(crate) fn build_fx_overlay_menu(
                     let hdr = format!("{}  ACTIONS", lane_name(bus));
                     bold_label(cx, &hdr, "mod-context-header")
                         .width(Stretch(1.0))
-                        .height(Pixels(16.0));
+                        .height(Pixels(HEADER_H))
+                        .child_top(Stretch(1.0))
+                        .child_bottom(Stretch(1.0));
                     build_ctx_sep(cx);
 
                     let ax = menu.anchor_x;
@@ -415,17 +493,90 @@ pub(crate) fn build_fx_overlay_menu(
     })
     .class("fx-picker-popover")
     .position_type(PositionType::SelfDirected)
-    .left(UiData::fx_menu.map(|m| {
-        let w = m.menu_width();
-        Pixels(m.anchor_x.clamp(6.0, BASE_WIDTH as f32 - w - 8.0))
-    }))
-    .top(UiData::fx_menu.map(|m| {
-        let h = m.est_height();
-        Pixels(m.anchor_y.clamp(6.0, BASE_HEIGHT as f32 - h - 8.0))
-    }))
+    .left(UiData::fx_menu.map(|m| Pixels(m.clamped_left())))
+    .top(UiData::fx_menu.map(|m| Pixels(m.clamped_top())))
     .width(UiData::fx_menu.map(|m| Pixels(m.menu_width())))
     .height(Auto)
-    .row_between(Pixels(2.0))
+    .row_between(Pixels(OUTER_ROW_GAP))
     .z_index(365)
     .display(UiData::fx_menu.map(FxOverlayMenuState::is_visible));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlay_menus_stay_strictly_inside_window_bounds() {
+        let cases = [
+            FxOverlayMenuKind::Picker {
+                bus: 0,
+                target: FxPickerTarget::InsertAt(0),
+            },
+            FxOverlayMenuKind::UnitContext {
+                bus: 1,
+                pos: 0,
+                slot: 0,
+            },
+            FxOverlayMenuKind::LaneContext { bus: 2 },
+        ];
+
+        for kind in cases {
+            let state = FxOverlayMenuState {
+                kind,
+                anchor_x: BASE_WIDTH as f32 + 200.0,
+                anchor_y: BASE_HEIGHT as f32 + 200.0,
+                rev: 1,
+            };
+            let exact_h = state.exact_height();
+            let est_h = state.est_height();
+            assert!(
+                est_h >= exact_h + HEIGHT_SAFETY_CUSHION - 1e-4,
+                "est_height ({est_h}) must include safety cushion above exact_height ({exact_h})"
+            );
+            let left = state.clamped_left();
+            let top = state.clamped_top();
+            assert!(
+                left >= 6.0
+                    && left + state.menu_width() <= BASE_WIDTH as f32 - VIEWPORT_MARGIN_X + 1e-4
+            );
+            assert!(
+                top >= 6.0
+                    && top + exact_h
+                        <= BASE_HEIGHT as f32 - VIEWPORT_MARGIN_BOTTOM - HEIGHT_SAFETY_CUSHION
+                            + 1e-4,
+                "menu {:?} bottom {} overflows window height {}",
+                kind,
+                top + exact_h,
+                BASE_HEIGHT
+            );
+        }
+    }
+
+    #[test]
+    fn picker_height_accounts_for_all_categories_and_effects() {
+        let picker = FxOverlayMenuState {
+            kind: FxOverlayMenuKind::Picker {
+                bus: 0,
+                target: FxPickerTarget::InsertAt(0),
+            },
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            rev: 0,
+        };
+        let total_fx: usize = FX_PICKER_LEFT_COL
+            .iter()
+            .chain(FX_PICKER_RIGHT_COL.iter())
+            .map(|c| c.items.len())
+            .sum();
+        assert_eq!(
+            total_fx, 14,
+            "FX picker should expose all 14 active FX types"
+        );
+        assert!(
+            picker.exact_height() >= 295.0,
+            "Picker exact_height ({}) should reflect full taller right column",
+            picker.exact_height()
+        );
+    }
 }

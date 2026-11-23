@@ -1183,7 +1183,7 @@ scrollview:checked > scrollbar:active .thumb {
 }
 
 .fx-picker-cat-header {
-  font-size: 8;
+  font-size: 8.5;
   font-weight: bold;
   color: #f5b349;
   child-left: 3px;
