@@ -275,11 +275,11 @@ jobs:
             --exclude '^state-reproducibility-' \
             target/bundled/j-syn.clap
 
-      - name: Validate J-SYN.vst3 with pluginval (strictness 5)
+      - name: Validate J-SYN.vst3 with pluginval (strictness 8)
         run: |
           xvfb-run -a ~/.j-syn-ci-tools/pluginval-bin \
             --validate-in-process \
-            --strictness-level 5 \
+            --strictness-level 8 \
             --skip-gui-tests \
             target/bundled/j-syn.vst3
 
