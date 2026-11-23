@@ -292,24 +292,67 @@ impl View for FxInsertSeam {
     }
 }
 
-/// Click-anywhere empty lane area below the last FX card (left-click opens FX Picker, right-click opens Lane Menu).
+/// Hover-only empty lane area below the last FX card:
+/// - Invisible at rest (zero visual clutter)
+/// - Hovering the empty lane shows a darker rounded highlight box in the next slot position
+/// - Hovering directly over that box brightens the highlight + translucent `"Insert FX..."` label
+/// - Left-click anywhere in the empty lane opens the categorized FX Picker; right-click opens the Lane Menu.
 struct FxEmptyLaneZone {
     bus_idx: usize,
     insert_pos: usize,
     can_add: bool,
+    is_lane_empty: bool,
+    hovered_zone: bool,
+    hovered_box: bool,
 }
 
 impl FxEmptyLaneZone {
-    fn new(cx: &mut Context, bus_idx: usize, insert_pos: usize, can_add: bool) -> Handle<'_, Self> {
+    fn new(
+        cx: &mut Context,
+        bus_idx: usize,
+        insert_pos: usize,
+        can_add: bool,
+        is_lane_empty: bool,
+    ) -> Handle<'_, Self> {
+        let min_h = if is_lane_empty {
+            tokens::FX_UNIT_EMPTY_SLOT_H + 8.0
+        } else {
+            tokens::FX_UNIT_TRAILING_SLOT_H + 12.0
+        };
         Self {
             bus_idx,
             insert_pos,
             can_add,
+            is_lane_empty,
+            hovered_zone: false,
+            hovered_box: false,
         }
         .build(cx, |_| {})
         .width(Pixels(tokens::FX_UNIT_W))
         .height(Stretch(1.0))
-        .min_height(Pixels(72.0))
+        .min_height(Pixels(min_h))
+    }
+
+    #[inline]
+    fn highlight_box_rect(&self, bounds: BoundingBox, dpx: f32) -> (f32, f32, f32, f32) {
+        let top_pad = if self.is_lane_empty {
+            2.0 * dpx
+        } else {
+            6.0 * dpx
+        };
+        let target_h = if self.is_lane_empty {
+            tokens::FX_UNIT_EMPTY_SLOT_H
+        } else {
+            tokens::FX_UNIT_TRAILING_SLOT_H
+        } * dpx;
+        let max_h = (bounds.h - top_pad - 4.0 * dpx).max(32.0 * dpx);
+        (bounds.x, bounds.y + top_pad, bounds.w, target_h.min(max_h))
+    }
+
+    #[inline]
+    fn point_in_box(&self, bounds: BoundingBox, dpx: f32, x: f32, y: f32) -> bool {
+        let (bx, by, bw, bh) = self.highlight_box_rect(bounds, dpx);
+        x >= bx && x <= bx + bw && y >= by && y <= by + bh
     }
 }
 
@@ -320,6 +363,28 @@ impl View for FxEmptyLaneZone {
 
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseOver => {
+                self.hovered_zone = true;
+                self.hovered_box = self.point_in_box(
+                    cx.bounds(),
+                    cx.scale_factor(),
+                    cx.mouse().cursorx,
+                    cx.mouse().cursory,
+                );
+                cx.needs_redraw();
+            }
+            WindowEvent::MouseMove(x, y) if self.hovered_zone => {
+                let next_box = self.point_in_box(cx.bounds(), cx.scale_factor(), *x, *y);
+                if next_box != self.hovered_box {
+                    self.hovered_box = next_box;
+                    cx.needs_redraw();
+                }
+            }
+            WindowEvent::MouseOut => {
+                self.hovered_zone = false;
+                self.hovered_box = false;
+                cx.needs_redraw();
+            }
             WindowEvent::MouseDown(MouseButton::Left) if self.can_add => {
                 let scale = cx.scale_factor().max(0.01);
                 cx.emit(UiEvent::ShowFxPicker(
@@ -341,6 +406,53 @@ impl View for FxEmptyLaneZone {
             }
             _ => {}
         });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        if !self.can_add || !self.hovered_zone {
+            return;
+        }
+        let bounds = cx.bounds();
+        if bounds.w <= 4.0 || bounds.h <= 8.0 {
+            return;
+        }
+        let dpx = cx.scale_factor();
+        let (bx, by, bw, bh) = self.highlight_box_rect(bounds, dpx);
+        let pal = theme::current_palette(cx);
+        let base_rgb = theme::hex_to_rgb(&pal.surface_hover);
+        let (ar, ag, ab) = pal.accent_rgb();
+
+        let (fill_col, border_col, border_w, text_col) = if self.hovered_box {
+            let (fr, fg, fb) = theme::lerp_rgb(base_rgb, (ar, ag, ab), 0.22);
+            (
+                vg::Color::rgba(fr, fg, fb, 155),
+                vg::Color::rgba(ar, ag, ab, 215),
+                1.35 * dpx,
+                theme::vg_color(&pal.text_bright, 195),
+            )
+        } else {
+            let (fr, fg, fb) = theme::lerp_rgb(base_rgb, (ar, ag, ab), 0.08);
+            (
+                vg::Color::rgba(fr, fg, fb, 72),
+                vg::Color::rgba(ar, ag, ab, 92),
+                1.0 * dpx,
+                theme::vg_color(&pal.text_muted, 110),
+            )
+        };
+
+        let mut rect = vg::Path::new();
+        rect.rounded_rect(bx, by, bw, bh, 5.0 * dpx);
+        canvas.fill_path(&rect, &vg::Paint::color(fill_col));
+
+        let mut stroke = vg::Paint::color(border_col);
+        stroke.set_line_width(border_w);
+        canvas.stroke_path(&rect, &stroke);
+
+        let mut text_paint = vg::Paint::color(text_col);
+        text_paint.set_font_size(11.0 * dpx);
+        text_paint.set_text_align(vg::Align::Center);
+        text_paint.set_text_baseline(vg::Baseline::Middle);
+        let _ = canvas.fill_text(bx + bw * 0.5, by + bh * 0.5, "Insert FX...", &text_paint);
     }
 }
 
@@ -679,40 +791,19 @@ fn build_fx_unit_card(
             "module-disabled",
             UiData::mod_ui_rev.map(move |_| !slot_enabled_for_bus(&p_dim, bus_idx, slot_idx)),
         )
-        .toggle_class(
-            "fx-card-dragging",
-            UiData::mod_val_rev.map(move |_| drag_dim.is_dragging_source_move(bus_idx, slot_idx)),
-        )
+        .opacity(UiData::mod_val_rev.map(move |_| {
+            if drag_dim.is_dragging_source_move(bus_idx, slot_idx) {
+                0.35
+            } else {
+                1.0
+            }
+        }))
         .width(Pixels(tokens::FX_UNIT_W))
         .height(Auto)
         .row_between(Pixels(tokens::SPACE_SM));
     })
     .width(Pixels(tokens::FX_UNIT_W))
     .height(Auto);
-}
-
-fn build_add_effect_bar(cx: &mut Context, bus_idx: usize, insert_pos: usize) {
-    Button::new(
-        cx,
-        move |cx| {
-            let bounds = cx.bounds();
-            let scale = cx.scale_factor().max(0.01);
-            cx.emit(UiEvent::ShowFxPicker(
-                bus_idx,
-                FxPickerTarget::InsertAt(insert_pos),
-                bounds.x / scale,
-                (bounds.y + bounds.h + 4.0) / scale,
-            ));
-        },
-        |cx| {
-            bold_label(cx, "+ Add Effect", "fx-add-bar-label")
-                .child_space(Stretch(1.0))
-                .hoverable(false)
-        },
-    )
-    .class("fx-add-bar")
-    .width(Pixels(tokens::FX_UNIT_W))
-    .height(Pixels(tokens::FX_UNIT_ADD_BAR_H));
 }
 
 /// Right Wing: 3-lane Phase Plant-style scrollable FX Rack (`Bus A`, `Bus B`, `Bus C`, up to 30 active FX Units each).
@@ -730,6 +821,7 @@ pub(crate) fn build_three_lane_fx_rack(
             let m_lane = mod_ui.clone();
             let p_byp = params.clone();
             let p_mute = params.clone();
+            let p_opac = params.clone();
             VStack::new(cx, move |cx| {
                 build_lane_header(
                     cx,
@@ -781,28 +873,39 @@ pub(crate) fn build_three_lane_fx_rack(
                                     }
 
                                     let can_add = count < NUM_FX_SLOTS;
-                                    if can_add {
-                                        Element::new(cx)
-                                            .height(Pixels(tokens::SPACE_SM))
-                                            .width(Pixels(1.0))
-                                            .hoverable(false);
-                                        build_add_effect_bar(cx, bus_idx, count);
-                                    }
-                                    FxEmptyLaneZone::new(cx, bus_idx, count, can_add);
+                                    FxEmptyLaneZone::new(
+                                        cx,
+                                        bus_idx,
+                                        count,
+                                        can_add,
+                                        count == 0,
+                                    );
                                 },
                             );
                         })
                         .child_right(Pixels(tokens::FX_LANE_SCROLL_GUTTER))
                         .width(Stretch(1.0))
-                        .height(Auto);
+                        .height(Auto)
+                        .min_height(Percentage(100.0));
                     })
                     .width(Stretch(1.0))
                     .height(Stretch(1.0))
                     .entity()
                 })
+                .class("fx-lane-viewport")
+                .opacity(UiData::mod_ui_rev.map(move |_| {
+                    if p_opac.fx_bus_muted_param(bus_idx).value() {
+                        0.42
+                    } else if !p_opac.fx_bus_enabled_param(bus_idx).value() {
+                        0.58
+                    } else {
+                        1.0
+                    }
+                }))
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
             })
+            .class("fx-lane")
             .toggle_class(
                 "fx-lane-bypassed",
                 UiData::mod_ui_rev.map(move |_| !p_byp.fx_bus_enabled_param(bus_idx).value()),

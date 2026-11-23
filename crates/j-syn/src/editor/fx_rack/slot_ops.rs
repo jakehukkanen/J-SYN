@@ -32,12 +32,14 @@ pub(crate) const FX_PICKER_LEFT_COL: &[FxPickerCategory] = &[
         items: &[
             ("Distortion", FxTypeParam::Distortion),
             ("MB Dist", FxTypeParam::MultibandDist),
-            ("Clipper", FxTypeParam::JSatClipper),
         ],
     },
     FxPickerCategory {
         title: "UTILITY",
-        items: &[("Utility", FxTypeParam::Utility)],
+        items: &[
+            ("Utility", FxTypeParam::Utility),
+            ("Clipper", FxTypeParam::JSatClipper),
+        ],
     },
 ];
 

@@ -809,6 +809,7 @@ led-toggle:checked:hover .switch-label {
 /* Milestone 4: Master FX Rack & Parallel Dual-Bus Layout */
 
 .fx-full-card {
+  opacity: 1;
   child-left: 4px;
   child-right: 4px;
   child-top: 3px;
@@ -1108,16 +1109,32 @@ scrollview:checked > scrollbar:active .thumb {
   color: #6b6157;
 }
 
-.fx-card-dragging {
+.fx-lane {
+  opacity: 1;
+}
+
+.fx-lane-viewport {
+  opacity: 1;
+}
+
+.fx-full-card.fx-card-dragging {
   opacity: 0.35;
 }
 
-.fx-lane-bypassed .fx-full-card {
+.fx-lane.fx-lane-bypassed .fx-lane-viewport {
   opacity: 0.58;
 }
 
-.fx-lane-muted {
+.fx-lane.fx-lane-muted .fx-lane-viewport {
   opacity: 0.42;
+}
+
+.fx-lane.fx-lane-muted .fx-bus-header {
+  border-color: #8a4b44;
+}
+
+.fx-lane.fx-lane-muted .fx-bus-header .module-title {
+  color: #84786c;
 }
 
 .fx-lane-mute-btn {
@@ -1152,29 +1169,6 @@ scrollview:checked > scrollbar:active .thumb {
   font-size: 7.5;
   font-weight: bold;
   color: #84786c;
-}
-
-.fx-add-bar {
-  background-color: #211c17;
-  border-width: 1px;
-  border-color: #463b32;
-  border-radius: 4px;
-  child-space: 1s;
-}
-
-.fx-add-bar:hover {
-  background-color: #312923;
-  border-color: #f5b349;
-}
-
-.fx-add-bar-label {
-  font-size: 9;
-  font-weight: bold;
-  color: #a99582;
-}
-
-.fx-add-bar:hover .fx-add-bar-label {
-  color: #ffd382;
 }
 
 .fx-picker-popover {
