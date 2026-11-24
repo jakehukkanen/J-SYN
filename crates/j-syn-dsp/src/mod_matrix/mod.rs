@@ -145,7 +145,30 @@ impl ModMatrixState {
         }
     }
 
-    /// Evaluates all 32 slots for a voice's current `[0..1]` source values and accumulates
+    /// Evaluates active modulation slots into voice/base destination offsets (`0..NUM_VOICE_MOD_DESTS`).
+    /// Skips FX-slot destinations so per-voice audio loops stay cache-compact and fast.
+    #[inline]
+    pub fn evaluate_voice_destinations(
+        &self,
+        source_values: &[f32; NUM_ACTIVE_SOURCES],
+        out_deltas: &mut [f32; NUM_VOICE_MOD_DESTS],
+    ) {
+        out_deltas.fill(0.0);
+        for slot in &self.slots {
+            if !slot.enabled || slot.bypassed {
+                continue;
+            }
+            let dest_idx = slot.destination.index();
+            if dest_idx >= NUM_VOICE_MOD_DESTS {
+                continue;
+            }
+            if let Some(sig) = Self::eval_slot_signal(slot, source_values) {
+                out_deltas[dest_idx] += sig * slot.depth.clamp(-1.0, 1.0);
+            }
+        }
+    }
+
+    /// Evaluates all slots for a voice's current `[0..1]` source values and accumulates
     /// per-destination normalized offsets into `out_deltas`. Zero heap allocations.
     #[inline]
     pub fn evaluate_destinations(
@@ -158,33 +181,39 @@ impl ModMatrixState {
             if !slot.enabled || slot.bypassed {
                 continue;
             }
-            if let Some(src_idx) = slot.source.active_index() {
-                let mut raw = source_values[src_idx].clamp(0.0, 1.0);
-                if (slot.curve - 2.0).abs() < 0.1 {
-                    raw = raw * raw * (3.0 - 2.0 * raw);
-                } else if (slot.curve - 3.0).abs() < 0.1 {
-                    raw = (raw * 4.0).floor() * 0.25;
-                } else {
-                    let curve = slot.curve.clamp(-1.0, 1.0);
-                    if curve.abs() > 1e-4 {
-                        let exp = (curve * 2.5).exp();
-                        raw = raw.powf(exp);
-                    }
-                }
-                let mut sig = if slot.bipolar {
-                    raw * 2.0 - 1.0
-                } else {
-                    raw
-                };
-                if let Some(aux_idx) = slot.aux_source.active_index() {
-                    sig *= source_values[aux_idx].clamp(0.0, 1.0);
-                }
-                let dest_idx = slot.destination.index();
-                if dest_idx < NUM_MOD_DESTS {
-                    out_deltas[dest_idx] += sig * slot.depth.clamp(-1.0, 1.0);
-                }
+            let dest_idx = slot.destination.index();
+            if dest_idx >= NUM_MOD_DESTS {
+                continue;
+            }
+            if let Some(sig) = Self::eval_slot_signal(slot, source_values) {
+                out_deltas[dest_idx] += sig * slot.depth.clamp(-1.0, 1.0);
             }
         }
+    }
+
+    #[inline]
+    fn eval_slot_signal(
+        slot: &ModSlot,
+        source_values: &[f32; NUM_ACTIVE_SOURCES],
+    ) -> Option<f32> {
+        let src_idx = slot.source.active_index()?;
+        let mut raw = source_values[src_idx].clamp(0.0, 1.0);
+        if (slot.curve - 2.0).abs() < 0.1 {
+            raw = raw * raw * (3.0 - 2.0 * raw);
+        } else if (slot.curve - 3.0).abs() < 0.1 {
+            raw = (raw * 4.0).floor() * 0.25;
+        } else {
+            let curve = slot.curve.clamp(-1.0, 1.0);
+            if curve.abs() > 1e-4 {
+                let exp = (curve * 2.5).exp();
+                raw = raw.powf(exp);
+            }
+        }
+        let mut sig = if slot.bipolar { raw * 2.0 - 1.0 } else { raw };
+        if let Some(aux_idx) = slot.aux_source.active_index() {
+            sig *= source_values[aux_idx].clamp(0.0, 1.0);
+        }
+        Some(sig)
     }
 }
 

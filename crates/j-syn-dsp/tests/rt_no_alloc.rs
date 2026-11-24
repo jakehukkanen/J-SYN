@@ -141,6 +141,31 @@ fn audio_thread_polyphony_mpe_voice_stealing_and_all_fx_zero_alloc() {
         FxBusTopology::BToC,
     ];
 
+    // Pre-provision all 14 FX types distributed across Buses A/B/C off the RT thread,
+    // and queue a pending swap command on Bus A slot 0 so the RT thread exercises lock-free swap + retire!
+    for (idx, &fx_ty) in all_fx.iter().enumerate() {
+        let mut slot = FxSlotParams::init_patch_slot(idx);
+        slot.fx_type = fx_ty;
+        slot.enabled = true;
+        slot.stack = ((idx % MAX_FX_STACK) + 1) as u8;
+        slot.params = FxSlotParams::default_params_for_type(fx_ty);
+        if matches!(fx_ty, FxType::Delay | FxType::Reverb | FxType::TubeResonator) {
+            slot.params[3] = 0.5;
+        }
+        slot.eq_params = FxSlotParams::default_eq_params_for_type(fx_ty);
+        let bus = idx % 3;
+        let slot_idx = idx / 3;
+        match bus {
+            0 => params.fx_bus_a.slots[slot_idx] = slot,
+            1 => params.fx_bus_b.slots[slot_idx] = slot,
+            _ => params.fx_bus_c.slots[slot_idx] = slot,
+        }
+    }
+    engine.prepare_fx_for_params(&params);
+    let swap_queue = engine.fx_swap_queue();
+    let bus0_slot0_ty = params.fx_bus_a.slots[0].fx_type;
+    swap_queue.provision_slot(0, 0, bus0_slot0_ty, 2);
+
     let (non_finite_count, peak) = assert_no_alloc(|| {
         let mut non_finite = 0usize;
         let mut max_peak = 0.0_f32;
@@ -166,19 +191,11 @@ fn audio_thread_polyphony_mpe_voice_stealing_and_all_fx_zero_alloc() {
             }
         }
 
-        // Sweep every FxType across Bus A/B/C with STACK 1..=MAX_FX_STACK and all topologies
-        for (idx, &fx_ty) in all_fx.iter().enumerate() {
-            params.fx_bus_topology = topologies[idx % topologies.len()];
-            let mut slot = FxSlotParams::init_patch_slot(0);
-            slot.fx_type = fx_ty;
-            slot.enabled = true;
-            slot.stack = ((idx % MAX_FX_STACK) + 1) as u8;
-            slot.params = FxSlotParams::default_params_for_type(fx_ty);
-            slot.eq_params = FxSlotParams::default_eq_params_for_type(fx_ty);
-            params.fx_bus_a.slots[0] = slot;
-            params.fx_bus_b.slots[0] = slot;
-            params.fx_bus_c.slots[0] = slot;
-
+        // Sweep all topologies + unprovisioned slot 29 (exercises mark_needs_provision with 0 alloc)
+        params.fx_bus_a.slots[29].fx_type = FxType::Delay;
+        params.fx_bus_a.slots[29].enabled = true;
+        for &topo in &topologies {
+            params.fx_bus_topology = topo;
             for _ in 0..32 {
                 let (l, r) = engine.process_sample_with_tables(&params, tables);
                 if !l.is_finite() || !r.is_finite() {
@@ -200,6 +217,15 @@ fn audio_thread_polyphony_mpe_voice_stealing_and_all_fx_zero_alloc() {
 
         (non_finite, max_peak)
     });
+
+    // Verify garbage engine was retired cleanly off-RT and unprovisioned slot 29 was flagged
+    let masks = swap_queue.take_provision_masks();
+    assert_ne!(
+        masks[0] & (1u32 << 29),
+        0,
+        "Expected unprovisioned slot 29 to set provision mask bit"
+    );
+    swap_queue.drain_garbage();
 
     assert_eq!(
         non_finite_count, 0,

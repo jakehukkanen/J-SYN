@@ -1,8 +1,10 @@
-//! Parallel dual-bus 8-slot serial Master FX Rack (`Bus A` & `Bus B` + `Sub Bus`),
-//! with per-slot stacking (`STACK 1..=4`) and zero audio-thread heap allocations.
+//! Parallel 3-bus 30-slot serial Master FX Rack (`Bus A`, `Bus B`, `Bus C` + `Sub Bus`),
+//! with lazy per-slot engine provisioning (`ActiveFxEngine`), explicit drag-and-drop ordering
+//! (`FxRackOrder`), per-slot stacking (`STACK 1..=4`), and zero audio-thread heap allocations.
 
 pub mod diopser;
 pub mod dynamics;
+pub mod engine_pool;
 pub mod limiter;
 pub mod modulation;
 pub mod multiband_dist;
@@ -10,6 +12,7 @@ pub mod tube_resonator;
 pub mod utility;
 
 use std::f64::consts::FRAC_1_SQRT_2;
+use std::sync::Arc;
 
 use crate::adaa::TanhAdaa2;
 use crate::filter::{
@@ -21,17 +24,12 @@ use crate::oscillator::EngineMode;
 use crate::oversample::{Biquad, BiquadCoeffs, Oversampler4x};
 use crate::waveshaper::DistortionMode;
 
-use self::diopser::DiopserStereo;
-use self::dynamics::{DistortionStereo, JSatClipperStereo, OttStereo};
-use self::limiter::LimiterStereo;
-use self::modulation::{ChorusStereo, DelayStereo, FlangerStereo, PhaserStereo, ReverbStereo};
-use self::multiband_dist::MultiBandDistStereo;
-use self::tube_resonator::TubeResonatorStereo;
-use self::utility::UtilityStereo;
+use self::modulation::DelayStereo;
 
 pub use self::diopser::{
     diopser_freq_hz, diopser_stage_count, evaluate_diopser_ripple, DIOPSER_STAGE_COUNTS,
 };
+pub use self::engine_pool::{ActiveFxEngine, FxEngineSwapQueue, FxRackOrder, FxSwapCommand};
 pub use self::limiter::{
     limiter_ceil_db, limiter_gain_db, limiter_lookahead_ms, limiter_lookahead_samples,
     limiter_release_ms,
@@ -56,7 +54,7 @@ pub use self::utility::{
 };
 
 pub const NUM_FX_BUSES: usize = 3;
-pub const NUM_FX_SLOTS: usize = 8;
+pub const NUM_FX_SLOTS: usize = 30;
 pub const MAX_FX_STACK: usize = 4;
 
 const SCOPE_HZ: f32 = 150.0;
@@ -365,10 +363,12 @@ impl FxSlotParams {
     }
 }
 
-/// Parameters for one parallel 8-slot serial FX Bus (`Bus A` or `Bus B`).
+/// Parameters for one parallel 30-slot serial FX Bus (`Bus A`, `Bus B`, or `Bus C`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FxBusParams {
     pub slots: [FxSlotParams; NUM_FX_SLOTS],
+    pub enabled: bool,
+    pub muted: bool,
     pub level: f32,
     pub pan: f32,
 }
@@ -377,6 +377,8 @@ impl Default for FxBusParams {
     fn default() -> Self {
         Self {
             slots: [FxSlotParams::default(); NUM_FX_SLOTS],
+            enabled: true,
+            muted: false,
             level: 1.0,
             pan: 0.0,
         }
@@ -467,12 +469,13 @@ impl FxBusTopology {
     }
 }
 
-/// Full FX Rack (`Bus A` + `Bus B` + `Sub Bus` + `FxBusTopology` + `EngineMode`).
+/// Full FX Rack (`Bus A` + `Bus B` + `Bus C` + `Sub Bus` + `FxBusTopology` + `FxRackOrder` + `EngineMode`).
 #[derive(Debug, Clone, Copy)]
 pub struct FxRackParams {
     pub buses: [FxBusParams; NUM_FX_BUSES],
     pub sub: SubBusParams,
     pub topology: FxBusTopology,
+    pub order: FxRackOrder,
     pub engine_mode: EngineMode,
 }
 
@@ -482,6 +485,7 @@ impl Default for FxRackParams {
             buses: [FxBusParams::default(); NUM_FX_BUSES],
             sub: SubBusParams::default(),
             topology: FxBusTopology::default(),
+            order: FxRackOrder::default(),
             engine_mode: EngineMode::Vintage2007,
         }
     }
@@ -631,142 +635,10 @@ pub fn filter_response_db_from_slot(
     }
 }
 
-/// Complete single FX processing stage holding pre-allocated DSP sub-engines.
-struct StereoFxStage {
-    ott: OttStereo,
-    dist: DistortionStereo,
-    chorus: ChorusStereo,
-    delay: DelayStereo,
-    reverb: ReverbStereo,
-    clipper: JSatClipperStereo,
-    filter: FxFilterStereo,
-    phaser: PhaserStereo,
-    diopser: DiopserStereo,
-    tube_res: TubeResonatorStereo,
-    utility: UtilityStereo,
-    limiter: LimiterStereo,
-    mb_dist: Box<MultiBandDistStereo>,
-    flanger: FlangerStereo,
-}
-
-impl StereoFxStage {
-    fn new(sample_rate: f32) -> Self {
-        Self {
-            ott: OttStereo::new(sample_rate),
-            dist: DistortionStereo::new(sample_rate),
-            chorus: ChorusStereo::new(sample_rate),
-            delay: DelayStereo::new(sample_rate),
-            reverb: ReverbStereo::new(sample_rate),
-            clipper: JSatClipperStereo::new(),
-            filter: FxFilterStereo::new(sample_rate),
-            phaser: PhaserStereo::new(sample_rate),
-            diopser: DiopserStereo::new(sample_rate),
-            tube_res: TubeResonatorStereo::new(sample_rate),
-            utility: UtilityStereo::new(sample_rate),
-            limiter: LimiterStereo::new(sample_rate),
-            mb_dist: Box::new(MultiBandDistStereo::new(sample_rate)),
-            flanger: FlangerStereo::new(sample_rate),
-        }
-    }
-
-    fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.ott.set_sample_rate(sample_rate);
-        self.dist.set_sample_rate(sample_rate);
-        self.chorus.set_sample_rate(sample_rate);
-        self.delay.set_sample_rate(sample_rate);
-        self.reverb.set_sample_rate(sample_rate);
-        self.filter.set_sample_rate(sample_rate);
-        self.phaser.set_sample_rate(sample_rate);
-        self.diopser.set_sample_rate(sample_rate);
-        self.tube_res.set_sample_rate(sample_rate);
-        self.utility.set_sample_rate(sample_rate);
-        self.limiter.set_sample_rate(sample_rate);
-        self.mb_dist.set_sample_rate(sample_rate);
-        self.flanger.set_sample_rate(sample_rate);
-    }
-
-    fn reset(&mut self) {
-        self.ott.reset();
-        self.dist.reset();
-        self.chorus.reset();
-        self.delay.reset();
-        self.reverb.reset();
-        self.clipper.reset();
-        self.filter.reset();
-        self.phaser.reset();
-        self.diopser.reset();
-        self.tube_res.reset();
-        self.utility.reset();
-        self.limiter.reset();
-        self.mb_dist.reset();
-        self.flanger.reset();
-    }
-
-    #[inline]
-    #[allow(clippy::too_many_arguments)]
-    fn process_type(
-        &mut self,
-        slot: &FxSlotParams,
-        in_l: f32,
-        in_r: f32,
-        p: [f32; 4],
-        eq: [f32; 4],
-        eff_bands: &[MbDistBandParams; 3],
-        tempo_bpm: f32,
-        _engine_mode: EngineMode,
-    ) -> (f32, f32, f32) {
-        match slot.fx_type {
-            FxType::Off => (in_l, in_r, 0.0),
-            FxType::Ott => self.ott.process(in_l, in_r, p),
-            FxType::Distortion => self.dist.process(in_l, in_r, slot.distortion_mode, p),
-            FxType::Chorus => self.chorus.process(in_l, in_r, p, eq),
-            FxType::Delay => self.delay.process(in_l, in_r, p, eq, tempo_bpm),
-            FxType::Reverb => self.reverb.process(in_l, in_r, p, eq),
-            FxType::JSatClipper => self.clipper.process(in_l, in_r, p, slot.clipper_pcm),
-            FxType::Filter => {
-                self.filter
-                    .process(in_l, in_r, slot.filter_mode, slot.filter_slope, p, eq[0])
-            }
-            FxType::Phaser => self.phaser.process(in_l, in_r, p),
-            FxType::Diopser => self.diopser.process(in_l, in_r, p, slot.diopser_stages as usize),
-            FxType::TubeResonator => self.tube_res.process(
-                in_l,
-                in_r,
-                p,
-                eq,
-                slot.tube_res_filter_enabled,
-                slot.tube_res_dirty_lfo,
-            ),
-            FxType::Utility => self.utility.process(
-                in_l,
-                in_r,
-                p,
-                slot.utility_inv_l,
-                slot.utility_inv_r,
-            ),
-            FxType::Limiter => self.limiter.process(
-                in_l,
-                in_r,
-                p,
-                eq,
-                slot.limiter_true_peak,
-            ),
-            FxType::MultibandDist => self.mb_dist.process(
-                in_l,
-                in_r,
-                eff_bands,
-                p,
-            ),
-            FxType::Flanger => self.flanger.process(in_l, in_r, p, eq),
-        }
-    }
-}
-
-/// Pre-allocated single 8-slot serial FX Bus (`Bus A` or `Bus B`).
+/// Lazy single 30-slot serial FX Bus (`Bus A`, `Bus B`, or `Bus C`).
 struct FxBusState {
     bus_idx: usize,
-    stages: Box<[[StereoFxStage; MAX_FX_STACK]]>,
-    last_slot_types: [Option<FxType>; NUM_FX_SLOTS],
+    stages: Box<[[ActiveFxEngine; MAX_FX_STACK]]>,
     scope_accum: [(f32, f32, f32, usize); NUM_FX_SLOTS],
     scope_samples_per_col: usize,
 }
@@ -774,14 +646,13 @@ struct FxBusState {
 impl FxBusState {
     fn new(bus_idx: usize, sample_rate: f32) -> Self {
         let sr = sample_rate.max(1_000.0);
-        let mut stages_vec = Vec::with_capacity(NUM_FX_SLOTS);
-        for _ in 0..NUM_FX_SLOTS {
-            stages_vec.push(std::array::from_fn(|_| StereoFxStage::new(sr)));
-        }
+        let stages = (0..NUM_FX_SLOTS)
+            .map(|_| std::array::from_fn(|_| ActiveFxEngine::Off))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
         Self {
             bus_idx,
-            stages: stages_vec.into_boxed_slice(),
-            last_slot_types: [None; NUM_FX_SLOTS],
+            stages,
             scope_accum: [(0.0, 0.0, 0.0, 0); NUM_FX_SLOTS],
             scope_samples_per_col: (sr / SCOPE_HZ).round().max(1.0) as usize,
         }
@@ -803,8 +674,144 @@ impl FxBusState {
                 stage.reset();
             }
         }
-        self.last_slot_types = [None; NUM_FX_SLOTS];
         self.scope_accum = [(0.0, 0.0, 0.0, 0); NUM_FX_SLOTS];
+    }
+
+    /// Synchronously provisions all active engines for `bus` (call off the audio thread).
+    fn prepare_for_bus(&mut self, bus: &FxBusParams, sample_rate: f32) {
+        for (slot_idx, slot) in bus.slots.iter().enumerate() {
+            let active_stages = if slot.fx_type == FxType::Off {
+                0
+            } else {
+                (slot.stack as usize).clamp(1, MAX_FX_STACK)
+            };
+            for (stack_idx, stage) in self.stages[slot_idx].iter_mut().enumerate() {
+                let target_ty = if stack_idx < active_stages {
+                    slot.fx_type
+                } else {
+                    FxType::Off
+                };
+                if stage.fx_type() != target_ty {
+                    *stage = ActiveFxEngine::new_for_type(target_ty, sample_rate);
+                }
+            }
+        }
+    }
+
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn process_slot(
+        &mut self,
+        slot_idx: usize,
+        slot: &FxSlotParams,
+        mut l: f32,
+        mut r: f32,
+        mod_offsets: &[f32; NUM_MOD_DESTS],
+        tempo_bpm: f32,
+        swap_queue: &FxEngineSwapQueue,
+        telemetry: Option<&ModUiTelemetry>,
+    ) -> (f32, f32) {
+        let pre_peak = l.abs().max(r.abs());
+        let mut slot_activity = 0.0_f32;
+
+        if slot.enabled && slot.fx_type != FxType::Off {
+            let mut eff = [0.0_f32; 4];
+            let mut eff_eq = [0.0_f32; 4];
+            for p in 0..4 {
+                let mod_val = mod_offsets
+                    [ModDestination::fx_bus_slot_param(self.bus_idx, slot_idx, p).index()];
+                eff[p] = (slot.params[p] + mod_val).clamp(0.0, 1.0);
+                let eq_mod = mod_offsets
+                    [ModDestination::fx_bus_slot_param(self.bus_idx, slot_idx, 4 + p).index()];
+                eff_eq[p] = (slot.eq_params[p] + eq_mod).clamp(0.0, 1.0);
+            }
+
+            let eff_bands = if slot.fx_type == FxType::MultibandDist {
+                let mut bands = slot.mb_bands;
+                for (b, band) in bands.iter_mut().enumerate() {
+                    let base = 4 + b * 4;
+                    band.drive = (band.drive
+                        + mod_offsets[ModDestination::fx_bus_slot_param(
+                            self.bus_idx,
+                            slot_idx,
+                            base,
+                        )
+                        .index()])
+                    .clamp(0.0, 1.0);
+                    band.bias = (band.bias
+                        + mod_offsets[ModDestination::fx_bus_slot_param(
+                            self.bus_idx,
+                            slot_idx,
+                            base + 1,
+                        )
+                        .index()])
+                    .clamp(0.0, 1.0);
+                    band.level = (band.level
+                        + mod_offsets[ModDestination::fx_bus_slot_param(
+                            self.bus_idx,
+                            slot_idx,
+                            base + 2,
+                        )
+                        .index()])
+                    .clamp(0.0, 1.0);
+                    band.mix = (band.mix
+                        + mod_offsets[ModDestination::fx_bus_slot_param(
+                            self.bus_idx,
+                            slot_idx,
+                            base + 3,
+                        )
+                        .index()])
+                    .clamp(0.0, 1.0);
+                }
+                bands
+            } else {
+                slot.mb_bands
+            };
+
+            let stack_count = (slot.stack as usize).clamp(1, MAX_FX_STACK);
+            let mut needs_provision = false;
+            for stage in self.stages[slot_idx].iter_mut().take(stack_count) {
+                if stage.fx_type() == slot.fx_type {
+                    let (nl, nr, act) = stage.process_sample(
+                        slot,
+                        l,
+                        r,
+                        eff,
+                        eff_eq,
+                        &eff_bands,
+                        tempo_bpm,
+                    );
+                    l = nl;
+                    r = nr;
+                    slot_activity = slot_activity.max(act);
+                } else {
+                    needs_provision = true;
+                }
+            }
+            if needs_provision {
+                swap_queue.mark_needs_provision(self.bus_idx, slot_idx);
+            }
+        }
+
+        let post_peak = l.abs().max(r.abs());
+        if let Some(tel) = telemetry {
+            let (ref mut acc_pre, ref mut acc_post, ref mut acc_act, ref mut cnt) =
+                self.scope_accum[slot_idx];
+            *acc_pre = acc_pre.max(pre_peak);
+            *acc_post = acc_post.max(post_peak);
+            *acc_act = acc_act.max(slot_activity);
+            *cnt += 1;
+            if *cnt >= self.scope_samples_per_col {
+                tel.fx_scope(self.bus_idx, slot_idx)
+                    .push(*acc_pre, *acc_post, *acc_act);
+                *acc_pre = 0.0;
+                *acc_post = 0.0;
+                *acc_act = 0.0;
+                *cnt = 0;
+            }
+        }
+
+        (l, r)
     }
 
     #[inline]
@@ -814,121 +821,53 @@ impl FxBusState {
         in_l: f32,
         in_r: f32,
         bus: &FxBusParams,
+        order: &FxRackOrder,
         mod_offsets: &[f32; NUM_MOD_DESTS],
         tempo_bpm: f32,
-        engine_mode: EngineMode,
+        swap_queue: &FxEngineSwapQueue,
         telemetry: Option<&ModUiTelemetry>,
     ) -> (f32, f32) {
+        if bus.muted {
+            return (0.0, 0.0);
+        }
+
         let mut l = in_l;
         let mut r = in_r;
 
-        for (slot_idx, slot) in bus.slots.iter().enumerate() {
-            match self.last_slot_types[slot_idx] {
-                Some(prev) if prev != slot.fx_type => {
-                    for stage in &mut self.stages[slot_idx] {
-                        stage.reset();
+        if bus.enabled {
+            if order.explicit {
+                for &slot_u8 in order.active_slots(self.bus_idx) {
+                    let slot_idx = slot_u8 as usize;
+                    if slot_idx < NUM_FX_SLOTS {
+                        let slot = &bus.slots[slot_idx];
+                        if slot.fx_type != FxType::Off {
+                            (l, r) = self.process_slot(
+                                slot_idx,
+                                slot,
+                                l,
+                                r,
+                                mod_offsets,
+                                tempo_bpm,
+                                swap_queue,
+                                telemetry,
+                            );
+                        }
                     }
-                    self.last_slot_types[slot_idx] = Some(slot.fx_type);
-                    if let Some(tel) = telemetry {
-                        tel.fx_scope(self.bus_idx, slot_idx).clear();
+                }
+            } else {
+                for (slot_idx, slot) in bus.slots.iter().enumerate() {
+                    if slot.fx_type != FxType::Off {
+                        (l, r) = self.process_slot(
+                            slot_idx,
+                            slot,
+                            l,
+                            r,
+                            mod_offsets,
+                            tempo_bpm,
+                            swap_queue,
+                            telemetry,
+                        );
                     }
-                }
-                None => {
-                    self.last_slot_types[slot_idx] = Some(slot.fx_type);
-                }
-                Some(_) => {}
-            }
-
-            let pre_peak = l.abs().max(r.abs());
-            let mut slot_activity = 0.0_f32;
-
-            if slot.enabled && slot.fx_type != FxType::Off {
-                let mut eff = [0.0_f32; 4];
-                let mut eff_eq = [0.0_f32; 4];
-                for p in 0..4 {
-                    let mod_val = mod_offsets
-                        [ModDestination::fx_bus_slot_param(self.bus_idx, slot_idx, p).index()];
-                    eff[p] = (slot.params[p] + mod_val).clamp(0.0, 1.0);
-                    let eq_mod = mod_offsets
-                        [ModDestination::fx_bus_slot_param(self.bus_idx, slot_idx, 4 + p).index()];
-                    eff_eq[p] = (slot.eq_params[p] + eq_mod).clamp(0.0, 1.0);
-                }
-
-                let eff_bands = if slot.fx_type == FxType::MultibandDist {
-                    let mut bands = slot.mb_bands;
-                    for (b, band) in bands.iter_mut().enumerate() {
-                        let base = 4 + b * 4;
-                        band.drive = (band.drive
-                            + mod_offsets[ModDestination::fx_bus_slot_param(
-                                self.bus_idx,
-                                slot_idx,
-                                base,
-                            )
-                            .index()])
-                        .clamp(0.0, 1.0);
-                        band.bias = (band.bias
-                            + mod_offsets[ModDestination::fx_bus_slot_param(
-                                self.bus_idx,
-                                slot_idx,
-                                base + 1,
-                            )
-                            .index()])
-                        .clamp(0.0, 1.0);
-                        band.level = (band.level
-                            + mod_offsets[ModDestination::fx_bus_slot_param(
-                                self.bus_idx,
-                                slot_idx,
-                                base + 2,
-                            )
-                            .index()])
-                        .clamp(0.0, 1.0);
-                        band.mix = (band.mix
-                            + mod_offsets[ModDestination::fx_bus_slot_param(
-                                self.bus_idx,
-                                slot_idx,
-                                base + 3,
-                            )
-                            .index()])
-                        .clamp(0.0, 1.0);
-                    }
-                    bands
-                } else {
-                    slot.mb_bands
-                };
-
-                let stack_count = (slot.stack as usize).clamp(1, MAX_FX_STACK);
-                for stage in self.stages[slot_idx].iter_mut().take(stack_count) {
-                    let (nl, nr, act) = stage.process_type(
-                        slot,
-                        l,
-                        r,
-                        eff,
-                        eff_eq,
-                        &eff_bands,
-                        tempo_bpm,
-                        engine_mode,
-                    );
-                    l = nl;
-                    r = nr;
-                    slot_activity = slot_activity.max(act);
-                }
-            }
-
-            let post_peak = l.abs().max(r.abs());
-            if let Some(tel) = telemetry {
-                let (ref mut acc_pre, ref mut acc_post, ref mut acc_act, ref mut cnt) =
-                    self.scope_accum[slot_idx];
-                *acc_pre = acc_pre.max(pre_peak);
-                *acc_post = acc_post.max(post_peak);
-                *acc_act = acc_act.max(slot_activity);
-                *cnt += 1;
-                if *cnt >= self.scope_samples_per_col {
-                    tel.fx_scope(self.bus_idx, slot_idx)
-                        .push(*acc_pre, *acc_post, *acc_act);
-                    *acc_pre = 0.0;
-                    *acc_post = 0.0;
-                    *acc_act = 0.0;
-                    *cnt = 0;
                 }
             }
         }
@@ -1104,10 +1043,12 @@ impl SubBusProcessor {
     }
 }
 
-/// Complete parallel dual-bus 8-slot FX Rack + dedicated Sub Bus.
+/// Complete parallel 3-bus 30-slot lazy FX Rack + dedicated Sub Bus.
 pub struct FxRackState {
     buses: Box<[FxBusState]>,
     sub_bus: SubBusProcessor,
+    swap_queue: Arc<FxEngineSwapQueue>,
+    sample_rate: f32,
 }
 
 impl FxRackState {
@@ -1119,11 +1060,19 @@ impl FxRackState {
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
             sub_bus: SubBusProcessor::new(sr),
+            swap_queue: Arc::new(FxEngineSwapQueue::new(sr)),
+            sample_rate: sr,
         }
+    }
+
+    pub fn swap_queue(&self) -> Arc<FxEngineSwapQueue> {
+        Arc::clone(&self.swap_queue)
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         let sr = sample_rate.max(1_000.0);
+        self.sample_rate = sr;
+        self.swap_queue.set_sample_rate(sr);
         self.buses[0].set_sample_rate(sr);
         self.buses[1].set_sample_rate(sr);
         self.buses[2].set_sample_rate(sr);
@@ -1135,6 +1084,47 @@ impl FxRackState {
         self.buses[1].reset();
         self.buses[2].reset();
         self.sub_bus.reset();
+    }
+
+    /// Synchronously provisions all active FX engines for the given buses (call off-RT).
+    pub fn prepare_for_buses(&mut self, buses: &[&FxBusParams; NUM_FX_BUSES]) {
+        self.drain_swap_commands(None);
+        self.swap_queue.drain_garbage();
+        let sr = self.sample_rate;
+        for b in 0..NUM_FX_BUSES {
+            self.buses[b].prepare_for_bus(buses[b], sr);
+        }
+        let _ = self.swap_queue.take_provision_masks();
+    }
+
+    /// Synchronously provisions all active FX engines for `rack` (call off-RT).
+    pub fn prepare_for_params(&mut self, rack: &FxRackParams) {
+        self.prepare_for_buses(&[&rack.buses[0], &rack.buses[1], &rack.buses[2]]);
+    }
+
+    #[inline]
+    fn drain_swap_commands(&mut self, telemetry: Option<&ModUiTelemetry>) {
+        while self.swap_queue.can_retire() {
+            let Some(cmd) = self.swap_queue.try_pop_cmd() else {
+                break;
+            };
+            let b = cmd.bus as usize;
+            let s = cmd.slot as usize;
+            let k = cmd.stack_idx as usize;
+            if b < NUM_FX_BUSES && s < NUM_FX_SLOTS && k < MAX_FX_STACK {
+                let prev_ty = self.buses[b].stages[s][k].fx_type();
+                let new_ty = cmd.engine.fx_type();
+                let old = std::mem::replace(&mut self.buses[b].stages[s][k], cmd.engine);
+                self.swap_queue.retire_engine(old);
+                if k == 0 && prev_ty != new_ty {
+                    if let Some(tel) = telemetry {
+                        tel.fx_scope(b, s).clear();
+                    }
+                }
+            } else {
+                self.swap_queue.retire_engine(cmd.engine);
+            }
+        }
     }
 
     #[inline]
@@ -1157,29 +1147,36 @@ impl FxRackState {
         FxFilterStereo::filter_params(mode, slope, p, freq2_norm)
     }
 
+    /// Zero-copy stereo sample processing accepting borrowed bus parameter slices directly.
     #[inline]
     #[allow(clippy::too_many_arguments)]
-    pub fn process_buses_sample(
+    pub fn process_buses_refs_sample(
         &mut self,
         bus_a_in: (f32, f32),
         bus_b_in: (f32, f32),
         sub_in: (f32, f32),
-        rack: &FxRackParams,
+        buses: &[&FxBusParams; NUM_FX_BUSES],
+        sub: &SubBusParams,
+        topology: FxBusTopology,
+        order: &FxRackOrder,
         mod_offsets: &[f32; NUM_MOD_DESTS],
         tempo_bpm: f32,
         telemetry: Option<&ModUiTelemetry>,
     ) -> (f32, f32) {
+        self.drain_swap_commands(telemetry);
+
         let (sub_l, sub_r) =
             self.sub_bus
-                .process_sample(sub_in.0, sub_in.1, &rack.sub, mod_offsets, telemetry);
+                .process_sample(sub_in.0, sub_in.1, sub, mod_offsets, telemetry);
 
         let (al, ar) = self.buses[0].process_sample(
             bus_a_in.0,
             bus_a_in.1,
-            &rack.buses[0],
+            buses[0],
+            order,
             mod_offsets,
             tempo_bpm,
-            rack.engine_mode,
+            &self.swap_queue,
             telemetry,
         );
 
@@ -1190,7 +1187,7 @@ impl FxRackState {
         let mut c_in_l = sub_l;
         let mut c_in_r = sub_r;
 
-        match rack.topology.bus_a_target() {
+        match topology.bus_a_target() {
             0 => {
                 master_l += al;
                 master_r += ar;
@@ -1208,13 +1205,14 @@ impl FxRackState {
         let (bl, br) = self.buses[1].process_sample(
             b_in_l,
             b_in_r,
-            &rack.buses[1],
+            buses[1],
+            order,
             mod_offsets,
             tempo_bpm,
-            rack.engine_mode,
+            &self.swap_queue,
             telemetry,
         );
-        match rack.topology.bus_b_target() {
+        match topology.bus_b_target() {
             0 => {
                 master_l += bl;
                 master_r += br;
@@ -1228,13 +1226,40 @@ impl FxRackState {
         let (cl, cr) = self.buses[2].process_sample(
             c_in_l,
             c_in_r,
-            &rack.buses[2],
+            buses[2],
+            order,
             mod_offsets,
             tempo_bpm,
-            rack.engine_mode,
+            &self.swap_queue,
             telemetry,
         );
 
         (flush_denormal(master_l + cl), flush_denormal(master_r + cr))
+    }
+
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn process_buses_sample(
+        &mut self,
+        bus_a_in: (f32, f32),
+        bus_b_in: (f32, f32),
+        sub_in: (f32, f32),
+        rack: &FxRackParams,
+        mod_offsets: &[f32; NUM_MOD_DESTS],
+        tempo_bpm: f32,
+        telemetry: Option<&ModUiTelemetry>,
+    ) -> (f32, f32) {
+        self.process_buses_refs_sample(
+            bus_a_in,
+            bus_b_in,
+            sub_in,
+            &[&rack.buses[0], &rack.buses[1], &rack.buses[2]],
+            &rack.sub,
+            rack.topology,
+            &rack.order,
+            mod_offsets,
+            tempo_bpm,
+            telemetry,
+        )
     }
 }

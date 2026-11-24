@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
-use crate::fx::{FxRackParams, FxRackState};
-use crate::mod_matrix::{ModDestination, ModUiTelemetry, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS};
+use crate::fx::{FxEngineSwapQueue, FxRackState};
+use crate::mod_matrix::{
+    ModDestination, ModUiTelemetry, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS, NUM_VOICE_MOD_DESTS,
+};
 use crate::modseq::{ModSeqRetrig, ModSeqState};
 use crate::oscillator::EngineMode;
-use crate::voice::{PolyMode, SynthParams, TailVoice, Voice, VoiceBusOutput};
+use crate::voice::{
+    PolyMode, SynthParams, TailVoice, Voice, VoiceBusOutput, VoiceControlOverrides,
+};
 use crate::wavetable::{Wavetable, WavetableBank};
 
 pub const MAX_VOICES: usize = 64;
@@ -139,7 +143,7 @@ pub struct SynthEngine {
     smoothed_master_gain: f32,
     rng_state: u32,
     fx_rack: FxRackState,
-    idle_mod_offsets: [f32; NUM_MOD_DESTS],
+    global_mod_offsets: Box<[f32; NUM_MOD_DESTS]>,
     dc_blocker: DcBlocker,
     safety_limiter: SafetyLimiter,
     meter_peak_l: f32,
@@ -188,7 +192,7 @@ impl SynthEngine {
             smoothed_master_gain: 0.707_106_77,
             rng_state: 0x9E37_79B9,
             fx_rack: FxRackState::new(sr),
-            idle_mod_offsets: [0.0; NUM_MOD_DESTS],
+            global_mod_offsets: Box::new([0.0; NUM_MOD_DESTS]),
             dc_blocker: DcBlocker::new(sr),
             safety_limiter: SafetyLimiter::new(sr),
             meter_peak_l: 0.0,
@@ -256,7 +260,17 @@ impl SynthEngine {
         self.channel_pressure = [0.0; 16];
         self.channel_slide = [0.0; 16];
         self.control_tick_counter = 0;
-        self.idle_mod_offsets = [0.0; NUM_MOD_DESTS];
+        self.global_mod_offsets.fill(0.0);
+    }
+
+    pub fn fx_swap_queue(&self) -> Arc<FxEngineSwapQueue> {
+        self.fx_rack.swap_queue()
+    }
+
+    /// Synchronously provisions all active FX engines for `params` (call off the audio thread).
+    pub fn prepare_fx_for_params(&mut self, params: &SynthParams) {
+        self.fx_rack
+            .prepare_for_buses(&[&params.fx_bus_a, &params.fx_bus_b, &params.fx_bus_c]);
     }
 
     #[inline]
@@ -483,6 +497,7 @@ impl SynthEngine {
                 ch_expr,
                 &mut self.rng_state,
             );
+            self.refresh_global_mod_offsets(params);
             self.last_note = Some(note as f32);
             return;
         }
@@ -530,6 +545,7 @@ impl SynthEngine {
             ch_expr,
             &mut self.rng_state,
         );
+        self.refresh_global_mod_offsets(params);
         self.last_note = Some(note as f32);
     }
 
@@ -709,9 +725,8 @@ impl SynthEngine {
                         );
                     }
                 }
-            } else {
-                self.idle_mod_offsets = self.evaluate_idle_offsets(params);
             }
+            self.refresh_global_mod_offsets(params);
         } else if is_control_tick {
             let dt_tick = (self.control_tick_period as f32) / self.sample_rate;
             let rate_mods = self.current_global_modseq_rate_mods();
@@ -740,9 +755,8 @@ impl SynthEngine {
                         );
                     }
                 }
-            } else {
-                self.idle_mod_offsets = self.evaluate_idle_offsets(params);
             }
+            self.refresh_global_mod_offsets(params);
         }
 
         let mut sum_a_l = 0.0_f32;
@@ -753,17 +767,14 @@ impl SynthEngine {
         let mut sum_sub_r = 0.0_f32;
 
         if any_voices || any_tail {
-            let mut cr_params = *params;
-            for i in 0..4 {
-                cr_params.oscs[i].wt_pos = self.smoothed_wt_pos[i];
-                cr_params.oscs[i].mod_depth = self.smoothed_mod_depth[i];
-                cr_params.oscs[i].warp_amount = self.smoothed_warp_amount[i];
-            }
-            for i in 0..2 {
-                cr_params.filters[i].cutoff_hz = self.smoothed_filter_cutoff[i];
-                cr_params.filters[i].resonance = self.smoothed_filter_res[i];
-                cr_params.filters[i].drive = self.smoothed_filter_drive[i];
-            }
+            let cr_overrides = VoiceControlOverrides {
+                osc_wt_pos: self.smoothed_wt_pos,
+                osc_mod_depth: self.smoothed_mod_depth,
+                osc_warp_amount: self.smoothed_warp_amount,
+                filter_cutoff_hz: self.smoothed_filter_cutoff,
+                filter_res: self.smoothed_filter_res,
+                filter_drive: self.smoothed_filter_drive,
+            };
 
             let pb_semi = self.pitch_bend_smoothed * params.pitch_bend_range;
             let mut accum = |o: VoiceBusOutput| {
@@ -778,7 +789,13 @@ impl SynthEngine {
             if any_voices {
                 for v in &mut self.voices {
                     if v.active {
-                        accum(v.process_sample(&cr_params, tables, self.sample_rate, pb_semi));
+                        accum(v.process_sample_with_overrides(
+                            params,
+                            &cr_overrides,
+                            tables,
+                            self.sample_rate,
+                            pb_semi,
+                        ));
                     }
                 }
             }
@@ -786,7 +803,13 @@ impl SynthEngine {
             if any_tail {
                 for tv in &mut self.tail_voices {
                     if tv.active {
-                        accum(tv.process_sample(&cr_params, tables, self.sample_rate, pb_semi));
+                        accum(tv.process_sample_with_overrides(
+                            params,
+                            &cr_overrides,
+                            tables,
+                            self.sample_rate,
+                            pb_semi,
+                        ));
                     }
                 }
             }
@@ -796,21 +819,17 @@ impl SynthEngine {
             self.publish_telemetry(params);
         }
 
-        // Polyphonic headroom scaling (~-9 dB) -> Parallel FX Buses (Bus A / Bus B / Sub) -> master gain
+        // Polyphonic headroom scaling (~-9 dB) -> Parallel FX Buses (Bus A / Bus B / Bus C + Sub) -> master gain
         const HEADROOM: f32 = 0.35;
-        let fx_mod = Self::current_global_fx_mod_offsets(&self.voices, &self.idle_mod_offsets);
-        let rack = FxRackParams {
-            buses: [params.fx_bus_a, params.fx_bus_b, params.fx_bus_c],
-            sub: params.sub_bus,
-            topology: params.fx_bus_topology,
-            engine_mode: params.engine_mode,
-        };
-        let (fx_l, fx_r) = self.fx_rack.process_buses_sample(
+        let (fx_l, fx_r) = self.fx_rack.process_buses_refs_sample(
             (sum_a_l * HEADROOM, sum_a_r * HEADROOM),
             (sum_b_l * HEADROOM, sum_b_r * HEADROOM),
             (sum_sub_l * HEADROOM, sum_sub_r * HEADROOM),
-            &rack,
-            fx_mod,
+            &[&params.fx_bus_a, &params.fx_bus_b, &params.fx_bus_c],
+            &params.sub_bus,
+            params.fx_bus_topology,
+            &params.fx_rack_order,
+            &self.global_mod_offsets,
             params.tempo_bpm,
             Some(&self.telemetry),
         );
@@ -883,7 +902,7 @@ impl SynthEngine {
     }
 
     #[inline]
-    fn evaluate_idle_offsets(&self, params: &SynthParams) -> [f32; NUM_MOD_DESTS] {
+    fn build_idle_sources(&self, params: &SynthParams) -> [f32; NUM_ACTIVE_SOURCES] {
         let mut idle_sources = [0.0_f32; NUM_ACTIVE_SOURCES];
         for i in 0..4 {
             if params.modseqs[i].retrig == ModSeqRetrig::MonoGlobal {
@@ -896,28 +915,27 @@ impl SynthEngine {
             idle_sources[12 + m] = params.macros[m].clamp(0.0, 1.0);
         }
         idle_sources[20] = self.slide.clamp(0.0, 1.0);
-        let mut idle_offsets = [0.0_f32; NUM_MOD_DESTS];
-        params
-            .mod_matrix
-            .evaluate_destinations(&idle_sources, &mut idle_offsets);
-        idle_offsets
+        idle_sources
     }
 
     #[inline]
-    fn current_global_fx_mod_offsets<'a>(
-        voices: &'a [Voice],
-        idle_mod_offsets: &'a [f32; NUM_MOD_DESTS],
-    ) -> &'a [f32; NUM_MOD_DESTS] {
-        if let Some(v) = voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {
-            return &v.mod_offsets;
+    fn refresh_global_mod_offsets(&mut self, params: &SynthParams) {
+        if let Some(v) = self.voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {
+            params
+                .mod_matrix
+                .evaluate_destinations(&v.last_sources, &mut self.global_mod_offsets);
+            self.global_mod_offsets[..NUM_VOICE_MOD_DESTS].copy_from_slice(&v.mod_offsets);
+        } else {
+            let idle_sources = self.build_idle_sources(params);
+            params
+                .mod_matrix
+                .evaluate_destinations(&idle_sources, &mut self.global_mod_offsets);
         }
-        idle_mod_offsets
     }
 
     #[inline]
     fn current_global_modseq_rate_mods(&self) -> [f32; 4] {
-        let offsets = Self::current_global_fx_mod_offsets(&self.voices, &self.idle_mod_offsets);
-        std::array::from_fn(|i| offsets[ModDestination::modseq_rate(i).index()])
+        std::array::from_fn(|i| self.global_mod_offsets[ModDestination::modseq_rate(i).index()])
     }
 
     fn publish_telemetry(&self, params: &SynthParams) {
@@ -937,7 +955,7 @@ impl SynthEngine {
                 v.mod_envs[2].level(),
             ];
             self.telemetry.store_voice_snapshot(
-                &v.mod_offsets,
+                &self.global_mod_offsets,
                 &v.last_sources,
                 &modseq_phases,
                 &env_levels,
@@ -950,32 +968,22 @@ impl SynthEngine {
                     .store_filter_live(i, fc, mf.resonance, mf.drive, mf.aux);
             }
         } else {
-            let mut idle_sources = [0.0_f32; NUM_ACTIVE_SOURCES];
+            let idle_sources = self.build_idle_sources(params);
             let mut modseq_phases = [0.0_f32; 4];
             for i in 0..4 {
                 if params.modseqs[i].retrig == ModSeqRetrig::MonoGlobal {
-                    idle_sources[4 + i] = self.global_modseq_vals[i];
                     modseq_phases[i] = self.global_modseqs[i].phase;
                 }
             }
-            idle_sources[10] = self.mod_wheel.clamp(0.0, 1.0);
-            idle_sources[11] = self.aftertouch.clamp(0.0, 1.0);
-            for m in 0..8 {
-                idle_sources[12 + m] = params.macros[m].clamp(0.0, 1.0);
-            }
-            idle_sources[20] = self.slide.clamp(0.0, 1.0);
-            let mut idle_offsets = [0.0_f32; NUM_MOD_DESTS];
-            params
-                .mod_matrix
-                .evaluate_destinations(&idle_sources, &mut idle_offsets);
             self.telemetry.store_voice_snapshot(
-                &idle_offsets,
+                &self.global_mod_offsets,
                 &idle_sources,
                 &modseq_phases,
                 &[0.0; 4],
             );
             for (i, flt) in params.filters.iter().enumerate() {
-                let mf = crate::voice::apply_filter_modulation(flt, i, &idle_offsets);
+                let mf =
+                    crate::voice::apply_filter_modulation(flt, i, &self.global_mod_offsets[..]);
                 self.telemetry.store_filter_live(
                     i,
                     mf.cutoff_hz,

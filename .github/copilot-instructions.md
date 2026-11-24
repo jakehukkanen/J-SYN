@@ -9,7 +9,7 @@ Flag any violation of the four sections below as **Blocking**.
 
 ## 1. Real-Time Audio Thread Safety (`crates/j-syn-dsp/`)
 
-- **Zero audio-thread allocations or blocking:** Reject any heap allocation (`Vec`, `String`, `Box`, `format!`, `.collect()`, `Arc::new`), blocking `Mutex`/`RwLock`, filesystem/network I/O, `Instant::now()`, or `println!`/`dbg!` reachable from `SynthEngine::process*`, `Voice::process*`, `TailVoice::process*`, or `FxRackState::process*`.
+- **Zero audio-thread allocations, drops, or blocking:** Reject any heap allocation (`Vec`, `String`, `Box`, `format!`, `.collect()`, `Arc::new`), **heap deallocation/drop** (e.g. dropping `Box`/`ActiveFxEngine` on the audio thread instead of retiring it to a wait-free garbage ring), blocking `Mutex`/`RwLock`, filesystem/network I/O, `Instant::now()`, or `println!`/`dbg!` reachable from `SynthEngine::process*`, `Voice::process*`, `TailVoice::process*`, or `FxRackState::process*`. Any lazy engine provisioning must also work headless via `JSynBgTask` when no GUI is open (for DAW automation / `pluginval --strictness-level 8`).
 - **Numerical & idle hygiene:** Verify denormal flushing (`flush_denormal`), idle sleep recovery (`track_idle`), finite/NaN/Inf guards on feedback paths and resonant filters, and smoothing on discontinuous parameter jumps (gain, pan, mix, pitch).
 - **Sample-rate & block-size invariance:** Increments, one-pole coefficients, delay lengths, and LFO rates must derive from `sample_rate` and produce equivalent results whether processed in `1`-sample or `512`-sample chunks.
 - **Self-contained FX DSP:** Never couple FX DSP behavior in `crates/j-syn-dsp/src/fx/` to global synth flags (like `hq_mode`/`EngineMode`), so standalone plugins in `crates/plugins/*` and `J-SYN` rack slots stay 1:1.
@@ -24,13 +24,16 @@ Flag any violation of the four sections below as **Blocking**.
 
 - **Single 60 Hz timer:** Do not add any new `cx.add_timer(...)` loop; extend the single 60 Hz timer in `crates/j-syn/src/editor/mod_bar.rs`.
 - **Split structural vs. value lenses:** Never emit `UiEvent::ModUiChanged` (`mod_ui_rev` structural rebuild) during continuous knob/slider drags inside `Binding::new(..., UiData::mod_ui_rev, ...)`; emit `UiEvent::ModValChanged` so `cx.capture()` widgets are not destroyed mid-drag.
-- **Vizia CSS & widget traps:**
+- **Vizia CSS, `femtovg` & widget traps:**
   - Never use unsupported Vizia CSS selectors (especially `:focus-within`, which crashes Ableton Live).
   - Never put Unicode arrows (`▲`, `▼`, `◀`, `▶`, `▾`) or child icon views inside `vizia::Button`; use `ArrowButton`, `CrossButton`, or `VectorArrow::caret`.
   - Never apply `.hoverable(false)` to a container wrapping interactive overlay buttons/dropdowns; apply it only to underlying canvas/spacer views.
-  - **Never use `.z_index(...)` inside a `ScrollView`** (Vizia hoists `z_index > 0` views above `ScrollView`'s clip rect).
+  - **Never use `.z_index(...)` inside a `ScrollView`** or anywhere under `crates/j-syn/src/editor/fx_rack/` (Vizia hoists `z_index > 0` views above `ScrollView`'s clip rect; place top-level `SelfDirected` overlays at `crates/j-syn/src/editor/` root).
+  - **Bind a font before `canvas.fill_text(...)`:** `vg::Paint::color(...)` has no default font (`NoFontFound`); always bind via `j_syn_ui::shell::ensure_canvas_bold_font`.
+  - **Avoid sticky CSS `opacity`:** Always pair CSS `opacity < 1.0` modifier classes with an explicit `opacity: 1;` base rule and/or reactive `.opacity(...)` in Rust.
+  - **No clipped bold labels or stale popover heights:** Give bold uppercase single-line headers `>= 18 px` height (or `Auto`), and compute floating overlay clamping heights deterministically from shared layout constants + safety cushion rather than stale magic numbers.
 - **Theme-only colors:** Route all `femtovg` and CSS colors through `theme::current_palette(cx)` / `ThemePalette` (zero hardcoded hex/RGB color literals in `draw()` outside `theme.rs`).
-- **Naming & tokens:** Reference `j_syn_ui::tokens::*` instead of magic layout numbers. Always name slot effect cards **`FX Unit`** (`fx_unit` / `FX_UNIT_*`), never `snapin`.
+- **Naming & tokens:** Reference `j_syn_ui::tokens::*` instead of magic layout numbers. Always name slot effect cards **`FX Unit`** (`fx_unit` / `FX_UNIT_*`), never `snapin`, and avoid third-party synth/plugin brand namedrops in comments, PRs, or docs.
 
 ## 4. Anti-Slopification & Code Quality
 

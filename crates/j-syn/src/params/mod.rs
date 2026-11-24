@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use arc_swap::ArcSwap;
-use j_syn_dsp::{ModMatrixState, ModSeqStepBank};
+use j_syn_dsp::{FxRackOrder, FxType, ModMatrixState, ModSeqStepBank, NUM_FX_BUSES, NUM_FX_SLOTS};
 use nih_plug::params::persist::PersistentField;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
@@ -121,6 +121,9 @@ pub struct JSynPluginParams {
     #[persist = "modseq_steps"]
     pub modseq_steps: PersistedArcSwap<ModSeqStepBank>,
 
+    #[persist = "fx_rack_order"]
+    pub fx_rack_order: PersistedArcSwap<FxRackOrder>,
+
     #[id = "master_vol"]
     pub master_volume_db: FloatParam,
 
@@ -182,7 +185,13 @@ pub struct JSynPluginParams {
     pub modseqs: [ModSeqPluginParams; 4],
 
     #[nested(array, group = "Master FX")]
-    pub fx_slots: [FxSlotPluginParams; 8],
+    pub fx_slots: [Box<FxSlotPluginParams>; NUM_FX_SLOTS],
+
+    #[id = "bus_a_en"]
+    pub bus_a_enabled: BoolParam,
+
+    #[id = "bus_a_mute"]
+    pub bus_a_muted: BoolParam,
 
     #[id = "bus_a_lvl"]
     pub bus_a_level: FloatParam,
@@ -211,11 +220,29 @@ pub struct JSynPluginParams {
 
 impl JSynPluginParams {
     #[inline]
-    pub fn fx_bus_slots(&self, bus: usize) -> &[FxSlotPluginParams; 8] {
+    pub fn fx_bus_slots(&self, bus: usize) -> &[Box<FxSlotPluginParams>; NUM_FX_SLOTS] {
         match bus {
             0 => &self.fx_slots,
             1 => &self.fx_bus_b.slots,
             _ => &self.fx_bus_c.slots,
+        }
+    }
+
+    #[inline]
+    pub fn fx_bus_enabled_param(&self, bus: usize) -> &BoolParam {
+        match bus {
+            0 => &self.bus_a_enabled,
+            1 => &self.fx_bus_b.enabled,
+            _ => &self.fx_bus_c.enabled,
+        }
+    }
+
+    #[inline]
+    pub fn fx_bus_muted_param(&self, bus: usize) -> &BoolParam {
+        match bus {
+            0 => &self.bus_a_muted,
+            1 => &self.fx_bus_b.muted,
+            _ => &self.fx_bus_c.muted,
         }
     }
 
@@ -235,6 +262,32 @@ impl JSynPluginParams {
             1 => &self.fx_bus_b.pan,
             _ => &self.fx_bus_c.pan,
         }
+    }
+
+    /// Computes per-bus bitmasks of slots whose `fx_type != Off`.
+    #[inline]
+    pub fn fx_active_masks(&self) -> [u32; NUM_FX_BUSES] {
+        let mut masks = [0u32; NUM_FX_BUSES];
+        for (bus, mask) in masks.iter_mut().enumerate() {
+            for (slot_idx, slot) in self.fx_bus_slots(bus).iter().enumerate() {
+                if FxType::from(slot.fx_type.value()) != FxType::Off {
+                    *mask |= 1u32 << (slot_idx as u32);
+                }
+            }
+        }
+        masks
+    }
+
+    /// Returns an explicit `FxRackOrder` reconciled with currently active (`fx_type != Off`) slots.
+    pub fn reconciled_fx_rack_order(&self) -> FxRackOrder {
+        let masks = self.fx_active_masks();
+        let mut order = self.fx_rack_order.snapshot();
+        let prev = order;
+        order.reconcile_with_active_mask(masks);
+        if order != prev {
+            self.fx_rack_order.store_value(order);
+        }
+        order
     }
 }
 
@@ -271,6 +324,9 @@ impl Default for JSynPluginParams {
             ])),
             mod_matrix: PersistedArcSwap::default(),
             modseq_steps: PersistedArcSwap::default(),
+            fx_rack_order: PersistedArcSwap(Arc::new(ArcSwap::from_pointee(
+                FxRackOrder::empty_explicit(),
+            ))),
             master_volume_db: FloatParam::new(
                 "Master Vol",
                 0.0,
@@ -336,7 +392,9 @@ impl Default for JSynPluginParams {
             routing: RoutingPluginParams::default(),
             mod_envs: std::array::from_fn(|_| ModEnvPluginParams::default()),
             modseqs: std::array::from_fn(|_| ModSeqPluginParams::default()),
-            fx_slots: std::array::from_fn(FxSlotPluginParams::new_slot),
+            fx_slots: std::array::from_fn(|i| Box::new(FxSlotPluginParams::new_slot(i))),
+            bus_a_enabled: BoolParam::new("Bus A Enabled", true),
+            bus_a_muted: BoolParam::new("Bus A Mute", false),
             bus_a_level: fx_level_param("Bus A Level"),
             bus_a_pan: bipolar_percentage_param("Bus A Pan", 0.0),
             fx_bus_b: Box::new(FxBusPluginParams::new_bus_b()),

@@ -33,11 +33,12 @@ pub use fx::{
     mb_out_gain_db, mb_xover_high_hz, mb_xover_high_norm, mb_xover_low_hz, mb_xover_low_norm,
     sub_cutoff_hz_to_norm, sub_cutoff_norm_to_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
     tube_res_flt_width_oct, tube_res_lfo_rate_hz, tube_res_tune_hz, tube_res_tune_midi,
-    utility_gain_db_from_norm, utility_pan_bipolar, utility_width_from_norm, FxBusParams,
-    FxBusTopology, FxFilterSlope, FxRackParams, FxRackState, FxSlotParams, FxType,
-    MbDistBandParams, SubBusParams, DELAY_SYNC_LABELS, DIOPSER_STAGE_COUNTS, MAX_FX_STACK,
-    MB_BAND_LEVEL_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM,
-    NUM_FX_BUSES, NUM_FX_SLOTS, UTILITY_WIDTH_DEFAULT_NORM,
+    utility_gain_db_from_norm, utility_pan_bipolar, utility_width_from_norm, ActiveFxEngine,
+    FxBusParams, FxBusTopology, FxEngineSwapQueue, FxFilterSlope, FxRackOrder, FxRackParams,
+    FxRackState, FxSlotParams, FxSwapCommand, FxType, MbDistBandParams, SubBusParams,
+    DELAY_SYNC_LABELS, DIOPSER_STAGE_COUNTS, MAX_FX_STACK, MB_BAND_LEVEL_DEFAULT_NORM,
+    MB_XOVER_HIGH_DEFAULT_NORM, MB_XOVER_LOW_DEFAULT_NORM, NUM_FX_BUSES, NUM_FX_SLOTS,
+    UTILITY_WIDTH_DEFAULT_NORM,
 };
 pub use insert::{
     evaluate_insert_curve, DirectDest, FilterBusDest, FilterRouting, InsertMode, InsertParams,
@@ -45,7 +46,8 @@ pub use insert::{
 };
 pub use mod_matrix::{
     FxScopeRing, ModDestination, ModMatrixSource, ModMatrixState, ModSlot, ModUiTelemetry,
-    FX_SCOPE_LEN, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS, NUM_MOD_SLOTS,
+    BASE_MOD_DESTINATIONS, FX_SCOPE_LEN, NUM_ACTIVE_SOURCES, NUM_FX_MOD_DESTS, NUM_MOD_DESTS,
+    NUM_MOD_SLOTS, NUM_VOICE_MOD_DESTS,
 };
 pub use filter::{cutoff_hz_to_norm, cutoff_norm_to_hz};
 pub use modseq::{
@@ -62,7 +64,7 @@ pub use oscillator::{
     EngineMode, ModOrder, ModSource, ModType, OscParams, OscPitchMode, OscillatorState, WarpMode,
     MAX_UNISON,
 };
-pub use voice::{PolyMode, SynthParams, TailVoice, Voice, VoiceBusOutput};
+pub use voice::{PolyMode, SynthParams, TailVoice, Voice, VoiceBusOutput, VoiceControlOverrides};
 pub use wavetable::{
     FactoryWavetable, Wavetable, WavetableBank, FRAME_LEN, MAX_FRAMES, NUM_FACTORY_WAVETABLES,
     NUM_MIP_LEVELS,

@@ -20,7 +20,7 @@
 use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::{ModMatrixSource, ModUiTelemetry};
-use j_syn_dsp::WavetableBank;
+use j_syn_dsp::{FxEngineSwapQueue, WavetableBank};
 use nih_plug::prelude::{Editor, GuiContext};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
@@ -32,6 +32,8 @@ use crate::JSynPluginParams;
 mod controls;
 mod context_menu;
 mod filter_panel;
+mod fx_drag_overlay;
+mod fx_picker_menu;
 mod fx_rack;
 mod fx_scopes;
 mod header_bar;
@@ -53,6 +55,10 @@ use context_menu::build_mod_context_menu_overlay;
 use controls::build_center_tab_button;
 use header_bar::build_header_bar;
 use filter_panel::build_dual_filter_section;
+use fx_drag_overlay::FxDragOverlay;
+use fx_picker_menu::{
+    build_fx_overlay_menu, FxOverlayMenuKind, FxOverlayMenuState, FxPickerTarget,
+};
 use fx_rack::build_three_lane_fx_rack;
 use insert_panel::build_insert_panel;
 use macros_tab::build_macros_tab;
@@ -159,6 +165,10 @@ pub(crate) enum UiEvent {
     ToggleModMenuPicker,
     HideModContextMenu,
     ModMenuRefresh,
+    ShowFxPicker(usize, FxPickerTarget, f32, f32),
+    ShowFxUnitMenu(usize, usize, usize, f32, f32),
+    ShowFxLaneMenu(usize, f32, f32),
+    HideFxOverlayMenu,
 }
 
 #[derive(Lens)]
@@ -185,6 +195,7 @@ pub(crate) struct UiData {
     pub presets_dir_display: String,
     pub wavetables_dir_display: String,
     pub mod_menu: ModContextMenuState,
+    pub fx_menu: FxOverlayMenuState,
 }
 
 impl Model for UiData {
@@ -201,6 +212,7 @@ impl Model for UiData {
             }
             UiKitEvent::ShowModContextMenu(dest, x, y) => {
                 cx.emit(UiKitEvent::HideTooltip);
+                self.fx_menu.kind = FxOverlayMenuKind::None;
                 self.mod_menu = ModContextMenuState {
                     visible: true,
                     dest_idx: dest.index(),
@@ -215,6 +227,7 @@ impl Model for UiData {
             }
             UiKitEvent::ShowActionModContextMenu(dest, x, y) => {
                 cx.emit(UiKitEvent::HideTooltip);
+                self.fx_menu.kind = FxOverlayMenuKind::None;
                 self.mod_menu = ModContextMenuState {
                     visible: true,
                     dest_idx: dest.index(),
@@ -229,6 +242,7 @@ impl Model for UiData {
             }
             UiKitEvent::ShowPitchContextMenu(osc_idx, dest, x, y) => {
                 cx.emit(UiKitEvent::HideTooltip);
+                self.fx_menu.kind = FxOverlayMenuKind::None;
                 self.mod_menu = ModContextMenuState {
                     visible: true,
                     dest_idx: dest.index(),
@@ -253,7 +267,9 @@ impl Model for UiData {
                     MainViewMode::Settings => 3,
                 });
                 cx.emit(UiKitEvent::HideTooltip);
+                self.fx_menu.kind = FxOverlayMenuKind::None;
                 self.mod_ui.clear_drag();
+                self.mod_ui.fx_drag.cancel_drag();
                 meta.consume();
             }
             UiEvent::SelectTab(tab) => {
@@ -316,6 +332,8 @@ impl Model for UiData {
                     &self.gui_context,
                     &self.bank,
                 );
+                crate::presets::provision_active_fx(&self.params, &self.mod_ui.fx_swap_queue);
+                self.fx_menu.kind = FxOverlayMenuKind::None;
                 self.current_preset_name = "INIT".to_string();
                 self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
                 meta.consume();
@@ -372,6 +390,7 @@ impl Model for UiData {
                                 patch.name.clone()
                             };
                             let _ = patch.apply(&params, &gui_context, &bank);
+                            crate::presets::provision_active_fx(&params, &mod_ui.fx_swap_queue);
                             mod_ui.notify_external_sync(Some(name));
                         }
                     }
@@ -381,6 +400,8 @@ impl Model for UiData {
             UiEvent::LoadPresetPath(path, name) => {
                 if let Ok(patch) = crate::presets::JSynPatch::load_from_file(path) {
                     self.macro_names = patch.apply(&self.params, &self.gui_context, &self.bank);
+                    crate::presets::provision_active_fx(&self.params, &self.mod_ui.fx_swap_queue);
+                    self.fx_menu.kind = FxOverlayMenuKind::None;
                     self.current_preset_name = name.clone();
                     self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
                 }
@@ -410,6 +431,11 @@ impl Model for UiData {
                     if let Ok(patch) = crate::presets::JSynPatch::load_from_file(&target.path) {
                         self.macro_names =
                             patch.apply(&self.params, &self.gui_context, &self.bank);
+                        crate::presets::provision_active_fx(
+                            &self.params,
+                            &self.mod_ui.fx_swap_queue,
+                        );
+                        self.fx_menu.kind = FxOverlayMenuKind::None;
                         self.current_preset_name = target.name.clone();
                         self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
                     }
@@ -542,6 +568,50 @@ impl Model for UiData {
             }
             UiEvent::ModMenuRefresh => {
                 self.mod_menu.rev = self.mod_menu.rev.wrapping_add(1);
+                meta.consume();
+            }
+            UiEvent::ShowFxPicker(bus, target, x, y) => {
+                cx.emit(UiKitEvent::HideTooltip);
+                self.mod_menu.visible = false;
+                self.fx_menu = FxOverlayMenuState {
+                    kind: FxOverlayMenuKind::Picker {
+                        bus: *bus,
+                        target: *target,
+                    },
+                    anchor_x: *x,
+                    anchor_y: *y,
+                    rev: self.fx_menu.rev.wrapping_add(1),
+                };
+                meta.consume();
+            }
+            UiEvent::ShowFxUnitMenu(bus, pos, slot, x, y) => {
+                cx.emit(UiKitEvent::HideTooltip);
+                self.mod_menu.visible = false;
+                self.fx_menu = FxOverlayMenuState {
+                    kind: FxOverlayMenuKind::UnitContext {
+                        bus: *bus,
+                        pos: *pos,
+                        slot: *slot,
+                    },
+                    anchor_x: *x,
+                    anchor_y: *y,
+                    rev: self.fx_menu.rev.wrapping_add(1),
+                };
+                meta.consume();
+            }
+            UiEvent::ShowFxLaneMenu(bus, x, y) => {
+                cx.emit(UiKitEvent::HideTooltip);
+                self.mod_menu.visible = false;
+                self.fx_menu = FxOverlayMenuState {
+                    kind: FxOverlayMenuKind::LaneContext { bus: *bus },
+                    anchor_x: *x,
+                    anchor_y: *y,
+                    rev: self.fx_menu.rev.wrapping_add(1),
+                };
+                meta.consume();
+            }
+            UiEvent::HideFxOverlayMenu => {
+                self.fx_menu.kind = FxOverlayMenuKind::None;
                 meta.consume();
             }
         });
@@ -686,6 +756,7 @@ pub fn build_j_syn_ui(
     gui_context: Arc<dyn GuiContext>,
     bank: Arc<WavetableBank>,
     telemetry: Arc<ModUiTelemetry>,
+    fx_swap_queue: Arc<FxEngineSwapQueue>,
     initial_theme: theme::ThemePalette,
     initial_scale_pct: u32,
     persist_settings: bool,
@@ -708,7 +779,7 @@ pub fn build_j_syn_ui(
     }
     shell.install(cx);
 
-    let mod_ui = Arc::new(ModUiState::new(params.clone(), telemetry));
+    let mod_ui = Arc::new(ModUiState::new(params.clone(), telemetry, fx_swap_queue));
     let initial_macro_names = params
         .macro_names
         .lock()
@@ -735,6 +806,7 @@ pub fn build_j_syn_ui(
         presets_dir_display: format_dir_display(initial_cfg.presets_dir.as_deref()),
         wavetables_dir_display: format_dir_display(initial_cfg.wavetables_dir.as_deref()),
         mod_menu: ModContextMenuState::default(),
+        fx_menu: FxOverlayMenuState::default(),
     }
     .build(cx);
 
@@ -743,16 +815,31 @@ pub fn build_j_syn_ui(
     let gui_ctx_for_ui = gui_context;
     let params_menu = params_for_ui.clone();
     let gui_ctx_menu = gui_ctx_for_ui.clone();
+    let params_fx_menu = params_for_ui.clone();
+    let gui_ctx_fx_menu = gui_ctx_for_ui.clone();
     let mod_ui_for_ui = mod_ui.clone();
+    let mod_ui_fx_menu = mod_ui.clone();
+    let mod_ui_esc = mod_ui.clone();
+    let fx_drag_overlay_state = mod_ui.fx_drag.clone();
 
     VStack::new(cx, move |cx| {
-        // Prevent Spacebar (e.g. DAW transport play/stop) from triggering focused buttons.
-        cx.add_listener(|_view: &mut VStack, _cx, event| {
+        // Prevent Spacebar (e.g. DAW transport play/stop) from triggering focused buttons,
+        // and let Esc cancel active FX drags or close floating menus.
+        cx.add_listener(move |_view: &mut VStack, cx, event| {
             event.map(|window_event, meta| match window_event {
                 WindowEvent::KeyDown(Code::Space, _)
                 | WindowEvent::KeyUp(Code::Space, _)
                 | WindowEvent::Press { mouse: false }
                 | WindowEvent::PressDown { mouse: false } => {
+                    meta.consume();
+                }
+                WindowEvent::KeyDown(Code::Escape, _) => {
+                    if mod_ui_esc.fx_drag.cancel_drag() {
+                        cx.emit(UiEvent::ModValChanged);
+                        cx.needs_redraw();
+                    }
+                    cx.emit(UiEvent::HideFxOverlayMenu);
+                    cx.emit(UiEvent::HideModContextMenu);
                     meta.consume();
                 }
                 _ => {}
@@ -824,6 +911,8 @@ pub fn build_j_syn_ui(
         j_syn_ui::build_tooltip_overlay(cx, BASE_WIDTH as f32, BASE_HEIGHT as f32);
 
         build_mod_context_menu_overlay(cx, mod_ui, params_menu, gui_ctx_menu);
+        build_fx_overlay_menu(cx, mod_ui_fx_menu, params_fx_menu, gui_ctx_fx_menu);
+        FxDragOverlay::new(cx, fx_drag_overlay_state);
         })
         .class("plugin-root")
         .width(Stretch(1.0))
@@ -835,6 +924,7 @@ pub(crate) fn create(
     editor_state: Arc<ViziaState>,
     bank: Arc<WavetableBank>,
     telemetry: Arc<ModUiTelemetry>,
+    fx_swap_queue: Arc<FxEngineSwapQueue>,
 ) -> Option<Box<dyn Editor>> {
     create_vizia_editor(editor_state, ViziaTheming::Builtin, move |cx, gui_context| {
         let initial_cfg = crate::presets::JSynConfig::load();
@@ -846,6 +936,7 @@ pub(crate) fn create(
             gui_context,
             bank.clone(),
             telemetry.clone(),
+            fx_swap_queue.clone(),
             initial_theme,
             initial_scale_pct,
             true,

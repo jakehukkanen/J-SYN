@@ -4,7 +4,8 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use j_syn_dsp::{
-    EngineMode, FxBusParams, PolyMode, SynthEngine, SynthParams, Wavetable, WavetableBank,
+    EngineMode, FxBusParams, FxRackOrder, FxType, PolyMode, SynthEngine, SynthParams, Wavetable,
+    WavetableBank, NUM_FX_BUSES, NUM_FX_SLOTS,
 };
 use nih_plug::prelude::*;
 
@@ -14,10 +15,20 @@ pub mod presets;
 
 pub use params::*;
 
+pub enum JSynBgTask {
+    ProvisionFx {
+        bus: usize,
+        slot: usize,
+        fx_type: FxType,
+        stack: usize,
+    },
+}
+
 pub struct JSynPlugin {
     params: Arc<JSynPluginParams>,
     engine: Box<SynthEngine>,
     wavetable_bank: Arc<WavetableBank>,
+    scratch_params: Box<SynthParams>,
 }
 
 impl Default for JSynPlugin {
@@ -26,11 +37,93 @@ impl Default for JSynPlugin {
             params: Arc::new(JSynPluginParams::default()),
             engine: Box::new(SynthEngine::new(44100.0)),
             wavetable_bank: Arc::new(WavetableBank::new()),
+            scratch_params: Box::new(SynthParams::default()),
         }
     }
 }
 
 impl JSynPlugin {
+    fn populate_scratch_params(&mut self, tempo_bpm: f32) {
+        let mod_matrix = nih_plug::util::permit_alloc(|| self.params.mod_matrix.snapshot());
+        let modseq_steps = nih_plug::util::permit_alloc(|| self.params.modseq_steps.snapshot());
+        let mut fx_rack_order =
+            nih_plug::util::permit_alloc(|| self.params.fx_rack_order.snapshot());
+        let active_masks = self.params.fx_active_masks();
+        if !fx_rack_order.explicit || order_masks(&fx_rack_order) != active_masks {
+            fx_rack_order.reconcile_with_active_mask(active_masks);
+        }
+
+        let sp = &mut *self.scratch_params;
+        sp.master_gain = util::db_to_gain(self.params.master_volume_db.value());
+        sp.engine_mode = if self.params.hq_mode.value() {
+            EngineMode::Hq
+        } else {
+            EngineMode::Vintage2007
+        };
+        sp.poly_mode = if self.params.mono_legato.value() {
+            PolyMode::MonoLegato
+        } else {
+            PolyMode::Poly
+        };
+        sp.glide_ms = self.params.glide_ms.value();
+        sp.pitch_bend_range = self.params.pitch_bend_range.value() as f32;
+        sp.mpe_enabled = self.params.mpe_enabled.value();
+        sp.mpe_pitch_bend_range = self.params.mpe_pitch_bend_range.value() as f32;
+        sp.amp_attack_s = self.params.amp_attack.value();
+        sp.amp_decay_s = self.params.amp_decay.value();
+        sp.amp_sustain = self.params.amp_sustain.value();
+        sp.amp_release_s = self.params.amp_release.value();
+        for i in 0..4 {
+            sp.oscs[i] = self.params.oscs[i].to_dsp();
+        }
+        sp.noise = self.params.noise.to_dsp();
+        sp.filters[0] = self.params.filters[0].to_dsp();
+        sp.filters[1] = self.params.filters[1].to_dsp();
+        sp.routing = self.params.routing.to_dsp();
+        for i in 0..3 {
+            sp.mod_envs[i] = self.params.mod_envs[i].to_dsp();
+        }
+        let swing = self.params.modseq_swing.value();
+        for i in 0..4 {
+            sp.modseqs[i] = self.params.modseqs[i].to_dsp(swing);
+        }
+        sp.modseq_steps = modseq_steps;
+        sp.mod_matrix = mod_matrix;
+        for i in 0..8 {
+            sp.macros[i] = self.params.macros[i].value.value();
+        }
+        populate_fx_bus(
+            &mut sp.fx_bus_a,
+            &self.params.fx_slots,
+            self.params.bus_a_enabled.value(),
+            self.params.bus_a_muted.value(),
+            self.params.bus_a_level.value(),
+            self.params.bus_a_pan.value(),
+        );
+        populate_fx_bus(
+            &mut sp.fx_bus_b,
+            &self.params.fx_bus_b.slots,
+            self.params.fx_bus_b.enabled.value(),
+            self.params.fx_bus_b.muted.value(),
+            self.params.fx_bus_b.level.value(),
+            self.params.fx_bus_b.pan.value(),
+        );
+        populate_fx_bus(
+            &mut sp.fx_bus_c,
+            &self.params.fx_bus_c.slots,
+            self.params.fx_bus_c.enabled.value(),
+            self.params.fx_bus_c.muted.value(),
+            self.params.fx_bus_c.level.value(),
+            self.params.fx_bus_c.pan.value(),
+        );
+        sp.fx_bus_topology = self.params.fx_bus_topology.value().into();
+        sp.fx_rack_order = fx_rack_order;
+        sp.sub_bus = self.params.sub_bus.to_dsp();
+        sp.tempo_bpm = tempo_bpm;
+        sp.dc_blocker = self.params.dc_blocker.value();
+        sp.master_limiter = self.params.master_limiter.value();
+    }
+
     fn reload_persisted_wavetables(&self) {
         let paths = {
             let guard = self.params.wavetable_paths.lock().unwrap();
@@ -68,10 +161,24 @@ impl Plugin for JSynPlugin {
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
-    type BackgroundTask = ();
+    type BackgroundTask = JSynBgTask;
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+
+    fn task_executor(&mut self) -> TaskExecutor<Self> {
+        let swap_queue = self.engine.fx_swap_queue();
+        Box::new(move |task| match task {
+            JSynBgTask::ProvisionFx {
+                bus,
+                slot,
+                fx_type,
+                stack,
+            } => {
+                swap_queue.provision_slot(bus, slot, fx_type, stack);
+            }
+        })
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
@@ -80,6 +187,7 @@ impl Plugin for JSynPlugin {
             self.params.editor_state.clone(),
             self.wavetable_bank.clone(),
             self.engine.telemetry(),
+            self.engine.fx_swap_queue(),
         )
     }
 
@@ -91,6 +199,9 @@ impl Plugin for JSynPlugin {
     ) -> bool {
         self.engine.set_sample_rate(buffer_config.sample_rate);
         self.engine.reset();
+        let _ = self.params.reconciled_fx_rack_order();
+        self.populate_scratch_params(120.0);
+        self.engine.prepare_fx_for_params(&self.scratch_params);
         self.reload_persisted_wavetables();
         true
     }
@@ -110,80 +221,9 @@ impl Plugin for JSynPlugin {
             return ProcessStatus::Normal;
         }
 
-        let mod_matrix = nih_plug::util::permit_alloc(|| self.params.mod_matrix.snapshot());
-        let modseq_steps = nih_plug::util::permit_alloc(|| self.params.modseq_steps.snapshot());
         let tempo_bpm = context.transport().tempo.unwrap_or(120.0) as f32;
-
-        let synth_params = SynthParams {
-            master_gain: util::db_to_gain(self.params.master_volume_db.value()),
-            engine_mode: if self.params.hq_mode.value() {
-                EngineMode::Hq
-            } else {
-                EngineMode::Vintage2007
-            },
-            poly_mode: if self.params.mono_legato.value() {
-                PolyMode::MonoLegato
-            } else {
-                PolyMode::Poly
-            },
-            glide_ms: self.params.glide_ms.value(),
-            pitch_bend_range: self.params.pitch_bend_range.value() as f32,
-            mpe_enabled: self.params.mpe_enabled.value(),
-            mpe_pitch_bend_range: self.params.mpe_pitch_bend_range.value() as f32,
-            amp_attack_s: self.params.amp_attack.value(),
-            amp_decay_s: self.params.amp_decay.value(),
-            amp_sustain: self.params.amp_sustain.value(),
-            amp_release_s: self.params.amp_release.value(),
-            oscs: [
-                self.params.oscs[0].to_dsp(),
-                self.params.oscs[1].to_dsp(),
-                self.params.oscs[2].to_dsp(),
-                self.params.oscs[3].to_dsp(),
-            ],
-            noise: self.params.noise.to_dsp(),
-            filters: [
-                self.params.filters[0].to_dsp(),
-                self.params.filters[1].to_dsp(),
-            ],
-            routing: self.params.routing.to_dsp(),
-            mod_envs: [
-                self.params.mod_envs[0].to_dsp(),
-                self.params.mod_envs[1].to_dsp(),
-                self.params.mod_envs[2].to_dsp(),
-            ],
-            modseqs: {
-                let swing = self.params.modseq_swing.value();
-                [
-                    self.params.modseqs[0].to_dsp(swing),
-                    self.params.modseqs[1].to_dsp(swing),
-                    self.params.modseqs[2].to_dsp(swing),
-                    self.params.modseqs[3].to_dsp(swing),
-                ]
-            },
-            modseq_steps,
-            mod_matrix,
-            macros: std::array::from_fn(|i| self.params.macros[i].value.value()),
-            fx_bus_a: FxBusParams {
-                slots: std::array::from_fn(|i| self.params.fx_slots[i].to_dsp()),
-                level: self.params.bus_a_level.value(),
-                pan: self.params.bus_a_pan.value(),
-            },
-            fx_bus_b: FxBusParams {
-                slots: std::array::from_fn(|i| self.params.fx_bus_b.slots[i].to_dsp()),
-                level: self.params.fx_bus_b.level.value(),
-                pan: self.params.fx_bus_b.pan.value(),
-            },
-            fx_bus_c: FxBusParams {
-                slots: std::array::from_fn(|i| self.params.fx_bus_c.slots[i].to_dsp()),
-                level: self.params.fx_bus_c.level.value(),
-                pan: self.params.fx_bus_c.pan.value(),
-            },
-            fx_bus_topology: self.params.fx_bus_topology.value().into(),
-            sub_bus: self.params.sub_bus.to_dsp(),
-            tempo_bpm,
-            dc_blocker: self.params.dc_blocker.value(),
-            master_limiter: self.params.master_limiter.value(),
-        };
+        self.populate_scratch_params(tempo_bpm);
+        let synth_params = &*self.scratch_params;
 
         let choices = [
             self.params.oscs[0].wt_select.value(),
@@ -262,7 +302,7 @@ impl Plugin for JSynPlugin {
                         ..
                     } => {
                         self.engine
-                            .note_on(channel, note, velocity, voice_id, &synth_params);
+                            .note_on(channel, note, velocity, voice_id, synth_params);
                     }
                     NoteEvent::NoteOff {
                         channel,
@@ -271,7 +311,7 @@ impl Plugin for JSynPlugin {
                         ..
                     } => {
                         self.engine
-                            .note_off(channel, note, voice_id, &synth_params);
+                            .note_off(channel, note, voice_id, synth_params);
                     }
                     NoteEvent::Choke {
                         channel,
@@ -283,7 +323,7 @@ impl Plugin for JSynPlugin {
                     }
                     NoteEvent::MidiPitchBend { channel, value, .. } => {
                         self.engine
-                            .set_pitch_bend_ch(channel, value, &synth_params);
+                            .set_pitch_bend_ch(channel, value, synth_params);
                     }
                     NoteEvent::MidiCC {
                         channel, cc, value, ..
@@ -293,7 +333,7 @@ impl Plugin for JSynPlugin {
                                 self.engine.set_mod_wheel(value);
                             }
                         } else if cc == 74 {
-                            self.engine.set_slide_ch(channel, value, &synth_params);
+                            self.engine.set_slide_ch(channel, value, synth_params);
                         } else if cc == 120 && value >= 0.0 {
                             self.engine.all_sound_off();
                         } else if cc == 123 && value >= 0.0 {
@@ -304,7 +344,7 @@ impl Plugin for JSynPlugin {
                         channel, pressure, ..
                     } => {
                         self.engine
-                            .set_aftertouch_ch(channel, pressure, &synth_params);
+                            .set_aftertouch_ch(channel, pressure, synth_params);
                     }
                     NoteEvent::PolyPressure {
                         voice_id,
@@ -342,12 +382,64 @@ impl Plugin for JSynPlugin {
                 next_event = context.next_event();
             }
 
-            let (l, r) = self.engine.process_sample_with_tables(&synth_params, tables);
+            let (l, r) = self.engine.process_sample_with_tables(synth_params, tables);
             left[sample_idx] = l;
             right[sample_idx] = r;
         }
 
+        // Dispatch background provisioning for any slot whose type/stack changed via host automation
+        let prov_masks = self.engine.fx_swap_queue().take_provision_masks();
+        for (bus, &mask) in prov_masks.iter().enumerate() {
+            if mask == 0 {
+                continue;
+            }
+            let slots = self.params.fx_bus_slots(bus);
+            for (slot, slot_params) in slots.iter().enumerate() {
+                if ((mask >> (slot as u32)) & 1) != 0 {
+                    let fx_type = FxType::from(slot_params.fx_type.value());
+                    let stack = slot_params.stack.value().clamp(1, 4) as usize;
+                    context.execute_background(JSynBgTask::ProvisionFx {
+                        bus,
+                        slot,
+                        fx_type,
+                        stack,
+                    });
+                }
+            }
+        }
+
         ProcessStatus::Normal
+    }
+}
+
+#[inline]
+fn order_masks(order: &FxRackOrder) -> [u32; NUM_FX_BUSES] {
+    let mut masks = [0u32; NUM_FX_BUSES];
+    for (b, mask) in masks.iter_mut().enumerate() {
+        for &slot in order.active_slots(b) {
+            if (slot as usize) < NUM_FX_SLOTS {
+                *mask |= 1u32 << (slot as u32);
+            }
+        }
+    }
+    masks
+}
+
+#[inline]
+fn populate_fx_bus(
+    dst: &mut FxBusParams,
+    slots: &[Box<FxSlotPluginParams>; NUM_FX_SLOTS],
+    enabled: bool,
+    muted: bool,
+    level: f32,
+    pan: f32,
+) {
+    dst.enabled = enabled;
+    dst.muted = muted;
+    dst.level = level;
+    dst.pan = pan;
+    for (d, s) in dst.slots.iter_mut().zip(slots.iter()) {
+        *d = s.to_dsp();
     }
 }
 
