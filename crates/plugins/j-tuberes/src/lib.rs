@@ -7,7 +7,7 @@ use std::sync::Arc;
 use j_syn_dsp::fx::tube_resonator::TubeResonatorStereo;
 use j_syn_dsp::mod_matrix::FxScopeRing;
 use j_syn_dsp::{FxSlotParams, FxType, MAX_FX_STACK};
-use j_syn_ui::fx_units::format_fx_slot_param_value;
+use j_syn_ui::fx_units::fx_slot_float_param;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
 
@@ -59,57 +59,54 @@ impl Default for JTubeResParams {
     fn default() -> Self {
         let main_defs = FxSlotParams::default_params_for_type(FxType::TubeResonator);
         let lfo_defs = FxSlotParams::default_eq_params_for_type(FxType::TubeResonator);
-        let fmt_main = |idx: usize| {
-            Arc::new(move |v: f32| {
-                format_fx_slot_param_value(FxType::TubeResonator, false, 0, idx, v)
-            })
-        };
-        let fmt_lfo = |idx: usize| {
-            Arc::new(move |v: f32| {
-                format_fx_slot_param_value(FxType::TubeResonator, true, 0, idx, v)
-            })
-        };
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
             stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: MAX_FX_STACK as i32 }),
-            tune: FloatParam::new("Tune", main_defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_main(0)),
+            tune: fx_slot_float_param("Tune", main_defs[0], FxType::TubeResonator, false, 0, 0),
             flt_en: BoolParam::new("Pre-Filter", true),
-            flt_freq: FloatParam::new(
+            flt_freq: fx_slot_float_param(
                 "Filter Freq",
                 main_defs[1],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt_main(1)),
-            flt_width: FloatParam::new(
+                FxType::TubeResonator,
+                false,
+                0,
+                1,
+            ),
+            flt_width: fx_slot_float_param(
                 "Filter Width",
                 main_defs[2],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt_main(2)),
-            mix: FloatParam::new("Mix", main_defs[3], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_main(3)),
-            lfo_amt: FloatParam::new(
+                FxType::TubeResonator,
+                false,
+                0,
+                2,
+            ),
+            mix: fx_slot_float_param("Mix", main_defs[3], FxType::TubeResonator, false, 0, 3),
+            lfo_amt: fx_slot_float_param(
                 "LFO Amount",
                 lfo_defs[0],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt_lfo(0)),
-            lfo_spd: FloatParam::new(
+                FxType::TubeResonator,
+                true,
+                0,
+                0,
+            ),
+            lfo_spd: fx_slot_float_param(
                 "LFO Speed",
                 lfo_defs[1],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt_lfo(1)),
-            feedback: FloatParam::new(
+                FxType::TubeResonator,
+                true,
+                0,
+                1,
+            ),
+            feedback: fx_slot_float_param(
                 "Feedback",
                 lfo_defs[2],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt_lfo(2)),
-            damp: FloatParam::new("Damping", lfo_defs[3], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_lfo(3)),
+                FxType::TubeResonator,
+                true,
+                0,
+                2,
+            ),
+            damp: fx_slot_float_param("Damping", lfo_defs[3], FxType::TubeResonator, true, 0, 3),
             dirty: BoolParam::new("Dirty LFO", true),
         }
     }
@@ -281,6 +278,7 @@ mod tests {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
         assert_eq!(seen.len(), 12);
+        j_syn_ui::fx_units::assert_all_params_text_roundtrip(&params);
     }
 
     #[test]

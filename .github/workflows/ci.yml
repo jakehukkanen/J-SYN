@@ -63,7 +63,7 @@ jobs:
                 echo "Skipping heavy CI: docs/instructions-only PR."
                 SKIP="true"
               fi
-              if echo "$CHANGED_FILES" | grep -qE '^(crates/plugins/|crates/j-syn-ui/src/fx_units/)'; then
+              if echo "$CHANGED_FILES" | grep -qE '^(crates/plugins/|crates/j-syn-ui/src/fx_units/|crates/j-syn-dsp/src/fx/|\.github/workflows/ci\.yml$)'; then
                 VALIDATE_STANDALONE="true"
               fi
               ADDED_RS="$(git diff --diff-filter=A --name-only "$BASE_SHA" "$HEAD_SHA" | grep -E '\.rs$' | tr '\n' ' ' || true)"

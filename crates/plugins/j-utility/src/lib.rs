@@ -6,10 +6,8 @@ use std::sync::Arc;
 
 use j_syn_dsp::fx::utility::UtilityStereo;
 use j_syn_dsp::mod_matrix::FxScopeRing;
-use j_syn_dsp::{
-    format_utility_pan, utility_gain_db_from_norm, utility_width_from_norm, MAX_FX_STACK,
-    UTILITY_WIDTH_DEFAULT_NORM,
-};
+use j_syn_dsp::{FxType, MAX_FX_STACK, UTILITY_WIDTH_DEFAULT_NORM};
+use j_syn_ui::fx_units::fx_slot_float_param;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
 
@@ -51,30 +49,17 @@ impl Default for JUtilityParams {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
             stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: MAX_FX_STACK as i32 }),
-            width: FloatParam::new(
+            width: fx_slot_float_param(
                 "Width",
                 UTILITY_WIDTH_DEFAULT_NORM,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(Arc::new(|v| {
-                format!("{:.0}%", utility_width_from_norm(v) * 100.0)
-            })),
-            pan: FloatParam::new("Balance", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(format_utility_pan)),
-            gain: FloatParam::new("Gain", 0.5, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| {
-                    let db = utility_gain_db_from_norm(v);
-                    let clean = if db.abs() < 0.05 { 0.0 } else { db };
-                    if clean == 0.0 {
-                        "0.0 dB".to_string()
-                    } else {
-                        format!("{clean:+.1} dB")
-                    }
-                })),
-            mix: FloatParam::new("Mix", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_unit(" %")
-                .with_value_to_string(formatters::v2s_f32_percentage(0))
-                .with_string_to_value(formatters::s2v_f32_percentage()),
+                FxType::Utility,
+                false,
+                0,
+                0,
+            ),
+            pan: fx_slot_float_param("Balance", 0.5, FxType::Utility, false, 0, 1),
+            gain: fx_slot_float_param("Gain", 0.5, FxType::Utility, false, 0, 2),
+            mix: fx_slot_float_param("Mix", 1.0, FxType::Utility, false, 0, 3),
             inv_l: BoolParam::new("Invert Left", false),
             inv_r: BoolParam::new("Invert Right", false),
         }
@@ -247,6 +232,7 @@ mod tests {
             );
         }
         assert!(seen.len() >= 8);
+        j_syn_ui::fx_units::assert_all_params_text_roundtrip(&params);
     }
 
     #[test]

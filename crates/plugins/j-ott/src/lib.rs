@@ -8,7 +8,7 @@ use j_syn_dsp::fx::dynamics::OttStereo;
 use j_syn_dsp::fx::MAX_FX_STACK;
 use j_syn_dsp::mod_matrix::FxScopeRing;
 use j_syn_dsp::{FxSlotParams, FxType};
-use j_syn_ui::fx_units::format_fx_slot_param_value;
+use j_syn_ui::fx_units::fx_slot_float_param;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
 
@@ -41,25 +41,14 @@ pub struct JOttParams {
 impl Default for JOttParams {
     fn default() -> Self {
         let defs = FxSlotParams::default_params_for_type(FxType::Ott);
-        let fmt = |idx: usize| {
-            Arc::new(move |v: f32| format_fx_slot_param_value(FxType::Ott, false, 0, idx, v))
-        };
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
             stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: 4 }),
-            depth: FloatParam::new("Depth", defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(0)),
-            time: FloatParam::new("Time", defs[1], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(1)),
-            in_gain: FloatParam::new("In Gain", defs[2], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(2)),
-            out_gain: FloatParam::new(
-                "Out Gain",
-                defs[3],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt(3)),
+            depth: fx_slot_float_param("Depth", defs[0], FxType::Ott, false, 0, 0),
+            time: fx_slot_float_param("Time", defs[1], FxType::Ott, false, 0, 1),
+            in_gain: fx_slot_float_param("In Gain", defs[2], FxType::Ott, false, 0, 2),
+            out_gain: fx_slot_float_param("Out Gain", defs[3], FxType::Ott, false, 0, 3),
         }
     }
 }
@@ -224,6 +213,7 @@ mod tests {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
         assert_eq!(seen.len(), 6);
+        j_syn_ui::fx_units::assert_all_params_text_roundtrip(&params);
     }
 
     #[test]

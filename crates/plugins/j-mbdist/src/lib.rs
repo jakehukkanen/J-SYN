@@ -7,11 +7,10 @@ use std::sync::Arc;
 use j_syn_dsp::fx::multiband_dist::MultiBandDistStereo;
 use j_syn_dsp::mod_matrix::FxScopeRing;
 use j_syn_dsp::{
-    mb_band_level_db, mb_out_gain_db, mb_xover_high_hz, mb_xover_low_hz, MbDistBandParams,
-    MAX_FX_STACK, MB_BAND_LEVEL_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM,
+    FxType, MbDistBandParams, MAX_FX_STACK, MB_BAND_LEVEL_DEFAULT_NORM, MB_XOVER_HIGH_DEFAULT_NORM,
     MB_XOVER_LOW_DEFAULT_NORM,
 };
-use j_syn_ui::fx_units::{format_hz, DistortionModeParam};
+use j_syn_ui::fx_units::{fx_slot_float_param, DistortionModeParam};
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
 
@@ -47,34 +46,38 @@ impl JMbDistBandParams {
             enabled: BoolParam::new(format!("{band_label} On"), true),
             solo: BoolParam::new(format!("{band_label} Solo"), false),
             mode: EnumParam::new(format!("{band_label} Mode"), DistortionModeParam::Tube),
-            drive: FloatParam::new(
+            drive: fx_slot_float_param(
                 format!("{band_label} Drive"),
                 0.30,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_unit(" %")
-            .with_value_to_string(formatters::v2s_f32_percentage(0))
-            .with_string_to_value(formatters::s2v_f32_percentage()),
-            bias: FloatParam::new(
+                FxType::MultibandDist,
+                false,
+                1,
+                0,
+            ),
+            bias: fx_slot_float_param(
                 format!("{band_label} Bias"),
                 0.50,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(Arc::new(|v| format!("{:+.0}%", (v - 0.5) * 200.0))),
-            level: FloatParam::new(
+                FxType::MultibandDist,
+                false,
+                1,
+                1,
+            ),
+            level: fx_slot_float_param(
                 format!("{band_label} Level"),
                 MB_BAND_LEVEL_DEFAULT_NORM,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(Arc::new(|v| format!("{:+.1} dB", mb_band_level_db(v)))),
-            mix: FloatParam::new(
+                FxType::MultibandDist,
+                false,
+                1,
+                2,
+            ),
+            mix: fx_slot_float_param(
                 format!("{band_label} Mix"),
                 1.00,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_unit(" %")
-            .with_value_to_string(formatters::v2s_f32_percentage(0))
-            .with_string_to_value(formatters::s2v_f32_percentage()),
+                FxType::MultibandDist,
+                false,
+                1,
+                3,
+            ),
         }
     }
 
@@ -142,24 +145,24 @@ impl Default for JMbDistParams {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
             stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: MAX_FX_STACK as i32 }),
-            low_xover: FloatParam::new(
+            low_xover: fx_slot_float_param(
                 "Low Crossover",
                 MB_XOVER_LOW_DEFAULT_NORM,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(Arc::new(|v| format_hz(mb_xover_low_hz(v)))),
-            high_xover: FloatParam::new(
+                FxType::MultibandDist,
+                false,
+                0,
+                0,
+            ),
+            high_xover: fx_slot_float_param(
                 "High Crossover",
                 MB_XOVER_HIGH_DEFAULT_NORM,
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(Arc::new(|v| format_hz(mb_xover_high_hz(v)))),
-            out_gain: FloatParam::new("Output Gain", 0.50, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(Arc::new(|v| format!("{:+.1} dB", mb_out_gain_db(v)))),
-            mix: FloatParam::new("Mix", 1.00, FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_unit(" %")
-                .with_value_to_string(formatters::v2s_f32_percentage(0))
-                .with_string_to_value(formatters::s2v_f32_percentage()),
+                FxType::MultibandDist,
+                false,
+                0,
+                1,
+            ),
+            out_gain: fx_slot_float_param("Output Gain", 0.50, FxType::MultibandDist, false, 0, 2),
+            mix: fx_slot_float_param("Mix", 1.00, FxType::MultibandDist, false, 0, 3),
             low_band: JMbDistBandParams::new("Low"),
             mid_band: JMbDistBandParams::new("Mid"),
             high_band: JMbDistBandParams::new("High"),
@@ -337,6 +340,7 @@ mod tests {
         }
         // 6 top-level + 3 * 7 per-band = 27 parameters
         assert_eq!(seen.len(), 27);
+        j_syn_ui::fx_units::assert_all_params_text_roundtrip(&params);
     }
 
     #[test]
