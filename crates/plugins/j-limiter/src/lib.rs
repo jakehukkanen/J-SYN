@@ -72,8 +72,6 @@ impl Default for JLimiterParams {
 pub struct JLimiterPlugin {
     pub params: Arc<JLimiterParams>,
     dsp: LimiterStereo,
-    sample_rate: f32,
-    last_latency_samples: u32,
     pub scope_ring: Arc<FxScopeRing>,
     scope_decim: u32,
 }
@@ -83,8 +81,6 @@ impl Default for JLimiterPlugin {
         Self {
             params: Arc::new(JLimiterParams::default()),
             dsp: LimiterStereo::new(44_100.0),
-            sample_rate: 44_100.0,
-            last_latency_samples: 0,
             scope_ring: Arc::new(FxScopeRing::default()),
             scope_decim: 0,
         }
@@ -128,17 +124,19 @@ impl Plugin for JLimiterPlugin {
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
-        self.sample_rate = buffer_config.sample_rate.max(1_000.0);
-        self.dsp.set_sample_rate(self.sample_rate);
+        let sample_rate = buffer_config.sample_rate.max(1_000.0);
+        self.dsp.set_sample_rate(sample_rate);
         self.dsp.reset();
         self.scope_decim = 0;
 
+        // Report lookahead PDC strictly during `initialize()` (`clap_plugin::activate()`):
+        // calling `ProcessContext::set_latency_samples()` from `process()` in `nih-plug` invokes
+        // `clap_host_latency::changed()` outside `activate()`, violating the CLAP specification.
         let lat = if self.params.enabled.value() {
-            limiter_lookahead_samples(self.sample_rate, self.params.lookahead.value())
+            limiter_lookahead_samples(sample_rate, self.params.lookahead.value())
         } else {
             0
         };
-        self.last_latency_samples = lat;
         context.set_latency_samples(lat);
         true
     }
@@ -152,7 +150,7 @@ impl Plugin for JLimiterPlugin {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        context: &mut impl ProcessContext<Self>,
+        _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         if buffer.samples() == 0 {
             return ProcessStatus::Normal;
@@ -171,16 +169,6 @@ impl Plugin for JLimiterPlugin {
             self.params.link.value(),
             self.params.punch.value(),
         ];
-
-        let lat = if enabled {
-            limiter_lookahead_samples(self.sample_rate, p[2])
-        } else {
-            0
-        };
-        if lat != self.last_latency_samples {
-            self.last_latency_samples = lat;
-            context.set_latency_samples(lat);
-        }
 
         for mut channel_samples in buffer.iter_samples() {
             let mut ch = channel_samples.iter_mut();
