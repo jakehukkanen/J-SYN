@@ -8,7 +8,7 @@ use j_syn_dsp::fx::diopser::DiopserStereo;
 use j_syn_dsp::fx::MAX_FX_STACK;
 use j_syn_dsp::mod_matrix::FxScopeRing;
 use j_syn_dsp::{FxSlotParams, FxType};
-use j_syn_ui::fx_units::{format_fx_slot_param_value, DiopserStagesParam};
+use j_syn_ui::fx_units::{fx_slot_float_param, DiopserStagesParam};
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
 
@@ -44,22 +44,15 @@ pub struct JDispersionParams {
 impl Default for JDispersionParams {
     fn default() -> Self {
         let defs = FxSlotParams::default_params_for_type(FxType::Diopser);
-        let fmt = |idx: usize| {
-            Arc::new(move |v: f32| format_fx_slot_param_value(FxType::Diopser, false, 0, idx, v))
-        };
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
             stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: 4 }),
             stages: EnumParam::new("Stages", DiopserStagesParam::S32),
-            freq: FloatParam::new("Frequency", defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(0)),
-            res: FloatParam::new("Resonance", defs[1], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(1)),
-            spread: FloatParam::new("Spread", defs[2], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(2)),
-            mix: FloatParam::new("Mix", defs[3], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(3)),
+            freq: fx_slot_float_param("Frequency", defs[0], FxType::Diopser, false, 0, 0),
+            res: fx_slot_float_param("Resonance", defs[1], FxType::Diopser, false, 0, 1),
+            spread: fx_slot_float_param("Spread", defs[2], FxType::Diopser, false, 0, 2),
+            mix: fx_slot_float_param("Mix", defs[3], FxType::Diopser, false, 0, 3),
         }
     }
 }
@@ -225,6 +218,7 @@ mod tests {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
         assert_eq!(seen.len(), 7);
+        j_syn_ui::fx_units::assert_all_params_text_roundtrip(&params);
     }
 
     #[test]

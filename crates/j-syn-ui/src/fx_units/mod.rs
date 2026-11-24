@@ -3,16 +3,8 @@
 
 use std::sync::Arc;
 
-use j_syn_dsp::filter::cutoff_norm_to_hz;
 use j_syn_dsp::mod_matrix::ModDestination;
-use j_syn_dsp::{
-    diopser_freq_hz, flanger_delay_ms, flanger_feedback, flanger_phase_deg, flanger_rate_hz,
-    format_tube_res_tune, format_utility_pan, fx_high_cut_hz, fx_low_cut_hz, limiter_ceil_db,
-    limiter_gain_db, limiter_lookahead_ms, limiter_release_ms, mb_band_level_db, mb_out_gain_db,
-    mb_xover_high_hz, mb_xover_low_hz, tube_res_decay_ms, tube_res_flt_freq_hz,
-    tube_res_flt_width_oct, tube_res_lfo_rate_hz, utility_gain_db_from_norm,
-    utility_width_from_norm, FxRackState, FxType, MB_BAND_LEVEL_DEFAULT_NORM,
-};
+use j_syn_dsp::{FxType, MB_BAND_LEVEL_DEFAULT_NORM};
 use nih_plug::prelude::{BoolParam, FloatParam, GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 
@@ -22,6 +14,7 @@ use crate::shell::{ModUiHost, UiKitEvent};
 use crate::tokens;
 
 pub mod filter;
+pub mod formatters;
 pub mod limiter;
 pub mod multiband_dist;
 pub mod params;
@@ -30,6 +23,10 @@ pub mod standalone_shell;
 pub mod tube_res;
 
 pub use filter::{build_filter_fx_unit_body, FilterUnitParams};
+pub use formatters::{
+    assert_all_params_text_roundtrip, format_fx_slot_param_value, format_hz, fx_slot_float_param,
+    fx_slot_param_s2v, fx_slot_param_v2s, parse_fx_slot_param_value,
+};
 pub use limiter::{build_limiter_fx_unit_body, LimiterUnitParams};
 pub use multiband_dist::{
     build_multiband_dist_fx_unit_body, MultibandDistUnitParams, MultibandTabHost,
@@ -49,17 +46,6 @@ pub use standalone_shell::{
     StandaloneFxConfig, StandaloneFxHeaderSpec, StandaloneFxUiData, StandaloneShellEvent,
 };
 pub use tube_res::{build_tube_res_fx_unit_body, TubeResonatorUnitParams};
-
-#[inline]
-pub fn format_hz(hz: f32) -> String {
-    if hz >= 10_000.0 {
-        format!("{:.1} kHz", hz / 1000.0)
-    } else if hz >= 1000.0 {
-        format!("{:.2} kHz", hz / 1000.0)
-    } else {
-        format!("{:.0} Hz", hz)
-    }
-}
 
 #[inline]
 pub fn fx_slot_param_label(
@@ -219,153 +205,6 @@ pub fn fx_slot_param_label(
             _ => "MIX",
         },
         FxType::MultibandDist => "--",
-    }
-}
-
-#[inline]
-pub fn format_fx_slot_param_value(
-    fx_ty: FxType,
-    is_eq: bool,
-    mb_tab: u8,
-    param_idx: usize,
-    norm: f32,
-) -> String {
-    let n = norm.clamp(0.0, 1.0);
-    if fx_ty == FxType::MultibandDist {
-        return if mb_tab == 0 {
-            match param_idx {
-                0 => format_hz(mb_xover_low_hz(n)),
-                1 => format_hz(mb_xover_high_hz(n)),
-                2 => format!("{:+.1} dB", mb_out_gain_db(n)),
-                _ => format!("{:.0}%", n * 100.0),
-            }
-        } else {
-            match param_idx {
-                0 | 3 => format!("{:.0}%", n * 100.0),
-                1 => format!("{:+.0}%", (n - 0.5) * 200.0),
-                _ => format!("{:+.1} dB", mb_band_level_db(n)),
-            }
-        };
-    }
-    if is_eq {
-        if fx_ty == FxType::TubeResonator {
-            return match param_idx {
-                0 => format!("{:.0}%", n * 100.0),
-                1 => format!("{:.2} Hz", tube_res_lfo_rate_hz(n)),
-                2 => format!("{:.1} ms", tube_res_decay_ms(n)),
-                _ => format!("{:.0}%", n * 100.0),
-            };
-        }
-        if fx_ty == FxType::Limiter {
-            return match param_idx {
-                0 => format!("{:.0} ms", limiter_release_ms(n)),
-                _ => format!("{:.0}%", n * 100.0),
-            };
-        }
-        if fx_ty == FxType::Flanger {
-            return match param_idx {
-                0 => format!("{:+.0}%", flanger_feedback(n) * 100.0),
-                1 => format!("{:.0}°", flanger_phase_deg(n)),
-                2 => format_hz(fx_low_cut_hz(n)),
-                _ => format_hz(fx_high_cut_hz(n)),
-            };
-        }
-        if fx_ty == FxType::Filter {
-            return format_hz(cutoff_norm_to_hz(n));
-        }
-        return match param_idx {
-            0 => format_hz(fx_low_cut_hz(n)),
-            1 => format_hz(fx_high_cut_hz(n)),
-            2 => match fx_ty {
-                FxType::Reverb => format!("{:.0} ms", n * 250.0),
-                FxType::Chorus => format!("{:.0}%", n * 200.0),
-                _ => format!("{:.0}%", n * 100.0),
-            },
-            _ => match fx_ty {
-                FxType::Chorus => format!("{:.0}%", n * 75.0),
-                _ => format!("{:.0}%", n * 200.0),
-            },
-        };
-    }
-
-    match fx_ty {
-        FxType::Off => "--".to_string(),
-        FxType::Ott => match param_idx {
-            0 => format!("{:.0}%", n * 100.0),
-            1 => format!("{:.2}x", 0.25 * 16.0_f32.powf(n)),
-            2 | 3 => format!("{:+.1} dB", -18.0 + n * 36.0),
-            _ => String::new(),
-        },
-        FxType::Distortion => match param_idx {
-            0 | 2 => format!("{:+.0}%", (n - 0.5) * 200.0),
-            1 | 3 => format!("{:.0}%", n * 100.0),
-            _ => String::new(),
-        },
-        FxType::Chorus => match param_idx {
-            0 => format!("{:.2} Hz", 0.05 * 100.0_f32.powf(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::Delay => match param_idx {
-            0 => FxRackState::format_delay_sync(n).to_string(),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::Reverb => format!("{:.0}%", n * 100.0),
-        FxType::JSatClipper => match param_idx {
-            0 => format!("+{:.1} dB", n * 24.0),
-            1 => format!("{:.1} dB", -18.0 + n * 18.0),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::Filter => match param_idx {
-            0 => format_hz(cutoff_norm_to_hz(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::Phaser => match param_idx {
-            0 => format!("{:.2} Hz", 0.05 * 120.0_f32.powf(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::Diopser => match param_idx {
-            0 => format_hz(diopser_freq_hz(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::TubeResonator => match param_idx {
-            0 => format_tube_res_tune(n),
-            1 => format_hz(tube_res_flt_freq_hz(n)),
-            2 => format!("{:.2} oct", tube_res_flt_width_oct(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::Utility => match param_idx {
-            0 => format!("{:.0}%", utility_width_from_norm(n) * 100.0),
-            1 => format_utility_pan(n),
-            2 => {
-                let db = utility_gain_db_from_norm(n);
-                let clean = if db.abs() < 0.05 { 0.0 } else { db };
-                if clean == 0.0 {
-                    "0.0 dB".to_string()
-                } else {
-                    format!("{clean:+.1} dB")
-                }
-            }
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::Limiter => match param_idx {
-            0 => format!("+{:.1} dB", limiter_gain_db(n)),
-            1 => format!("{:.1} dB", limiter_ceil_db(n)),
-            2 => {
-                let ms = limiter_lookahead_ms(n);
-                if ms < 0.05 {
-                    "0.0 (Clip)".to_string()
-                } else {
-                    format!("{ms:.1} ms")
-                }
-            }
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::Flanger => match param_idx {
-            0 => format!("{:.2} Hz", flanger_rate_hz(n)),
-            2 => format!("{:.2} ms", flanger_delay_ms(n)),
-            _ => format!("{:.0}%", n * 100.0),
-        },
-        FxType::MultibandDist => String::new(),
     }
 }
 

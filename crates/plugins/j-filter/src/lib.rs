@@ -8,7 +8,7 @@ use j_syn_dsp::fx::FxFilterStereo;
 use j_syn_dsp::mod_matrix::FxScopeRing;
 use j_syn_dsp::{FxSlotParams, FxType, MAX_FX_STACK};
 use j_syn_ui::fx_units::{
-    format_fx_slot_param_value, FilterModeParam, FxFilterSlopeParam,
+    fx_slot_float_param, FilterModeParam, FxFilterSlopeParam,
 };
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
@@ -52,31 +52,17 @@ impl Default for JFilterParams {
     fn default() -> Self {
         let defs = FxSlotParams::default_params_for_type(FxType::Filter);
         let eq_defs = FxSlotParams::default_eq_params_for_type(FxType::Filter);
-        let fmt = |idx: usize| {
-            Arc::new(move |v: f32| format_fx_slot_param_value(FxType::Filter, false, 0, idx, v))
-        };
-        let fmt_freq2 =
-            Arc::new(|v: f32| format_fx_slot_param_value(FxType::Filter, true, 0, 0, v));
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
             stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: MAX_FX_STACK as i32 }),
             mode: EnumParam::new("Mode", FilterModeParam::Lp),
             slope: EnumParam::new("Slope", FxFilterSlopeParam::Db12),
-            cutoff: FloatParam::new("Cutoff", defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(0)),
-            resonance: FloatParam::new(
-                "Resonance",
-                defs[1],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt(1)),
-            drive: FloatParam::new("Drive", defs[2], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(2)),
-            mix: FloatParam::new("Mix", defs[3], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(3)),
-            freq2: FloatParam::new("Freq 2", eq_defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_freq2),
+            cutoff: fx_slot_float_param("Cutoff", defs[0], FxType::Filter, false, 0, 0),
+            resonance: fx_slot_float_param("Resonance", defs[1], FxType::Filter, false, 0, 1),
+            drive: fx_slot_float_param("Drive", defs[2], FxType::Filter, false, 0, 2),
+            mix: fx_slot_float_param("Mix", defs[3], FxType::Filter, false, 0, 3),
+            freq2: fx_slot_float_param("Freq 2", eq_defs[0], FxType::Filter, true, 0, 0),
         }
     }
 }
@@ -242,6 +228,7 @@ mod tests {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
         assert_eq!(seen.len(), 9);
+        j_syn_ui::fx_units::assert_all_params_text_roundtrip(&params);
     }
 
     #[test]

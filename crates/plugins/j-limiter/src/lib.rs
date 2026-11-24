@@ -7,7 +7,7 @@ use std::sync::Arc;
 use j_syn_dsp::fx::limiter::LimiterStereo;
 use j_syn_dsp::mod_matrix::FxScopeRing;
 use j_syn_dsp::{limiter_lookahead_samples, FxSlotParams, FxType};
-use j_syn_ui::fx_units::format_fx_slot_param_value;
+use j_syn_ui::fx_units::fx_slot_float_param;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
 
@@ -53,39 +53,17 @@ impl Default for JLimiterParams {
     fn default() -> Self {
         let main_defs = FxSlotParams::default_params_for_type(FxType::Limiter);
         let adv_defs = FxSlotParams::default_eq_params_for_type(FxType::Limiter);
-        let fmt_main = |idx: usize| {
-            Arc::new(move |v: f32| format_fx_slot_param_value(FxType::Limiter, false, 0, idx, v))
-        };
-        let fmt_adv = |idx: usize| {
-            Arc::new(move |v: f32| format_fx_slot_param_value(FxType::Limiter, true, 0, idx, v))
-        };
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
-            gain: FloatParam::new("Gain", main_defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_main(0)),
-            ceil: FloatParam::new("Ceiling", main_defs[1], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_main(1)),
-            lookahead: FloatParam::new(
-                "Lookahead",
-                main_defs[2],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt_main(2)),
-            mix: FloatParam::new("Mix", main_defs[3], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_main(3)),
-            release: FloatParam::new(
-                "Release",
-                adv_defs[0],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt_adv(0)),
-            knee: FloatParam::new("Knee", adv_defs[1], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_adv(1)),
-            link: FloatParam::new("Link", adv_defs[2], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_adv(2)),
-            punch: FloatParam::new("Punch", adv_defs[3], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt_adv(3)),
+            gain: fx_slot_float_param("Gain", main_defs[0], FxType::Limiter, false, 0, 0),
+            ceil: fx_slot_float_param("Ceiling", main_defs[1], FxType::Limiter, false, 0, 1),
+            lookahead: fx_slot_float_param("Lookahead", main_defs[2], FxType::Limiter, false, 0, 2),
+            mix: fx_slot_float_param("Mix", main_defs[3], FxType::Limiter, false, 0, 3),
+            release: fx_slot_float_param("Release", adv_defs[0], FxType::Limiter, true, 0, 0),
+            knee: fx_slot_float_param("Knee", adv_defs[1], FxType::Limiter, true, 0, 1),
+            link: fx_slot_float_param("Link", adv_defs[2], FxType::Limiter, true, 0, 2),
+            punch: fx_slot_float_param("Punch", adv_defs[3], FxType::Limiter, true, 0, 3),
             true_peak: BoolParam::new("True Peak", false),
         }
     }
@@ -94,8 +72,6 @@ impl Default for JLimiterParams {
 pub struct JLimiterPlugin {
     pub params: Arc<JLimiterParams>,
     dsp: LimiterStereo,
-    sample_rate: f32,
-    last_latency_samples: u32,
     pub scope_ring: Arc<FxScopeRing>,
     scope_decim: u32,
 }
@@ -105,8 +81,6 @@ impl Default for JLimiterPlugin {
         Self {
             params: Arc::new(JLimiterParams::default()),
             dsp: LimiterStereo::new(44_100.0),
-            sample_rate: 44_100.0,
-            last_latency_samples: 0,
             scope_ring: Arc::new(FxScopeRing::default()),
             scope_decim: 0,
         }
@@ -150,17 +124,19 @@ impl Plugin for JLimiterPlugin {
         buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
-        self.sample_rate = buffer_config.sample_rate.max(1_000.0);
-        self.dsp.set_sample_rate(self.sample_rate);
+        let sample_rate = buffer_config.sample_rate.max(1_000.0);
+        self.dsp.set_sample_rate(sample_rate);
         self.dsp.reset();
         self.scope_decim = 0;
 
+        // Report lookahead PDC strictly during `initialize()` (`clap_plugin::activate()`):
+        // calling `ProcessContext::set_latency_samples()` from `process()` in `nih-plug` invokes
+        // `clap_host_latency::changed()` outside `activate()`, violating the CLAP specification.
         let lat = if self.params.enabled.value() {
-            limiter_lookahead_samples(self.sample_rate, self.params.lookahead.value())
+            limiter_lookahead_samples(sample_rate, self.params.lookahead.value())
         } else {
             0
         };
-        self.last_latency_samples = lat;
         context.set_latency_samples(lat);
         true
     }
@@ -174,7 +150,7 @@ impl Plugin for JLimiterPlugin {
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        context: &mut impl ProcessContext<Self>,
+        _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         if buffer.samples() == 0 {
             return ProcessStatus::Normal;
@@ -193,16 +169,6 @@ impl Plugin for JLimiterPlugin {
             self.params.link.value(),
             self.params.punch.value(),
         ];
-
-        let lat = if enabled {
-            limiter_lookahead_samples(self.sample_rate, p[2])
-        } else {
-            0
-        };
-        if lat != self.last_latency_samples {
-            self.last_latency_samples = lat;
-            context.set_latency_samples(lat);
-        }
 
         for mut channel_samples in buffer.iter_samples() {
             let mut ch = channel_samples.iter_mut();
@@ -266,6 +232,7 @@ mod tests {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
         assert_eq!(seen.len(), 10);
+        j_syn_ui::fx_units::assert_all_params_text_roundtrip(&params);
     }
 
     #[test]

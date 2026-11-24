@@ -7,7 +7,7 @@ use std::sync::Arc;
 use j_syn_dsp::fx::modulation::PhaserStereo;
 use j_syn_dsp::mod_matrix::FxScopeRing;
 use j_syn_dsp::{FxSlotParams, FxType, MAX_FX_STACK};
-use j_syn_ui::fx_units::format_fx_slot_param_value;
+use j_syn_ui::fx_units::fx_slot_float_param;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
 
@@ -40,25 +40,14 @@ pub struct JPhaserParams {
 impl Default for JPhaserParams {
     fn default() -> Self {
         let defs = FxSlotParams::default_params_for_type(FxType::Phaser);
-        let fmt = |idx: usize| {
-            Arc::new(move |v: f32| format_fx_slot_param_value(FxType::Phaser, false, 0, idx, v))
-        };
         Self {
             editor_state: editor::default_state(),
             enabled: BoolParam::new("Bypass / On", true),
             stack: IntParam::new("Stack", 1, IntRange::Linear { min: 1, max: MAX_FX_STACK as i32 }),
-            rate: FloatParam::new("Rate", defs[0], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(0)),
-            depth: FloatParam::new("Depth", defs[1], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(1)),
-            feedback: FloatParam::new(
-                "Feedback",
-                defs[2],
-                FloatRange::Linear { min: 0.0, max: 1.0 },
-            )
-            .with_value_to_string(fmt(2)),
-            mix: FloatParam::new("Mix", defs[3], FloatRange::Linear { min: 0.0, max: 1.0 })
-                .with_value_to_string(fmt(3)),
+            rate: fx_slot_float_param("Rate", defs[0], FxType::Phaser, false, 0, 0),
+            depth: fx_slot_float_param("Depth", defs[1], FxType::Phaser, false, 0, 1),
+            feedback: fx_slot_float_param("Feedback", defs[2], FxType::Phaser, false, 0, 2),
+            mix: fx_slot_float_param("Mix", defs[3], FxType::Phaser, false, 0, 3),
         }
     }
 }
@@ -221,6 +210,7 @@ mod tests {
             assert!(seen.insert(id.clone()), "Duplicate parameter ID: '{id}'");
         }
         assert_eq!(seen.len(), 6);
+        j_syn_ui::fx_units::assert_all_params_text_roundtrip(&params);
     }
 
     #[test]
