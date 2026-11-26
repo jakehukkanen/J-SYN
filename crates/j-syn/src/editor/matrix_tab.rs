@@ -1,9 +1,9 @@
-//! Full-screen `MATRIX` overview table for inspecting and editing all 32 modulation slots.
+//! Full-screen `MATRIX` overview table for inspecting and editing all modulation slots.
 
 use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::{
-    ModDestination, ModMatrixSource, ModSlot, BASE_MOD_DESTINATIONS,
+    ModDestination, ModMatrixSource, ModSlot, BASE_MOD_DESTINATIONS, NUM_MOD_SLOTS,
 };
 use j_syn_dsp::NUM_FX_BUSES;
 use nih_plug_vizia::vizia::prelude::*;
@@ -15,29 +15,8 @@ use super::controls::{
 use super::mod_bar::ModUiState;
 use super::{UiData, UiEvent};
 
-pub(super) const ALL_MOD_SOURCES: [ModMatrixSource; 21] = [
-    ModMatrixSource::Env1,
-    ModMatrixSource::Env2,
-    ModMatrixSource::Env3,
-    ModMatrixSource::Env4,
-    ModMatrixSource::ModSeq1,
-    ModMatrixSource::ModSeq2,
-    ModMatrixSource::ModSeq3,
-    ModMatrixSource::ModSeq4,
-    ModMatrixSource::Macro1,
-    ModMatrixSource::Macro2,
-    ModMatrixSource::Macro3,
-    ModMatrixSource::Macro4,
-    ModMatrixSource::Macro5,
-    ModMatrixSource::Macro6,
-    ModMatrixSource::Macro7,
-    ModMatrixSource::Macro8,
-    ModMatrixSource::Velocity,
-    ModMatrixSource::Keytrack,
-    ModMatrixSource::ModWheel,
-    ModMatrixSource::Aftertouch,
-    ModMatrixSource::Slide,
-];
+pub(super) const ALL_MOD_SOURCES: [ModMatrixSource; j_syn_dsp::NUM_ACTIVE_SOURCES] =
+    ModMatrixSource::ALL_ACTIVE;
 
 const CURVE_MODES: &[(&str, f32)] = &[
     ("LIN", 0.0),
@@ -93,7 +72,7 @@ impl MatrixDragBox {
         }
         .build(cx, move |cx| {
             let text_lens = UiData::mod_val_rev.map(move |_| {
-                let slot = ui_lbl.params.mod_matrix.snapshot().slots[slot_idx];
+                let slot = ui_lbl.params.mod_matrix.load().slots[slot_idx];
                 match field {
                     MatrixField::Depth => format!("{:+.0}%", slot.depth * 100.0),
                 }
@@ -106,7 +85,7 @@ impl MatrixDragBox {
     }
 
     fn current_val(&self) -> f32 {
-        let slot = self.mod_ui.params.mod_matrix.snapshot().slots[self.slot_idx];
+        let slot = self.mod_ui.params.mod_matrix.load().slots[self.slot_idx];
         match self.field {
             MatrixField::Depth => slot.depth,
         }
@@ -216,7 +195,7 @@ fn build_matrix_row(
                     build_dropdown_trigger_labels(
                         cx,
                         UiData::mod_ui_rev.map(move |_| {
-                            let s = ui_s.params.mod_matrix.snapshot().slots[slot_idx];
+                            let s = ui_s.params.mod_matrix.load().slots[slot_idx];
                             if s.enabled {
                                 ui_s.source_display_name(s.source)
                             } else {
@@ -273,7 +252,7 @@ fn build_matrix_row(
                     build_dropdown_trigger_labels(
                         cx,
                         UiData::mod_ui_rev.map(move |_| {
-                            let s = ui_d.params.mod_matrix.snapshot().slots[slot_idx];
+                            let s = ui_d.params.mod_matrix.load().slots[slot_idx];
                             if s.enabled {
                                 s.destination.name().to_string()
                             } else {
@@ -347,7 +326,7 @@ fn build_matrix_row(
                     build_dropdown_trigger_labels(
                         cx,
                         UiData::mod_ui_rev.map(move |_| {
-                            let s = ui_c.params.mod_matrix.snapshot().slots[slot_idx];
+                            let s = ui_c.params.mod_matrix.load().slots[slot_idx];
                             curve_mode_label(s.curve).to_string()
                         }),
                     );
@@ -404,7 +383,7 @@ fn build_matrix_row(
                     build_dropdown_trigger_labels(
                         cx,
                         UiData::mod_ui_rev.map(move |_| {
-                            let s = ui_a.params.mod_matrix.snapshot().slots[slot_idx];
+                            let s = ui_a.params.mod_matrix.load().slots[slot_idx];
                             if s.enabled {
                                 ui_a.aux_short_label(s.aux_source)
                             } else {
@@ -519,7 +498,7 @@ pub(crate) fn build_matrix_view(cx: &mut Context, mod_ui: Arc<ModUiState>) {
             let ui_cnt = ui_header.clone();
             Binding::new(cx, UiData::mod_ui_rev, move |cx, _| {
                 let count = ui_cnt.active_slot_count();
-                let badge = format!("ACTIVE SLOTS: {count} / 32");
+                let badge = format!("ACTIVE SLOTS: {count} / {NUM_MOD_SLOTS}");
                 bold_label(cx, &badge, "matrix-count-badge")
                     .width(Auto)
                     .height(Stretch(1.0))

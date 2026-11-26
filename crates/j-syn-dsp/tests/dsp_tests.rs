@@ -1055,7 +1055,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
     params.amp_attack_s = 0.001;
     params.filters[0].enabled = false;
     params.oscs[0].level = 0.25;
-    for slot in &mut params.mod_matrix.slots {
+    for slot in &mut params.mod_matrix.slots[..32] {
         *slot = ModSlot {
             source: ModMatrixSource::ModWheel,
             destination: ModDestination::Osc1Level,
@@ -1065,6 +1065,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
             ..ModSlot::default()
         };
     }
+    params.mod_matrix.rebuild_index();
     let mut eng_lo = SynthEngine::new(sample_rate);
     eng_lo.set_mod_wheel(0.0);
     eng_lo.note_on(0, 60, 1.0, None, &params);
@@ -1128,6 +1129,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
         enabled: true,
         ..ModSlot::default()
     };
+    bp_params.mod_matrix.rebuild_index();
     bp_params.mod_envs[0].attack_s = 0.001;
     bp_params.mod_envs[0].sustain = 1.0;
 
@@ -1169,6 +1171,7 @@ fn mod_matrix_32_slots_envelopes_and_modseq_modulate_destinations() {
         enabled: true,
         ..ModSlot::default()
     };
+    seq_params.mod_matrix.rebuild_index();
     let mut eng_ms = SynthEngine::new(sample_rate);
     eng_ms.note_on(0, 60, 0.9, None, &seq_params);
     for _ in 0..8000 {
@@ -1310,6 +1313,7 @@ fn test_modseq_stamps_and_mseg_curve() {
         enabled: true,
         ..ModSlot::default()
     };
+    params.mod_matrix.rebuild_index();
 
     let mut engine = SynthEngine::new(48_000.0);
     engine.note_on(0, 60, 1.0, None, &params);
@@ -1503,6 +1507,7 @@ fn mod_matrix_modseq_rate_modulation_free_and_sync() {
         enabled: true,
         ..ModSlot::default()
     };
+    free_params.mod_matrix.rebuild_index();
 
     let run_phase = |params: &SynthParams, mod_wheel: f32, samples: usize| -> f32 {
         let mut eng = SynthEngine::new(sample_rate);
@@ -1539,6 +1544,7 @@ fn mod_matrix_modseq_rate_modulation_free_and_sync() {
         enabled: true,
         ..ModSlot::default()
     };
+    sync_poly.mod_matrix.rebuild_index();
 
     let sync_poly_base = run_phase(&sync_poly, 0.0, 4800);
     let sync_poly_fast = run_phase(&sync_poly, 1.0, 4800);
@@ -1657,6 +1663,7 @@ fn master_fx_rack_8_slots_stacking_and_modulation() {
             enabled: true,
             ..ModSlot::default()
         };
+        p.mod_matrix.rebuild_index();
         let mut e = SynthEngine::new(sample_rate);
         e.prepare_fx_for_params(&p);
         e.set_mod_wheel(mod_wheel);
@@ -1791,6 +1798,7 @@ fn fx_filter_all_modes_and_macro_mod_sources() {
         enabled: true,
         ..ModSlot::default()
     };
+    mp.mod_matrix.rebuild_index();
 
     let run_rms_and_fc = |params: &SynthParams| -> (f32, f32) {
         let mut eng = SynthEngine::new(48_000.0);
@@ -1830,6 +1838,7 @@ fn mod_matrix_aux_source_curve_and_master_safety_stages() {
         aux_source: ModMatrixSource::Macro1,
         curve: 0.5,
     };
+    matrix.rebuild_index();
     let mut sources = [0.0_f32; NUM_ACTIVE_SOURCES];
     sources[ModMatrixSource::ModWheel.active_index().unwrap()] = 0.5;
     let mut deltas = [0.0_f32; NUM_MOD_DESTS];
@@ -2193,6 +2202,7 @@ fn parallel_fx_buses_and_sub_bus_routing_and_modulation() {
         enabled: true,
         ..ModSlot::default()
     };
+    mp.mod_matrix.rebuild_index();
     mp.macros[0] = 1.0;
     let mut eng_muted = SynthEngine::new(sample_rate);
     eng_muted.note_on(0, 57, 1.0, None, &mp);
@@ -2451,6 +2461,7 @@ fn mpe_per_voice_pitch_bend_pressure_slide_and_master_broadcast() {
         enabled: true,
         ..ModSlot::default()
     };
+    p.mod_matrix.rebuild_index();
 
     let mut eng = SynthEngine::new(sr);
     // Note on Member Ch 2 (channel=1) and Member Ch 3 (channel=2)
@@ -2719,6 +2730,7 @@ fn osc_pitch_ratio_hz_offset_and_modulation() {
         aux_source: ModMatrixSource::None,
         curve: 0.0,
     };
+    mod_ratio_p.mod_matrix.rebuild_index();
     let zc_mod = count_zero_crossings(&mod_ratio_p, 69);
     let ratio_mod = zc_mod as f32 / (zc1.max(1) as f32);
     assert!(
@@ -3602,6 +3614,7 @@ fn fx_bus_c_8_slots_lane_routing_topologies_and_filter_bus_guards() {
             enabled: true,
             ..ModSlot::default()
         };
+        p.mod_matrix.rebuild_index();
         p.macros[0] = 1.0;
 
         let mut e = SynthEngine::new(sr);
@@ -3793,4 +3806,111 @@ fn phase_b_90_fx_units_order_bypass_mute_and_mod_serde() {
     let muted = run_ordered([0, 29], true, true);
     assert!(bypassed > 1.0, "Bypassed lane must still pass dry signal: {bypassed}");
     assert_eq!(muted, 0.0, "Muted lane must output exact silence");
+}
+
+#[test]
+fn env_5_through_8_and_modseq_5_through_8_modulate_destinations() {
+    use j_syn_dsp::{ModDestination, ModMatrixSource};
+
+    let mut p = SynthParams::default();
+    p.amp_attack_s = 0.001;
+    p.amp_sustain = 1.0;
+    for env in &mut p.mod_envs {
+        env.attack_s = 0.001;
+        env.sustain = 1.0;
+    }
+
+    // Route ENV 5..8 -> Osc 1..4 Level, and MODSEQ 5..8 -> Osc 1..4 WtPos
+    // Plus Macro1 -> ModSeq5Rate..ModSeq8Rate
+    for i in 0..4 {
+        p.mod_matrix.assign_or_update(
+            ModMatrixSource::ENVS[4 + i],
+            ModDestination::osc_level(i),
+            0.5,
+        );
+        p.mod_matrix.assign_or_update(
+            ModMatrixSource::MODSEQS[4 + i],
+            ModDestination::osc_wt_pos(i),
+            0.4,
+        );
+        p.mod_matrix.assign_or_update(
+            ModMatrixSource::Macro1,
+            ModDestination::modseq_rate(4 + i),
+            0.25,
+        );
+    }
+    p.macros[0] = 0.8;
+    for i in 0..4 {
+        assert!(p.mod_matrix.is_source_routed(ModMatrixSource::ENVS[4 + i]));
+        assert!(p.mod_matrix.is_source_routed(ModMatrixSource::MODSEQS[4 + i]));
+    }
+
+    let bank = WavetableBank::new();
+    let mut engine = SynthEngine::new(48_000.0);
+    engine.note_on(0, 60, 1.0, None, &p);
+    let mut max_abs = 0.0_f32;
+    for _ in 0..1024 {
+        let (l, r) = engine.process_sample(&p, &bank);
+        assert!(l.is_finite() && r.is_finite());
+        max_abs = max_abs.max(l.abs()).max(r.abs());
+    }
+    assert!(max_abs > 0.05);
+
+    let t = engine.telemetry();
+    for i in 0..4 {
+        let lvl = t.source_level(ModMatrixSource::ENVS[4 + i]);
+        assert!(lvl > 0.5, "ENV {} should be active (> 0.5), got {lvl}", 5 + i);
+        assert!(
+            t.dest_offset(ModDestination::osc_level(i)) > 0.2,
+            "ENV {} should modulate Osc {} level",
+            5 + i,
+            i + 1
+        );
+        assert!(
+            t.dest_offset(ModDestination::modseq_rate(4 + i)) > 0.15,
+            "ModSeq{}Rate should be modulated",
+            5 + i
+        );
+    }
+}
+
+#[test]
+fn mod_matrix_256_slots_compaction_and_evaluation() {
+    use j_syn_dsp::{
+        ModDestination, ModMatrixSource, ModMatrixState, ModSlot, NUM_ACTIVE_SOURCES,
+        NUM_MOD_DESTS, NUM_MOD_SLOTS,
+    };
+
+    let mut mat = ModMatrixState::default();
+    assert_eq!(mat.slots.len(), NUM_MOD_SLOTS);
+    assert_eq!(NUM_MOD_SLOTS, 256);
+
+    // Populate > 32 routes across various destinations and high slot index 210
+    for i in 0..40 {
+        let src = ModMatrixSource::ALL_ACTIVE[i % NUM_ACTIVE_SOURCES];
+        let dest = ModDestination::fx_bus_slot_param(i % 3, i / 3, i % 4);
+        assert!(mat.assign_or_update(src, dest, 0.25).is_some());
+    }
+    mat.slots[210] = ModSlot {
+        source: ModMatrixSource::Env8,
+        destination: ModDestination::ModSeq8Rate,
+        depth: 0.75,
+        bipolar: true,
+        enabled: true,
+        bypassed: false,
+        aux_source: ModMatrixSource::ModSeq7,
+        curve: 0.0,
+    };
+    mat.rebuild_index();
+
+    let mut src_vals = [0.0_f32; NUM_ACTIVE_SOURCES];
+    src_vals[ModMatrixSource::Env8.active_index().unwrap()] = 0.8;
+    src_vals[ModMatrixSource::ModSeq7.active_index().unwrap()] = 0.5;
+    let mut deltas = [0.0_f32; NUM_MOD_DESTS];
+    mat.evaluate_destinations(&src_vals, &mut deltas);
+    let expected = (0.8 * 2.0 - 1.0) * 0.5 * 0.75;
+    assert!(
+        (deltas[ModDestination::ModSeq8Rate.index()] - expected).abs() < 1e-5,
+        "High slot 210 must be evaluated via compacted index"
+    );
 }

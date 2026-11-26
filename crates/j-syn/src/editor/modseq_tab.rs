@@ -1,5 +1,5 @@
-//! `MODSEQ` bottom drawer: 4 hybrid 16-step (`MODSEQ`) / freeform breakpoint (`LFO`) modulators
-//! (`MSEQ 1`–`MSEQ 4`) and 4 modulation envelopes (`ENV 1`–`ENV 4`).
+//! `MODSEQ` bottom drawer: 8 hybrid 16-step (`MODSEQ`) / freeform breakpoint (`LFO`) modulators
+//! (`MSEQ 1`–`MSEQ 8`) and 8 envelopes (`ENV 1`–`ENV 8`).
 
 use std::sync::Arc;
 
@@ -111,11 +111,35 @@ fn env_param_fns(
             |p| &p.mod_envs[1].sustain,
             |p| &p.mod_envs[1].release,
         ),
-        _ => (
+        3 => (
             |p| &p.mod_envs[2].attack,
             |p| &p.mod_envs[2].decay,
             |p| &p.mod_envs[2].sustain,
             |p| &p.mod_envs[2].release,
+        ),
+        4 => (
+            |p| &p.mod_envs[3].attack,
+            |p| &p.mod_envs[3].decay,
+            |p| &p.mod_envs[3].sustain,
+            |p| &p.mod_envs[3].release,
+        ),
+        5 => (
+            |p| &p.mod_envs[4].attack,
+            |p| &p.mod_envs[4].decay,
+            |p| &p.mod_envs[4].sustain,
+            |p| &p.mod_envs[4].release,
+        ),
+        6 => (
+            |p| &p.mod_envs[5].attack,
+            |p| &p.mod_envs[5].decay,
+            |p| &p.mod_envs[5].sustain,
+            |p| &p.mod_envs[5].release,
+        ),
+        _ => (
+            |p| &p.mod_envs[6].attack,
+            |p| &p.mod_envs[6].decay,
+            |p| &p.mod_envs[6].sustain,
+            |p| &p.mod_envs[6].release,
         ),
     }
 }

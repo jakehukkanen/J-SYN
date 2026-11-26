@@ -311,6 +311,7 @@ fn clear_mod_routes_for_slot(params: &JSynPluginParams, bus: usize, slot: usize)
         }
     }
     if changed {
+        mat.rebuild_index();
         params.mod_matrix.store_value(mat);
     }
 }
@@ -333,6 +334,7 @@ fn remap_mod_routes(
         }
     }
     if changed {
+        mat.rebuild_index();
         params.mod_matrix.store_value(mat);
     }
 }
@@ -379,6 +381,7 @@ fn clone_mod_routes(
         }
     }
     if changed {
+        mat.rebuild_index();
         params.mod_matrix.store_value(mat);
     }
 }

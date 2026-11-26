@@ -483,11 +483,19 @@ pub fn mod_source_rgb(pal: &ThemePalette, src: ModMatrixSource) -> (u8, u8, u8) 
         ModMatrixSource::Env1
         | ModMatrixSource::Env2
         | ModMatrixSource::Env3
-        | ModMatrixSource::Env4 => pal.mod_env_rgb(),
+        | ModMatrixSource::Env4
+        | ModMatrixSource::Env5
+        | ModMatrixSource::Env6
+        | ModMatrixSource::Env7
+        | ModMatrixSource::Env8 => pal.mod_env_rgb(),
         ModMatrixSource::ModSeq1
         | ModMatrixSource::ModSeq2
         | ModMatrixSource::ModSeq3
-        | ModMatrixSource::ModSeq4 => pal.mod_seq_rgb(),
+        | ModMatrixSource::ModSeq4
+        | ModMatrixSource::ModSeq5
+        | ModMatrixSource::ModSeq6
+        | ModMatrixSource::ModSeq7
+        | ModMatrixSource::ModSeq8 => pal.mod_seq_rgb(),
         ModMatrixSource::Macro1
         | ModMatrixSource::Macro2
         | ModMatrixSource::Macro3

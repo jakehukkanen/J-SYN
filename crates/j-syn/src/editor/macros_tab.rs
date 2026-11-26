@@ -15,7 +15,7 @@ pub(super) fn build_macros_tab(cx: &mut Context, mod_ui: Arc<ModUiState>) {
         // Left vertical Performance Source column: VEL, KEY, MW, AT, SLD
         let perf_ui = mod_ui.clone();
         VStack::new(cx, move |cx| {
-            for &src in &ModMatrixSource::ALL_ACTIVE[8..13] {
+            for &src in &ModMatrixSource::PERF {
                 ModSourcePill::new(cx, src, perf_ui.clone())
                     .width(Stretch(1.0))
                     .height(Stretch(1.0));

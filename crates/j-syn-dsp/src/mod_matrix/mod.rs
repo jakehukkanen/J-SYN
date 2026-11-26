@@ -1,4 +1,4 @@
-//! Lock-free 32-slot Modulation Matrix and real-time UI telemetry primitives.
+//! Lock-free 256-slot Modulation Matrix and real-time UI telemetry primitives.
 
 use serde::{Deserialize, Serialize};
 
@@ -64,30 +64,39 @@ impl<'de> Deserialize<'de> for ModSlot {
     }
 }
 
-/// Pre-allocated fixed-size 32-slot modulation matrix (`Copy`, lock-free swap & persistence).
+/// Pre-allocated fixed-size 256-slot modulation matrix (`Copy`, lock-free swap & compacted evaluation).
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModMatrixState {
     pub slots: [ModSlot; NUM_MOD_SLOTS],
+    active_indices: [u16; NUM_MOD_SLOTS],
+    active_len: u16,
+    active_source_mask: u32,
 }
 
-#[derive(Deserialize, Default)]
+impl Serialize for ModMatrixState {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let trimmed_len = self
+            .slots
+            .iter()
+            .rposition(|s| s.enabled && s.source != ModMatrixSource::None)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let mut st = serializer.serialize_struct("ModMatrixState", 1)?;
+        st.serialize_field("slots", &self.slots[..trimmed_len])?;
+        st.end()
+    }
+}
+
+#[derive(Deserialize)]
 #[serde(default)]
 struct ModMatrixStateWire {
     #[serde(deserialize_with = "crate::serde_lenient::fixed_array")]
     slots: [ModSlot; NUM_MOD_SLOTS],
 }
 
-impl<'de> Deserialize<'de> for ModMatrixState {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let Some(w) = Option::<ModMatrixStateWire>::deserialize(deserializer)? else {
-            return Ok(Self::default());
-        };
-        Ok(Self { slots: w.slots })
-    }
-}
-
-impl Default for ModMatrixState {
+impl Default for ModMatrixStateWire {
     fn default() -> Self {
         Self {
             slots: [ModSlot::default(); NUM_MOD_SLOTS],
@@ -95,7 +104,63 @@ impl Default for ModMatrixState {
     }
 }
 
+impl<'de> Deserialize<'de> for ModMatrixState {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let Some(w) = Option::<ModMatrixStateWire>::deserialize(deserializer)? else {
+            return Ok(Self::default());
+        };
+        let mut out = Self {
+            slots: w.slots,
+            active_indices: [0; NUM_MOD_SLOTS],
+            active_len: 0,
+            active_source_mask: 0,
+        };
+        out.rebuild_index();
+        Ok(out)
+    }
+}
+
+impl Default for ModMatrixState {
+    fn default() -> Self {
+        Self {
+            slots: [ModSlot::default(); NUM_MOD_SLOTS],
+            active_indices: [0; NUM_MOD_SLOTS],
+            active_len: 0,
+            active_source_mask: 0,
+        }
+    }
+}
+
 impl ModMatrixState {
+    /// Rebuilds the compacted active-slot index and `active_source_mask`.
+    /// Must be called after mutating `self.slots` directly.
+    pub fn rebuild_index(&mut self) {
+        let mut len = 0usize;
+        let mut mask = 0u32;
+        for (i, slot) in self.slots.iter().enumerate() {
+            if slot.enabled && !slot.bypassed && slot.source != ModMatrixSource::None {
+                self.active_indices[len] = i as u16;
+                len += 1;
+                mask |= 1u32 << (slot.source as u8);
+                if slot.aux_source != ModMatrixSource::None {
+                    mask |= 1u32 << (slot.aux_source as u8);
+                }
+            }
+        }
+        self.active_len = len as u16;
+        self.active_source_mask = mask;
+    }
+
+    #[inline]
+    pub fn active_source_mask(&self) -> u32 {
+        self.active_source_mask
+    }
+
+    #[inline]
+    pub fn is_source_routed(&self, src: ModMatrixSource) -> bool {
+        (self.active_source_mask & (1u32 << (src as u8))) != 0
+    }
+
     /// Finds an active slot matching `(source, destination)` or allocates the first free slot.
     pub fn assign_or_update(
         &mut self,
@@ -128,6 +193,7 @@ impl ModMatrixState {
                 aux_source: ModMatrixSource::None,
                 curve: 0.0,
             };
+            self.rebuild_index();
             return Some(free_idx);
         }
         None
@@ -136,17 +202,19 @@ impl ModMatrixState {
     pub fn clear_slot(&mut self, slot_idx: usize) {
         if slot_idx < NUM_MOD_SLOTS {
             self.slots[slot_idx] = ModSlot::default();
+            self.rebuild_index();
         }
     }
 
     pub fn swap_slots(&mut self, a: usize, b: usize) {
         if a < NUM_MOD_SLOTS && b < NUM_MOD_SLOTS && a != b {
             self.slots.swap(a, b);
+            self.rebuild_index();
         }
     }
 
     /// Evaluates active modulation slots into voice/base destination offsets (`0..NUM_VOICE_MOD_DESTS`).
-    /// Skips FX-slot destinations so per-voice audio loops stay cache-compact and fast.
+    /// Loops only over compacted active slots so unused capacity costs zero CPU.
     #[inline]
     pub fn evaluate_voice_destinations(
         &self,
@@ -154,10 +222,8 @@ impl ModMatrixState {
         out_deltas: &mut [f32; NUM_VOICE_MOD_DESTS],
     ) {
         out_deltas.fill(0.0);
-        for slot in &self.slots {
-            if !slot.enabled || slot.bypassed {
-                continue;
-            }
+        for &slot_idx in &self.active_indices[..self.active_len as usize] {
+            let slot = &self.slots[slot_idx as usize];
             let dest_idx = slot.destination.index();
             if dest_idx >= NUM_VOICE_MOD_DESTS {
                 continue;
@@ -168,7 +234,7 @@ impl ModMatrixState {
         }
     }
 
-    /// Evaluates all slots for a voice's current `[0..1]` source values and accumulates
+    /// Evaluates all active slots for a voice's current `[0..1]` source values and accumulates
     /// per-destination normalized offsets into `out_deltas`. Zero heap allocations.
     #[inline]
     pub fn evaluate_destinations(
@@ -177,10 +243,8 @@ impl ModMatrixState {
         out_deltas: &mut [f32; NUM_MOD_DESTS],
     ) {
         out_deltas.fill(0.0);
-        for slot in &self.slots {
-            if !slot.enabled || slot.bypassed {
-                continue;
-            }
+        for &slot_idx in &self.active_indices[..self.active_len as usize] {
+            let slot = &self.slots[slot_idx as usize];
             let dest_idx = slot.destination.index();
             if dest_idx >= NUM_MOD_DESTS {
                 continue;

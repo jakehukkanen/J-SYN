@@ -7,7 +7,6 @@ use nih_plug::prelude::{GuiContext, Param, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{bold_label, CheckIcon, CrossButton};
-use super::matrix_tab;
 use super::mod_bar::ModUiState;
 use super::{UiData, UiEvent, BASE_HEIGHT, BASE_WIDTH};
 use crate::{JSynPluginParams, PitchModeParam};
@@ -181,7 +180,7 @@ pub(super) fn build_mod_context_menu_overlay(
                 Pixels(m.anchor_x.clamp(6.0, BASE_WIDTH as f32 - 236.0))
             }))
             .top(UiData::mod_menu.map(|m| {
-                Pixels(m.anchor_y.clamp(6.0, BASE_HEIGHT as f32 - 236.0))
+                Pixels(m.anchor_y.clamp(6.0, BASE_HEIGHT as f32 - 270.0))
             }))
             .width(Pixels(228.0))
             .height(Auto)
@@ -322,10 +321,16 @@ fn build_context_menu_actions_row(
 }
 
 fn build_context_mod_source_grid(cx: &mut Context, dest: ModDestination, mod_ui: &Arc<ModUiState>) {
+    let rows: [&[ModMatrixSource]; 4] = [
+        &ModMatrixSource::ENVS,
+        &ModMatrixSource::MODSEQS,
+        &ModMatrixSource::MACROS,
+        &ModMatrixSource::PERF,
+    ];
     VStack::new(cx, move |cx| {
-        for chunk in matrix_tab::ALL_MOD_SOURCES.chunks(7) {
+        for row in rows {
             HStack::new(cx, move |cx| {
-                for &src in chunk {
+                for &src in row {
                     let short = mod_source_menu_short_label(src);
                     let ui_assign = mod_ui.clone();
                     Button::new(
@@ -359,30 +364,7 @@ fn build_context_mod_source_grid(cx: &mut Context, dest: ModDestination, mod_ui:
 
 #[inline]
 fn mod_source_menu_short_label(src: ModMatrixSource) -> &'static str {
-    match src {
-        ModMatrixSource::Env1 => "E1",
-        ModMatrixSource::Env2 => "E2",
-        ModMatrixSource::Env3 => "E3",
-        ModMatrixSource::Env4 => "E4",
-        ModMatrixSource::ModSeq1 => "MS1",
-        ModMatrixSource::ModSeq2 => "MS2",
-        ModMatrixSource::ModSeq3 => "MS3",
-        ModMatrixSource::ModSeq4 => "MS4",
-        ModMatrixSource::Macro1 => "M1",
-        ModMatrixSource::Macro2 => "M2",
-        ModMatrixSource::Macro3 => "M3",
-        ModMatrixSource::Macro4 => "M4",
-        ModMatrixSource::Macro5 => "M5",
-        ModMatrixSource::Macro6 => "M6",
-        ModMatrixSource::Macro7 => "M7",
-        ModMatrixSource::Macro8 => "M8",
-        ModMatrixSource::Velocity => "VEL",
-        ModMatrixSource::Keytrack => "KEY",
-        ModMatrixSource::ModWheel => "MW",
-        ModMatrixSource::Aftertouch => "AT",
-        ModMatrixSource::Slide => "SLD",
-        ModMatrixSource::None => "--",
-    }
+    src.short_label()
 }
 
 fn reset_dest_param_to_default(

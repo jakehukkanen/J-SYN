@@ -8,9 +8,11 @@ use crate::insert::{
     VoiceFeedbackState,
 };
 use crate::mod_matrix::{
-    ModDestination, ModMatrixState, NUM_ACTIVE_SOURCES, NUM_VOICE_MOD_DESTS,
+    ModDestination, ModMatrixSource, ModMatrixState, NUM_ACTIVE_SOURCES, NUM_VOICE_MOD_DESTS,
 };
-use crate::modseq::{ModSeqParams, ModSeqRetrig, ModSeqState, ModSeqStepBank};
+use crate::modseq::{
+    ModSeqParams, ModSeqRetrig, ModSeqState, ModSeqStepBank, NUM_MODSEQS, NUM_MOD_ENVS,
+};
 use crate::noise::{NoiseParams, NoiseState};
 use crate::oscillator::{
     osc_hz_offset_from_norm, osc_hz_offset_to_norm, EngineMode, ModSource, OscParams,
@@ -92,8 +94,8 @@ pub struct SynthParams {
     pub noise: NoiseParams,
     pub filters: [FilterParams; 2],
     pub routing: RoutingParams,
-    pub mod_envs: [AdsrParams; 3],
-    pub modseqs: [ModSeqParams; 4],
+    pub mod_envs: [AdsrParams; NUM_MOD_ENVS],
+    pub modseqs: [ModSeqParams; NUM_MODSEQS],
     pub modseq_steps: ModSeqStepBank,
     pub mod_matrix: ModMatrixState,
     pub macros: [f32; 8],
@@ -132,8 +134,8 @@ impl Default for SynthParams {
                 FilterParams::default_filter_2(),
             ],
             routing: RoutingParams::default(),
-            mod_envs: [AdsrParams::default(); 3],
-            modseqs: [ModSeqParams::default(); 4],
+            mod_envs: [AdsrParams::default(); NUM_MOD_ENVS],
+            modseqs: [ModSeqParams::default(); NUM_MODSEQS],
             modseq_steps: ModSeqStepBank::default(),
             mod_matrix: ModMatrixState::default(),
             macros: [0.0; 8],
@@ -748,8 +750,8 @@ pub struct Voice {
     pub inserts_aux: [InsertShaperState; 2],
     pub feedback: VoiceFeedbackState,
     pub amp_env: AmpAdsr,
-    pub mod_envs: [AmpAdsr; 3],
-    pub modseqs: [ModSeqState; 4],
+    pub mod_envs: [AmpAdsr; NUM_MOD_ENVS],
+    pub modseqs: [ModSeqState; NUM_MODSEQS],
     pub mod_offsets: [f32; NUM_VOICE_MOD_DESTS],
     pub target_mod_offsets: [f32; NUM_VOICE_MOD_DESTS],
     pub last_sources: [f32; NUM_ACTIVE_SOURCES],
@@ -795,8 +797,8 @@ impl Voice {
             inserts_aux: [InsertShaperState::new(), InsertShaperState::new()],
             feedback: VoiceFeedbackState::new(),
             amp_env: AmpAdsr::new(),
-            mod_envs: [AmpAdsr::new(); 3],
-            modseqs: [ModSeqState::new(); 4],
+            mod_envs: [AmpAdsr::new(); NUM_MOD_ENVS],
+            modseqs: [ModSeqState::new(); NUM_MODSEQS],
             mod_offsets: [0.0; NUM_VOICE_MOD_DESTS],
             target_mod_offsets: [0.0; NUM_VOICE_MOD_DESTS],
             last_sources: [0.0; NUM_ACTIVE_SOURCES],
@@ -858,11 +860,12 @@ impl Voice {
         &mut self,
         dt_seconds: f32,
         params: &SynthParams,
-        global_modseq_vals: &[f32; 4],
+        global_modseq_vals: &[f32; NUM_MODSEQS],
         mod_wheel: f32,
         global_aftertouch: f32,
         global_slide: f32,
         snap: bool,
+        is_telemetry_voice: bool,
     ) {
         if !self.active {
             return;
@@ -880,10 +883,18 @@ impl Voice {
         } else {
             48_000.0
         };
-        for i in 0..3 {
+        for i in 0..NUM_MOD_ENVS {
+            let src = ModMatrixSource::ENVS[1 + i];
+            let Some(src_idx) = src.active_index() else {
+                continue;
+            };
+            if !is_telemetry_voice && !params.mod_matrix.is_source_routed(src) {
+                sources[src_idx] = 0.0;
+                continue;
+            }
             let env_p = &params.mod_envs[i];
             if dt_seconds > 0.0 {
-                sources[1 + i] = self.mod_envs[i].process(
+                sources[src_idx] = self.mod_envs[i].process(
                     sr_equiv,
                     env_p.attack_s,
                     env_p.decay_s,
@@ -891,13 +902,21 @@ impl Voice {
                     env_p.release_s,
                 );
             } else {
-                sources[1 + i] = self.mod_envs[i].level();
+                sources[src_idx] = self.mod_envs[i].level();
             }
         }
-        for i in 0..4 {
+        for i in 0..NUM_MODSEQS {
+            let src = ModMatrixSource::MODSEQS[i];
+            let Some(src_idx) = src.active_index() else {
+                continue;
+            };
+            if !is_telemetry_voice && !params.mod_matrix.is_source_routed(src) {
+                sources[src_idx] = 0.0;
+                continue;
+            }
             let mut ms_p = params.modseqs[i];
             ms_p.rate_mod = self.mod_offsets[ModDestination::modseq_rate(i).index()];
-            sources[4 + i] = if ms_p.retrig == ModSeqRetrig::PolyVoice {
+            sources[src_idx] = if ms_p.retrig == ModSeqRetrig::PolyVoice {
                 self.modseqs[i].advance_with_mseg(
                     dt_seconds,
                     params.tempo_bpm,

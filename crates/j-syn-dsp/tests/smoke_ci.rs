@@ -198,6 +198,7 @@ fn torture_inserts_osc_pitch_modes_mod_slams_and_odd_block_splits() {
             aux_source: ModMatrixSource::None,
             curve: 0.0,
         };
+        params.mod_matrix.rebuild_index();
 
         engine.reset();
         engine.note_on(0, 60, 1.0, None, &params);
@@ -390,6 +391,7 @@ fn deterministic_scenarios_cross_platform_invariants() {
         aux_source: ModMatrixSource::None,
         curve: 0.0,
     };
+    fm_p.mod_matrix.rebuild_index();
     let fm_stats = run_scenario(&fm_p, sr, 0.35, 0.45);
     assert!(
         (-30.0..=-3.0).contains(&fm_stats.active_rms_db),

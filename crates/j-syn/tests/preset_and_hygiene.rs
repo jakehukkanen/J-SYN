@@ -373,3 +373,37 @@ fn anti_slop_single_timer_no_zindex_in_fx_scrollview_and_no_focus_within() {
         "Unsupported Vizia CSS selector :focus-within crashes Ableton Live"
     );
 }
+
+#[test]
+fn mod_matrix_256_slots_trimmed_json_roundtrip_and_4_slot_modseq_migration() {
+    use j_syn_dsp::{ModMatrixState, ModSeqStepBank, NUM_MODSEQS};
+
+    let empty = ModMatrixState::default();
+    let empty_json = serde_json::to_string(&empty).expect("serialize empty matrix");
+    assert_eq!(empty_json, r#"{"slots":[]}"#);
+
+    let mut small = ModMatrixState::default();
+    small.assign_or_update(ModMatrixSource::Env5, ModDestination::Filter1Cutoff, 0.5);
+    small.assign_or_update(ModMatrixSource::ModSeq8, ModDestination::Osc2Pan, -0.3);
+    let json = serde_json::to_string(&small).expect("serialize compact matrix");
+    let parsed_val: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed_val["slots"].as_array().unwrap().len(), 2);
+
+    let decoded: ModMatrixState = serde_json::from_str(&json).expect("deserialize compact matrix");
+    assert_eq!(decoded, small);
+    assert!(decoded.is_source_routed(ModMatrixSource::Env5));
+    assert!(decoded.is_source_routed(ModMatrixSource::ModSeq8));
+
+    // Legacy 4-slot ModSeqStepBank JSON pads cleanly to 8 slots
+    let default_bank = ModSeqStepBank::default();
+    let legacy_json = serde_json::json!({
+        "seqs": &default_bank.seqs[0..4],
+        "msegs": &default_bank.msegs[0..4],
+    });
+    let decoded_bank: ModSeqStepBank =
+        serde_json::from_value(legacy_json).expect("deserialize 4-slot ModSeqStepBank");
+    assert_eq!(decoded_bank.seqs[0..4], default_bank.seqs[0..4]);
+    assert_eq!(decoded_bank.msegs[0..4], default_bank.msegs[0..4]);
+    assert_eq!(decoded_bank.seqs.len(), NUM_MODSEQS);
+    assert_eq!(decoded_bank.msegs.len(), NUM_MODSEQS);
+}

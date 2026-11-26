@@ -423,12 +423,16 @@ impl Default for MsegCurve {
     }
 }
 
-/// Fixed-size persistence/ArcSwap container holding Performer steps and MSEG curves for all 4 `MODSEQ` engines.
+pub const NUM_ENVS: usize = 8;
+pub const NUM_MOD_ENVS: usize = NUM_ENVS - 1;
+pub const NUM_MODSEQS: usize = 8;
+
+/// Fixed-size persistence/ArcSwap container holding Performer steps and MSEG curves for all 8 `MODSEQ` engines.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct ModSeqStepBank {
-    pub seqs: [[ModSeqStep; MAX_MODSEQ_STEPS]; 4],
-    pub msegs: [MsegCurve; 4],
+    pub seqs: [[ModSeqStep; MAX_MODSEQ_STEPS]; NUM_MODSEQS],
+    pub msegs: [MsegCurve; NUM_MODSEQS],
 }
 
 #[derive(Deserialize)]
@@ -447,9 +451,9 @@ impl Default for ModSeqRowWire {
 #[serde(default)]
 struct ModSeqStepBankWire {
     #[serde(deserialize_with = "crate::serde_lenient::fixed_array")]
-    seqs: [ModSeqRowWire; 4],
+    seqs: [ModSeqRowWire; NUM_MODSEQS],
     #[serde(deserialize_with = "crate::serde_lenient::fixed_array")]
-    msegs: [MsegCurve; 4],
+    msegs: [MsegCurve; NUM_MODSEQS],
 }
 
 impl Default for ModSeqStepBankWire {
@@ -515,8 +519,17 @@ impl Default for ModSeqStepBank {
         // MODSEQ 4: Stepped sample & hold groove
         ModSeqShapePreset::SampleAndHold.apply_to_sequence(&mut s3, 8);
 
+        let mut s4 = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
+        let mut s5 = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
+        let mut s6 = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
+        let mut s7 = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
+        ModSeqShapePreset::RampUp.apply_to_sequence(&mut s4, 8);
+        ModSeqShapePreset::Pulse.apply_to_sequence(&mut s5, 8);
+        ModSeqShapePreset::RampDown.apply_to_sequence(&mut s6, 8);
+        ModSeqShapePreset::Triangle.apply_to_sequence(&mut s7, 8);
+
         Self {
-            seqs: [s0, s1, s2, s3],
+            seqs: [s0, s1, s2, s3, s4, s5, s6, s7],
             msegs: std::array::from_fn(|_| MsegCurve::default()),
         }
     }
