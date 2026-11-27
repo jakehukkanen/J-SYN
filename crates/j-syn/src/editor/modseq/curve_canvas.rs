@@ -172,6 +172,7 @@ impl ModSeqCurveCanvas {
         match mode {
             CanvasDragMode::StampLevel => {
                 let (row, col, level) = Self::cursor_row_col_level(bounds, x, y, scale);
+                self.mod_ui.set_active_modseq_row(self.seq_idx, row);
                 let tile = self.mod_ui.active_tile();
                 let swing = self.params.modseq_swing.value();
                 if tile.two_step {
