@@ -7,7 +7,7 @@ use std::time::Duration;
 use j_syn_dsp::mod_matrix::{
     ModDestination, ModMatrixSource, ModSlot, ModUiTelemetry, NUM_MOD_DESTS, NUM_MOD_SLOTS,
 };
-use j_syn_dsp::modseq::{ModSeqPaletteTile, MODSEQ_PALETTE_TILES};
+use j_syn_dsp::modseq::{ModSeqPaletteTile, MODSEQ_PALETTE_TILES, NUM_MODSEQS};
 use j_syn_dsp::{FxEngineSwapQueue, FxType, NUM_FX_BUSES, NUM_FX_SLOTS};
 use j_syn_ui::ModUiHost;
 use nih_plug_vizia::vizia::prelude::*;
@@ -15,7 +15,7 @@ use nih_plug_vizia::vizia::vg;
 
 use super::controls::bold_label;
 use super::fx_drag_overlay::FxDragState;
-use super::modseq_tab::ModSeqSubTab;
+use super::modseq::ModSeqSubTab;
 use super::{theme, BottomTab, UiEvent};
 use crate::JSynPluginParams;
 
@@ -50,7 +50,7 @@ pub(crate) struct ModUiState {
     inspected_dest: AtomicU16,
     inspected_slot: AtomicU8,
     active_stamp: AtomicU8,
-    active_modseq_row: AtomicU8,
+    active_modseq_rows: [AtomicU8; NUM_MODSEQS],
     mseg_snap: AtomicBool,
     last_enabled_mask: AtomicU64,
     external_sync_rev: AtomicU64,
@@ -83,7 +83,7 @@ impl ModUiState {
             inspected_dest: AtomicU16::new(UNSET_DEST),
             inspected_slot: AtomicU8::new(UNSET_U8),
             active_stamp: AtomicU8::new(2), // RampDown in MODSEQ_PALETTE_TILES
-            active_modseq_row: AtomicU8::new(0),
+            active_modseq_rows: std::array::from_fn(|_| AtomicU8::new(0)),
             mseg_snap: AtomicBool::new(false),
             last_enabled_mask: AtomicU64::new(initial_mask),
             external_sync_rev: AtomicU64::new(0),
@@ -126,13 +126,14 @@ impl ModUiState {
     }
 
     #[inline]
-    pub fn active_modseq_row(&self) -> usize {
-        (self.active_modseq_row.load(Ordering::Relaxed) as usize).min(1)
+    pub fn active_modseq_row(&self, seq_idx: usize) -> usize {
+        let idx = seq_idx.min(NUM_MODSEQS - 1);
+        (self.active_modseq_rows[idx].load(Ordering::Relaxed) as usize).min(1)
     }
 
-    pub fn set_active_modseq_row(&self, row: usize) {
-        self.active_modseq_row
-            .store((row.min(1)) as u8, Ordering::Relaxed);
+    pub fn set_active_modseq_row(&self, seq_idx: usize, row: usize) {
+        let idx = seq_idx.min(NUM_MODSEQS - 1);
+        self.active_modseq_rows[idx].store(row.min(1) as u8, Ordering::Relaxed);
     }
 
     #[inline]

@@ -554,7 +554,12 @@ fn resolve_patch_param_norm(patch: &JSynPatch, id: &str, ptr: ParamPtr) -> f32 {
                 }
                 if let Some(&norm) = patch.params.get(id) {
                     if norm.is_finite() {
-                        return norm.clamp(0.0, 1.0);
+                        let clamped = norm.clamp(0.0, 1.0);
+                        if patch.version < 2 && id.starts_with("ms_steps_") {
+                            let legacy_steps = (2.0 + clamped * 14.0).round();
+                            return clamp_finite_norm(ptr.preview_normalized(legacy_steps), ptr);
+                        }
+                        return clamped;
                     }
                 }
                 ptr.default_normalized_value()

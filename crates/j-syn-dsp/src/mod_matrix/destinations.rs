@@ -16,7 +16,7 @@ pub const FX_MOD_PARAMS_PER_SLOT: usize = 16;
 pub const NUM_VOICE_MOD_DESTS: usize = 92;
 /// FX-slot parameter destinations (`3 buses × 30 slots × 16 params = 1,440`).
 pub const NUM_FX_MOD_DESTS: usize = FX_MOD_BUSES * FX_MOD_SLOTS_PER_BUS * FX_MOD_PARAMS_PER_SLOT;
-/// Total modulatable destinations (`80 + 1,440 = 1,520`).
+/// Total modulatable destinations (`92 + 1,440 = 1,532`).
 pub const NUM_MOD_DESTS: usize = NUM_VOICE_MOD_DESTS + NUM_FX_MOD_DESTS;
 
 /// Modulation sources assignable in any matrix slot.

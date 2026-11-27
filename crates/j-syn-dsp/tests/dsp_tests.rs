@@ -1441,6 +1441,100 @@ fn modseq_32_steps_half_speed_spans_and_row_modulation() {
         eng.process_sample(&params, &bank);
     }
     assert!((eng.telemetry().dest_offset(ModDestination::Osc1Warp) - 0.85).abs() < 0.05);
+
+    // 5. Block-size / tick-rate invariance across 44.1 kHz and 48 kHz (1-step vs 512-step)
+    for sr in [44_100.0_f32, 48_000.0_f32] {
+        let mut ms_fine = ModSeqState::new();
+        let mut ms_coarse = ModSeqState::new();
+        let dt_fine = 1.0 / sr;
+        let dt_coarse = 512.0 / sr;
+        let mut out_fine = 0.0;
+        let mut out_coarse = 0.0;
+        for _ in 0..4 {
+            for _ in 0..512 {
+                out_fine = ms_fine.advance_with_mseg(
+                    dt_fine,
+                    120.0,
+                    &p_loop,
+                    &steps,
+                    &MsegCurve::default(),
+                );
+            }
+            out_coarse = ms_coarse.advance_with_mseg(
+                dt_coarse,
+                120.0,
+                &p_loop,
+                &steps,
+                &MsegCurve::default(),
+            );
+        }
+        assert!(
+            (out_fine - out_coarse).abs() < 1e-4 && (ms_fine.phase - ms_coarse.phase).abs() < 1e-4,
+            "Sample-rate {sr} block invariance failed: fine={out_fine}, coarse={out_coarse}"
+        );
+    }
+
+    // 6. OneShot & PingPong with Row2 + Continue / LoopRow and partial Row 2 lengths (20, 24, 31)
+    assert_eq!(
+        resolve_modseq_step(20, ModSeqRowStart::Row2, ModSeqRowMode::Continue, 0.0, 0.0).0,
+        16
+    );
+    assert_eq!(
+        resolve_modseq_step(20, ModSeqRowStart::Row2, ModSeqRowMode::Continue, 0.0, 0.25).0,
+        1
+    );
+    assert_eq!(
+        resolve_modseq_step(24, ModSeqRowStart::Row2, ModSeqRowMode::Continue, 0.0, 0.5).0,
+        4
+    );
+    assert_eq!(
+        resolve_modseq_step(31, ModSeqRowStart::Row2, ModSeqRowMode::Continue, 0.0, 0.45).0,
+        29
+    );
+
+    let mut ms_oneshot = ModSeqState::new();
+    let p_oneshot = ModSeqParams {
+        play_mode: ModSeqPlayMode::OneShot,
+        sync_mode: ModSeqSyncMode::Free,
+        rate_norm: 0.767, // ~10 Hz
+        num_steps: 24,
+        smooth: 0.0,
+        start_row: ModSeqRowStart::Row2,
+        row_mode: ModSeqRowMode::Continue,
+        ..ModSeqParams::default()
+    };
+    for _ in 0..20 {
+        ms_oneshot.advance_with_mseg(0.02, 120.0, &p_oneshot, &steps, &MsegCurve::default());
+    }
+    assert!(ms_oneshot.completed);
+
+    let mut ms_pp = ModSeqState::new();
+    let p_pp = ModSeqParams {
+        play_mode: ModSeqPlayMode::PingPong,
+        ..p_oneshot
+    };
+    for _ in 0..20 {
+        let v = ms_pp.advance_with_mseg(0.02, 120.0, &p_pp, &steps, &MsegCurve::default());
+        assert!(v.is_finite() && (0.0..=1.0).contains(&v));
+    }
+
+    // 7. NaN and out-of-range row_mod safety
+    assert_eq!(
+        resolve_modseq_step(32, ModSeqRowStart::Row1, ModSeqRowMode::LoopRow, f32::NAN, 0.0).0,
+        0
+    );
+    assert_eq!(
+        resolve_modseq_step(32, ModSeqRowStart::Row2, ModSeqRowMode::LoopRow, f32::NAN, 0.0).0,
+        16
+    );
+    assert_eq!(
+        resolve_modseq_step(32, ModSeqRowStart::Row2, ModSeqRowMode::LoopRow, -10.0, 0.0).0,
+        0
+    );
+    assert_eq!(
+        resolve_modseq_step(32, ModSeqRowStart::Row1, ModSeqRowMode::LoopRow, 10.0, 0.0).0,
+        16
+    );
 }
 
 #[test]
