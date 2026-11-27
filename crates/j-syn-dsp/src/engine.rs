@@ -701,9 +701,11 @@ impl SynthEngine {
         if params.engine_mode == EngineMode::Hq {
             let dt_sample = 1.0 / self.sample_rate;
             let rate_mods = self.current_global_modseq_rate_mods();
+            let row_mods = self.current_global_modseq_row_mods();
             for i in 0..NUM_MODSEQS {
                 let mut ms_p = params.modseqs[i];
                 ms_p.rate_mod = rate_mods[i];
+                ms_p.row_mod = row_mods[i];
                 self.global_modseq_vals[i] = self.global_modseqs[i].advance_with_mseg(
                     dt_sample,
                     params.tempo_bpm,
@@ -739,9 +741,11 @@ impl SynthEngine {
         } else if is_control_tick {
             let dt_tick = (self.control_tick_period as f32) / self.sample_rate;
             let rate_mods = self.current_global_modseq_rate_mods();
+            let row_mods = self.current_global_modseq_row_mods();
             for i in 0..NUM_MODSEQS {
                 let mut ms_p = params.modseqs[i];
                 ms_p.rate_mod = rate_mods[i];
+                ms_p.row_mod = row_mods[i];
                 self.global_modseq_vals[i] = self.global_modseqs[i].advance_with_mseg(
                     dt_tick,
                     params.tempo_bpm,
@@ -957,15 +961,23 @@ impl SynthEngine {
         std::array::from_fn(|i| self.global_mod_offsets[ModDestination::modseq_rate(i).index()])
     }
 
+    #[inline]
+    fn current_global_modseq_row_mods(&self) -> [f32; NUM_MODSEQS] {
+        std::array::from_fn(|i| self.global_mod_offsets[ModDestination::modseq_row(i).index()])
+    }
+
     fn publish_telemetry(&self, params: &SynthParams) {
         if let Some(v) = self.voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {
             let mut modseq_phases = [0.0_f32; NUM_MODSEQS];
+            let mut modseq_display_phases = [0.0_f32; NUM_MODSEQS];
             for i in 0..NUM_MODSEQS {
-                modseq_phases[i] = if params.modseqs[i].retrig == ModSeqRetrig::PolyVoice {
-                    v.modseqs[i].phase
+                if params.modseqs[i].retrig == ModSeqRetrig::PolyVoice {
+                    modseq_phases[i] = v.modseqs[i].phase;
+                    modseq_display_phases[i] = v.modseqs[i].display_phase;
                 } else {
-                    self.global_modseqs[i].phase
-                };
+                    modseq_phases[i] = self.global_modseqs[i].phase;
+                    modseq_display_phases[i] = self.global_modseqs[i].display_phase;
+                }
             }
             let mut env_levels = [0.0_f32; NUM_ENVS];
             env_levels[0] = v.amp_env.level();
@@ -976,6 +988,7 @@ impl SynthEngine {
                 &self.global_mod_offsets,
                 &v.last_sources,
                 &modseq_phases,
+                &modseq_display_phases,
                 &env_levels,
             );
             for (i, flt) in params.filters.iter().enumerate() {
@@ -988,15 +1001,18 @@ impl SynthEngine {
         } else {
             let idle_sources = self.build_idle_sources(params);
             let mut modseq_phases = [0.0_f32; NUM_MODSEQS];
+            let mut modseq_display_phases = [0.0_f32; NUM_MODSEQS];
             for i in 0..NUM_MODSEQS {
                 if params.modseqs[i].retrig == ModSeqRetrig::MonoGlobal {
                     modseq_phases[i] = self.global_modseqs[i].phase;
+                    modseq_display_phases[i] = self.global_modseqs[i].display_phase;
                 }
             }
             self.telemetry.store_voice_snapshot(
                 &self.global_mod_offsets,
                 &idle_sources,
                 &modseq_phases,
+                &modseq_display_phases,
                 &[0.0; NUM_ENVS],
             );
             for (i, flt) in params.filters.iter().enumerate() {

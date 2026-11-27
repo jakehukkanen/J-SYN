@@ -916,6 +916,7 @@ impl Voice {
             }
             let mut ms_p = params.modseqs[i];
             ms_p.rate_mod = self.mod_offsets[ModDestination::modseq_rate(i).index()];
+            ms_p.row_mod = self.mod_offsets[ModDestination::modseq_row(i).index()];
             sources[src_idx] = if ms_p.retrig == ModSeqRetrig::PolyVoice {
                 self.modseqs[i].advance_with_mseg(
                     dt_seconds,
