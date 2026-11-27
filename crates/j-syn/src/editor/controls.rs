@@ -1,8 +1,8 @@
 //! J-SYN adapter controls re-exporting shared `j_syn_ui::controls::*` plus J-SYN-specific
 //! wavetable browser dropdown and center stage tab buttons.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use j_syn_dsp::WavetableBank;
 use nih_plug::prelude::{Enum, GuiContext, Param, ParamSetter};
@@ -10,14 +10,14 @@ use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 
 pub(crate) use j_syn_ui::controls::{
+    ArrowButton, ArrowDir, CheckIcon, CollapseButton, CrossButton, GearIcon, ScrollDropdown,
     bold_label, build_directory_tree_items, build_directory_tree_panes,
     build_dropdown_trigger_labels, build_flex_knob_cell_mod, build_flex_knob_cell_mod_dim,
     build_flex_knob_cell_mod_dim_tooltip, build_flex_pill_cell, build_header_knob_cell,
     build_inline_pill_cell, build_inline_pill_cell_mod, build_knob_cell, build_knob_cell_mod_fmt,
-    build_knob_cell_with_readout, build_mini_pill_cell, build_module_header,
-    build_param_readout_box, build_pitch_tuning_group, build_ratio_tuning_row,
-    build_rotary_knob_with_opt_mod, build_ui_scale_dropdown, ArrowButton, ArrowDir, CheckIcon,
-    CollapseButton, CrossButton, GearIcon, ScrollDropdown,
+    build_knob_cell_with_readout, build_module_header, build_param_readout_box,
+    build_pitch_tuning_group, build_ratio_tuning_row, build_rotary_knob_with_opt_mod,
+    build_ui_scale_dropdown,
 };
 
 use super::{BottomTab, CenterStageTab, UiData, UiEvent};
@@ -280,10 +280,7 @@ pub(crate) fn build_wavetable_dropdown(
                                 }
                             }
                         }
-                        param.normalized_value_to_string(
-                            param.modulated_normalized_value(),
-                            true,
-                        )
+                        param.normalized_value_to_string(param.modulated_normalized_value(), true)
                     },
                 );
                 HStack::new(cx, move |cx| {
@@ -301,8 +298,7 @@ pub(crate) fn build_wavetable_dropdown(
                 let g_dir = gui_context.clone();
                 Binding::new(cx, UiData::wavetables_dir_rev, move |cx, _| {
                     let cfg = crate::presets::JSynConfig::load();
-                    let tree =
-                        crate::presets::scan_wavetable_tree(cfg.wavetables_dir.as_deref());
+                    let tree = crate::presets::scan_wavetable_tree(cfg.wavetables_dir.as_deref());
                     let expanded = UiData::expanded_wt_folder.get(cx);
                     let p_hdr = p_dir.clone();
                     let g_hdr = g_dir.clone();
