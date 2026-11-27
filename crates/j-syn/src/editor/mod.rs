@@ -675,12 +675,7 @@ fn build_center_wing(
             let u_row2 = u_tabs;
             VStack::new(cx, move |cx| {
                 HStack::new(cx, move |cx| {
-                    for &src in &ModMatrixSource::ENVS[0..4] {
-                        ModSourcePill::new(cx, src, u_row1.clone())
-                            .width(Stretch(0.9))
-                            .height(Stretch(1.0));
-                    }
-                    for &src in &ModMatrixSource::MODSEQS[0..4] {
+                    for &src in &ModMatrixSource::MODSEQS {
                         ModSourcePill::new(cx, src, u_row1.clone())
                             .width(Stretch(1.0))
                             .height(Stretch(1.0));
@@ -692,12 +687,7 @@ fn build_center_wing(
                 .height(Stretch(1.0));
 
                 HStack::new(cx, move |cx| {
-                    for &src in &ModMatrixSource::ENVS[4..8] {
-                        ModSourcePill::new(cx, src, u_row2.clone())
-                            .width(Stretch(0.9))
-                            .height(Stretch(1.0));
-                    }
-                    for &src in &ModMatrixSource::MODSEQS[4..8] {
+                    for &src in &ModMatrixSource::ENVS {
                         ModSourcePill::new(cx, src, u_row2.clone())
                             .width(Stretch(1.0))
                             .height(Stretch(1.0));
