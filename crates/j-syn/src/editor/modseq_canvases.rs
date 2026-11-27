@@ -4,16 +4,16 @@
 use std::sync::Arc;
 
 use j_syn_dsp::{
-    evaluate_adsr_preview, evaluate_modseq_curve_with_swing, evaluate_mseg_curve,
-    evaluate_step_shape, AdsrParams, LfoPreset, ModSeqStep, ModSeqStepShape, MsegNode,
-    MAX_MODSEQ_STEPS, MAX_MSEG_NODES,
+    evaluate_adsr_preview, evaluate_mseg_curve, evaluate_step_shape, AdsrParams, LfoPreset,
+    ModSeqRowMode, ModSeqRowStart, ModSeqStep, ModSeqStepShape, ModSeqStepSpan, MsegNode,
+    MAX_MODSEQ_STEPS, MAX_MSEG_NODES, MODSEQ_PALETTE_TILES, MODSEQ_ROW_STEPS,
 };
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::util::ModifiersExt;
 
 use super::mod_bar::ModUiState;
-use super::UiEvent;
+use super::{tokens, UiEvent};
 use crate::{JSynPluginParams, ModSeqModeParam};
 
 pub(super) struct ModSeqCurveCanvas {
@@ -21,6 +21,7 @@ pub(super) struct ModSeqCurveCanvas {
     params: Arc<JSynPluginParams>,
     mod_ui: Arc<ModUiState>,
     drag_mode: Option<CanvasDragMode>,
+    bold_font: std::cell::Cell<Option<vg::FontId>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +45,7 @@ impl ModSeqCurveCanvas {
             params,
             mod_ui,
             drag_mode: None,
+            bold_font: std::cell::Cell::new(None),
         }
         .build(cx, |_| {})
     }
@@ -62,12 +64,26 @@ impl ModSeqCurveCanvas {
         (x0, y0, w, h)
     }
 
-    fn cursor_step_and_level(&self, bounds: BoundingBox, x: f32, y: f32, num_steps: usize) -> (usize, f32) {
-        let (x0, y0, w, h) = Self::inner_rect(bounds, 1.0);
-        let nx = ((x - x0) / w).clamp(0.0, 0.999_9);
-        let ny = 1.0 - ((y - y0) / h).clamp(0.0, 1.0);
-        let step_idx = ((nx * (num_steps as f32)).floor() as usize).min(num_steps - 1);
-        (step_idx, ny)
+    /// Computes `(row1_rect, row2_rect)` for the locked `2 × 16` Performer grid separated by `MODSEQ_ROW_SEP_H`.
+    /// Note: if testing dynamic width-stretching for `STEPS <= 16` later, Row 1 column count can be `num_steps.min(16)`.
+    fn row_rects(bounds: BoundingBox, scale: f32) -> ((f32, f32, f32, f32), (f32, f32, f32, f32)) {
+        let s = scale.max(1.0);
+        let (x0, y0, w, total_h) = Self::inner_rect(bounds, s);
+        let sep = tokens::MODSEQ_ROW_SEP_H * s;
+        let row_h = ((total_h - sep) * 0.5).max(1.0);
+        ((x0, y0, w, row_h), (x0, y0 + row_h + sep, w, row_h))
+    }
+
+    fn cursor_row_col_level(bounds: BoundingBox, x: f32, y: f32, scale: f32) -> (usize, usize, f32) {
+        let s = scale.max(1.0);
+        let (r1, r2) = Self::row_rects(bounds, s);
+        let sep = tokens::MODSEQ_ROW_SEP_H * s;
+        let row = if y >= r2.1 - sep * 0.5 { 1 } else { 0 };
+        let (rx, ry, rw, rh) = if row == 0 { r1 } else { r2 };
+        let nx = ((x - rx) / rw).clamp(0.0, 0.999_9);
+        let ny = 1.0 - ((y - ry) / rh).clamp(0.0, 1.0);
+        let col = ((nx * (MODSEQ_ROW_STEPS as f32)).floor() as usize).min(MODSEQ_ROW_STEPS - 1);
+        (row, col, ny)
     }
 
     fn cursor_norm_xy(bounds: BoundingBox, x: f32, y: f32, scale: f32) -> (f32, f32) {
@@ -125,27 +141,34 @@ impl ModSeqCurveCanvas {
         let mut bank = self.params.modseq_steps.snapshot();
         match mode {
             CanvasDragMode::StampLevel => {
-                let num_steps = self.params.modseqs[self.seq_idx]
-                    .num_steps
-                    .value()
-                    .clamp(2, MAX_MODSEQ_STEPS as i32) as usize;
-                let (hovered_step, level) = self.cursor_step_and_level(bounds, x, y, num_steps);
-                let shape = self.mod_ui.active_stamp();
-                let tension = if self.params.modseq_swing.value() {
-                    bank.seqs[self.seq_idx][hovered_step].tension
+                let (row, col, level) = Self::cursor_row_col_level(bounds, x, y, scale);
+                let tile = self.mod_ui.active_tile();
+                let swing = self.params.modseq_swing.value();
+                if tile.two_step {
+                    let c0 = col.min(MODSEQ_ROW_STEPS - 2);
+                    let s0 = row * MODSEQ_ROW_STEPS + c0;
+                    let t0 = if swing { bank.seqs[self.seq_idx][s0].tension } else { 0.0 };
+                    let t1 = if swing { bank.seqs[self.seq_idx][s0 + 1].tension } else { 0.0 };
+                    bank.seqs[self.seq_idx][s0] =
+                        ModSeqStep::stamped_with_span(tile.shape, level, t0, ModSeqStepSpan::HalfFirst);
+                    bank.seqs[self.seq_idx][s0 + 1] =
+                        ModSeqStep::stamped_with_span(tile.shape, level, t1, ModSeqStepSpan::HalfSecond);
                 } else {
-                    0.0
-                };
-                bank.seqs[self.seq_idx][hovered_step] = ModSeqStep::stamped(shape, level, tension);
+                    let step_idx = row * MODSEQ_ROW_STEPS + col;
+                    let tension = if swing {
+                        bank.seqs[self.seq_idx][step_idx].tension
+                    } else {
+                        0.0
+                    };
+                    bank.seqs[self.seq_idx][step_idx] =
+                        ModSeqStep::stamped_with_span(tile.shape, level, tension, tile.span);
+                }
             }
             CanvasDragMode::EndLevel { step_idx } => {
-                let num_steps = self.params.modseqs[self.seq_idx]
-                    .num_steps
-                    .value()
-                    .clamp(2, MAX_MODSEQ_STEPS as i32) as usize;
-                let (_hovered, level) = self.cursor_step_and_level(bounds, x, y, num_steps);
+                let (_, _, level) = Self::cursor_row_col_level(bounds, x, y, scale);
                 let s = &mut bank.seqs[self.seq_idx][step_idx.min(MAX_MODSEQ_STEPS - 1)];
                 s.shape = ModSeqStepShape::Linear;
+                s.span = ModSeqStepSpan::Full;
                 s.end_level = level;
             }
             CanvasDragMode::StepTension {
@@ -269,11 +292,9 @@ impl View for ModSeqCurveCanvas {
                     return;
                 }
 
-                let num_steps = self.params.modseqs[self.seq_idx]
-                    .num_steps
-                    .value()
-                    .clamp(2, MAX_MODSEQ_STEPS as i32) as usize;
-                let (step_idx, _lvl) = self.cursor_step_and_level(bounds, mx, my, num_steps);
+                let (row, col, _lvl) = Self::cursor_row_col_level(bounds, mx, my, scale);
+                self.mod_ui.set_active_modseq_row(row);
+                let step_idx = row * MODSEQ_ROW_STEPS + col;
                 let mode = if cx.modifiers().contains(Modifiers::ALT) {
                     let bank = self.params.modseq_steps.snapshot();
                     CanvasDragMode::StepTension {
@@ -315,11 +336,9 @@ impl View for ModSeqCurveCanvas {
                         start_tension: mseg.nodes[seg_idx].tension,
                     });
                 } else {
-                    let num_steps = self.params.modseqs[self.seq_idx]
-                        .num_steps
-                        .value()
-                        .clamp(2, MAX_MODSEQ_STEPS as i32) as usize;
-                    let (step_idx, _) = self.cursor_step_and_level(bounds, mx, my, num_steps);
+                    let (row, col, _) = Self::cursor_row_col_level(bounds, mx, my, scale);
+                    self.mod_ui.set_active_modseq_row(row);
+                    let step_idx = row * MODSEQ_ROW_STEPS + col;
                     self.drag_mode = Some(CanvasDragMode::StepTension {
                         step_idx,
                         start_y: my,
@@ -391,11 +410,9 @@ impl View for ModSeqCurveCanvas {
                     return;
                 }
 
-                let num_steps = self.params.modseqs[self.seq_idx]
-                    .num_steps
-                    .value()
-                    .clamp(2, MAX_MODSEQ_STEPS as i32) as usize;
-                let (step_idx, _) = self.cursor_step_and_level(bounds, mx, my, num_steps);
+                let (row, col, _) = Self::cursor_row_col_level(bounds, mx, my, scale);
+                self.mod_ui.set_active_modseq_row(row);
+                let step_idx = row * MODSEQ_ROW_STEPS + col;
                 let mut bank = self.params.modseq_steps.snapshot();
                 bank.seqs[self.seq_idx][step_idx] = ModSeqStep::default();
                 self.params.modseq_steps.store_value(bank);
@@ -459,108 +476,79 @@ impl View for ModSeqCurveCanvas {
         let bank = self.params.modseq_steps.snapshot();
         let steps = &bank.seqs[self.seq_idx];
         let mseg = &bank.msegs[self.seq_idx];
+        let groove_swing = self.params.modseq_swing.value();
 
-        // Subtle grid (in LFO mode with SNAP enabled, show 1/16 x 1/8 snap lines)
         let mut grid_paint = vg::Paint::color(super::theme::vg_color(&pal.scope_grid, 175));
         grid_paint.set_line_width(0.8 * dpx);
-        let mut snap_grid_paint = vg::Paint::color(super::theme::vg_color(&pal.scope_grid, 90));
-        snap_grid_paint.set_line_width(0.65 * dpx);
-        let snap_on = is_mseg && self.mod_ui.mseg_snap();
 
-        let h_divs = if snap_on { 8 } else { 4 };
-        for g in 1..h_divs {
-            let gy = y0 + (g as f32 / h_divs as f32) * h;
-            let mut line = vg::Path::new();
-            line.move_to(x0, gy);
-            line.line_to(x0 + w, gy);
-            let paint = if snap_on && g % 2 != 0 {
-                &snap_grid_paint
-            } else {
-                &grid_paint
-            };
-            canvas.stroke_path(&line, paint);
-        }
-        let v_divs = if is_mseg {
-            if snap_on { 16 } else { 4 }
-        } else {
-            num_steps
-        };
-        for s in 1..v_divs {
-            let gx = x0 + (s as f32 / v_divs as f32) * w;
-            let mut line = vg::Path::new();
-            line.move_to(gx, y0);
-            line.line_to(gx, y0 + h);
-            let paint = if snap_on && s % 4 != 0 {
-                &snap_grid_paint
-            } else {
-                &grid_paint
-            };
-            canvas.stroke_path(&line, paint);
-        }
+        if is_mseg {
+            // Subtle grid (in LFO mode with SNAP enabled, show 1/16 x 1/8 snap lines)
+            let mut snap_grid_paint = vg::Paint::color(super::theme::vg_color(&pal.scope_grid, 90));
+            snap_grid_paint.set_line_width(0.65 * dpx);
+            let snap_on = self.mod_ui.mseg_snap();
 
-        // Subtle per-step depth bars in MODSEQ mode so stamped amplitudes read at a glance
-        if !is_mseg {
-            let step_w = w / num_steps as f32;
-            for (s, step) in steps.iter().enumerate().take(num_steps) {
-                let lvl = step.start_level.clamp(0.0, 1.0);
-                if lvl > 0.005 {
-                    let bx = x0 + s as f32 * step_w + 1.0 * dpx;
-                    let bw = (step_w - 2.0 * dpx).max(1.0);
-                    let bh = lvl * h;
-                    let mut bar = vg::Path::new();
-                    bar.rounded_rect(bx, y0 + h - bh, bw, bh, 1.5 * dpx);
-                    canvas.fill_path(&bar, &vg::Paint::color(vg::Color::rgba(ar, ag, ab, 20)));
+            let h_divs = if snap_on { 8 } else { 4 };
+            for g in 1..h_divs {
+                let gy = y0 + (g as f32 / h_divs as f32) * h;
+                let mut line = vg::Path::new();
+                line.move_to(x0, gy);
+                line.line_to(x0 + w, gy);
+                let paint = if snap_on && g % 2 != 0 {
+                    &snap_grid_paint
+                } else {
+                    &grid_paint
+                };
+                canvas.stroke_path(&line, paint);
+            }
+            let v_divs = if snap_on { 16 } else { 4 };
+            for s in 1..v_divs {
+                let gx = x0 + (s as f32 / v_divs as f32) * w;
+                let mut line = vg::Path::new();
+                line.move_to(gx, y0);
+                line.line_to(gx, y0 + h);
+                let paint = if snap_on && s % 4 != 0 {
+                    &snap_grid_paint
+                } else {
+                    &grid_paint
+                };
+                canvas.stroke_path(&line, paint);
+            }
+
+            let samples = 128usize;
+            let mut fill_path = vg::Path::new();
+            let mut stroke_path = vg::Path::new();
+            fill_path.move_to(x0, y0 + h);
+            for i in 0..=samples {
+                let t = (i as f32 / samples as f32).min(0.999_999);
+                let val = evaluate_mseg_curve(mseg, t);
+                let px = x0 + (i as f32 / samples as f32) * w;
+                let py = y0 + (1.0 - val) * h;
+                fill_path.line_to(px, py);
+                if i == 0 {
+                    stroke_path.move_to(px, py);
+                } else {
+                    stroke_path.line_to(px, py);
                 }
             }
-        }
+            fill_path.line_to(x0 + w, y0 + h);
+            fill_path.close();
 
-        // Filled + stroked continuous curve
-        let groove_swing = self.params.modseq_swing.value();
-        let samples = if is_mseg {
-            128
-        } else {
-            (num_steps * 24).max(128)
-        };
-        let mut fill_path = vg::Path::new();
-        let mut stroke_path = vg::Path::new();
-        fill_path.move_to(x0, y0 + h);
-        for i in 0..=samples {
-            let t = (i as f32 / samples as f32).min(0.999_999);
-            let val = if is_mseg {
-                evaluate_mseg_curve(mseg, t)
-            } else {
-                evaluate_modseq_curve_with_swing(steps, num_steps, t, groove_swing)
-            };
-            let px = x0 + (i as f32 / samples as f32) * w;
-            let py = y0 + (1.0 - val) * h;
-            fill_path.line_to(px, py);
-            if i == 0 {
-                stroke_path.move_to(px, py);
-            } else {
-                stroke_path.line_to(px, py);
-            }
-        }
-        fill_path.line_to(x0 + w, y0 + h);
-        fill_path.close();
+            let fill_paint = vg::Paint::linear_gradient(
+                x0,
+                y0,
+                x0,
+                y0 + h,
+                vg::Color::rgba(ar, ag, ab, 95),
+                vg::Color::rgba(ar, ag, ab, 14),
+            );
+            canvas.fill_path(&fill_path, &fill_paint);
 
-        let fill_paint = vg::Paint::linear_gradient(
-            x0,
-            y0,
-            x0,
-            y0 + h,
-            vg::Color::rgba(ar, ag, ab, 95),
-            vg::Color::rgba(ar, ag, ab, 14),
-        );
-        canvas.fill_path(&fill_path, &fill_paint);
+            let mut stroke_paint = vg::Paint::color(vg::Color::rgb(ar, ag, ab));
+            stroke_paint.set_line_width(1.8 * dpx);
+            stroke_paint.set_line_cap(vg::LineCap::Round);
+            stroke_paint.set_line_join(vg::LineJoin::Round);
+            canvas.stroke_path(&stroke_path, &stroke_paint);
 
-        let mut stroke_paint = vg::Paint::color(vg::Color::rgb(ar, ag, ab));
-        stroke_paint.set_line_width(1.8 * dpx);
-        stroke_paint.set_line_cap(vg::LineCap::Round);
-        stroke_paint.set_line_join(vg::LineJoin::Round);
-        canvas.stroke_path(&stroke_path, &stroke_paint);
-
-        // Node/step control points
-        if is_mseg {
             let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
             for i in 0..(n - 1) {
                 let mid_x = 0.5 * (mseg.nodes[i].time_x + mseg.nodes[i + 1].time_x);
@@ -581,41 +569,228 @@ impl View for ModSeqCurveCanvas {
                 inner.circle(nx, ny, 2.0 * dpx);
                 canvas.fill_path(&inner, &vg::Paint::color(vg::Color::rgb(255, 248, 236)));
             }
-        } else {
-            let step_w = w / num_steps as f32;
-            for (s, step) in steps.iter().enumerate().take(num_steps) {
-                let sx0 = x0 + s as f32 * step_w;
+
+            let phase = self.mod_ui.telemetry.modseq_phase(self.seq_idx).clamp(0.0, 1.0);
+            let ph_x = x0 + phase * w;
+            let mut ph_line = vg::Path::new();
+            ph_line.move_to(ph_x, y0);
+            ph_line.line_to(ph_x, y0 + h);
+            let mut ph_paint = vg::Paint::color(vg::Color::rgba(255, 248, 232, 210));
+            ph_paint.set_line_width(1.4 * dpx);
+            canvas.stroke_path(&ph_line, &ph_paint);
+
+            let cur_val = evaluate_mseg_curve(mseg, phase.min(0.999_999));
+            let mut ph_dot = vg::Path::new();
+            ph_dot.circle(ph_x, y0 + (1.0 - cur_val) * h, 3.0 * dpx);
+            canvas.fill_path(&ph_dot, &vg::Paint::color(vg::Color::rgb(ar, ag, ab)));
+            let mut ph_ring = vg::Paint::color(vg::Color::rgb(255, 248, 232));
+            ph_ring.set_line_width(1.1 * dpx);
+            canvas.stroke_path(&ph_dot, &ph_ring);
+            return;
+        }
+
+        // MODSEQ Performer 2×16 grid with 4 px separator
+        let (r1, r2) = Self::row_rects(bounds, dpx);
+        let sep_y = r1.1 + r1.3;
+        let sep_h = (r2.1 - sep_y).max(1.0);
+        let mut sep_rect = vg::Path::new();
+        sep_rect.rect(r1.0, sep_y, r1.2, sep_h);
+        canvas.fill_path(
+            &sep_rect,
+            &vg::Paint::color(super::theme::vg_color(&pal.border_mid, 140)),
+        );
+
+        let start_row: ModSeqRowStart = self.params.modseqs[self.seq_idx].start_row.value().into();
+        let row_mode: ModSeqRowMode = self.params.modseqs[self.seq_idx].row_mode.value().into();
+        let active_row = self.mod_ui.active_modseq_row();
+        let is_step_active = |s: usize| -> bool {
+            let row = s / MODSEQ_ROW_STEPS;
+            let col = s % MODSEQ_ROW_STEPS;
+            match row_mode {
+                ModSeqRowMode::LoopRow => {
+                    let target_row = usize::from(start_row == ModSeqRowStart::Row2);
+                    row == target_row && col < num_steps.min(MODSEQ_ROW_STEPS)
+                }
+                ModSeqRowMode::Continue => {
+                    if num_steps <= MODSEQ_ROW_STEPS {
+                        let target_row = usize::from(start_row == ModSeqRowStart::Row2);
+                        row == target_row && col < num_steps
+                    } else {
+                        s < num_steps
+                    }
+                }
+            }
+        };
+
+        let font_id = j_syn_ui::shell::ensure_canvas_bold_font(canvas, &self.bold_font);
+        let mut stroke_paint = vg::Paint::color(vg::Color::rgb(ar, ag, ab));
+        stroke_paint.set_line_width(1.7 * dpx);
+        stroke_paint.set_line_cap(vg::LineCap::Round);
+        stroke_paint.set_line_join(vg::LineJoin::Round);
+
+        for row in 0..2 {
+            let (rx, ry, rw, rh) = if row == 0 { r1 } else { r2 };
+            let step_w = rw / MODSEQ_ROW_STEPS as f32;
+
+            // Horizontal & 16-column vertical grid lines
+            for g in 1..4 {
+                let gy = ry + (g as f32 / 4.0) * rh;
+                let mut line = vg::Path::new();
+                line.move_to(rx, gy);
+                line.line_to(rx + rw, gy);
+                canvas.stroke_path(&line, &grid_paint);
+            }
+            for c in 1..MODSEQ_ROW_STEPS {
+                let gx = rx + (c as f32) * step_w;
+                let mut line = vg::Path::new();
+                line.move_to(gx, ry);
+                line.line_to(gx, ry + rh);
+                canvas.stroke_path(&line, &grid_paint);
+            }
+
+            // Subtle per-step depth bars
+            for col in 0..MODSEQ_ROW_STEPS {
+                let s = row * MODSEQ_ROW_STEPS + col;
+                let lvl = steps[s].start_level.clamp(0.0, 1.0);
+                if lvl > 0.005 {
+                    let bx = rx + col as f32 * step_w + 1.0 * dpx;
+                    let bw = (step_w - 2.0 * dpx).max(1.0);
+                    let bh = lvl * rh;
+                    let mut bar = vg::Path::new();
+                    bar.rounded_rect(bx, ry + rh - bh, bw, bh, 1.5 * dpx);
+                    canvas.fill_path(&bar, &vg::Paint::color(vg::Color::rgba(ar, ag, ab, 20)));
+                }
+            }
+
+            // Crisp per-step curve polyline with exact vertical step transitions
+            const SUB_SAMPLES: usize = 20;
+            let mut fill_path = vg::Path::new();
+            let mut stroke_path = vg::Path::new();
+            fill_path.move_to(rx, ry + rh);
+            let mut started = false;
+            for col in 0..MODSEQ_ROW_STEPS {
+                let s = row * MODSEQ_ROW_STEPS + col;
+                let mut step = steps[s];
+                if groove_swing {
+                    const SWING: [f32; 8] = [-0.40, 0.0, -0.35, 0.0, -0.30, 0.0, -0.50, 0.0];
+                    step.tension = (step.tension + SWING[s % SWING.len()]).clamp(-1.0, 1.0);
+                }
+                let sx0 = rx + col as f32 * step_w;
+                for k in 0..=SUB_SAMPLES {
+                    let local_t = k as f32 / SUB_SAMPLES as f32;
+                    let val = evaluate_step_shape(step, local_t);
+                    let px = sx0 + local_t * step_w;
+                    let py = ry + (1.0 - val) * rh;
+                    fill_path.line_to(px, py);
+                    if !started {
+                        stroke_path.move_to(px, py);
+                        started = true;
+                    } else {
+                        stroke_path.line_to(px, py);
+                    }
+                }
+            }
+            fill_path.line_to(rx + rw, ry + rh);
+            fill_path.close();
+
+            let fill_paint = vg::Paint::linear_gradient(
+                rx,
+                ry,
+                rx,
+                ry + rh,
+                vg::Color::rgba(ar, ag, ab, 90),
+                vg::Color::rgba(ar, ag, ab, 14),
+            );
+            canvas.fill_path(&fill_path, &fill_paint);
+            canvas.stroke_path(&stroke_path, &stroke_paint);
+
+            // Control dots seated directly on step endpoints
+            for col in 0..MODSEQ_ROW_STEPS {
+                let s = row * MODSEQ_ROW_STEPS + col;
+                let step = steps[s];
+                let sx0 = rx + col as f32 * step_w;
                 let sx1 = sx0 + step_w;
-                let sy0 = y0 + (1.0 - step.start_level) * h;
-                let sy1 = y0 + (1.0 - step.end_level) * h;
+                let sy0 = ry + (1.0 - evaluate_step_shape(step, 0.0)) * rh;
+                let sy1 = ry + (1.0 - evaluate_step_shape(step, 1.0)) * rh;
                 let mut dot = vg::Path::new();
                 if step.shape == ModSeqStepShape::Linear && (sy1 - sy0).abs() > 2.0 * dpx {
-                    dot.circle(sx0 + 1.8 * dpx, sy0, 2.0 * dpx);
-                    dot.circle(sx1 - 1.8 * dpx, sy1, 1.8 * dpx);
+                    dot.circle(sx0 + 1.8 * dpx, sy0, 1.9 * dpx);
+                    dot.circle(sx1 - 1.8 * dpx, sy1, 1.7 * dpx);
                 } else {
-                    dot.circle(sx0 + 0.5 * step_w, sy0, 1.9 * dpx);
+                    dot.circle(sx0 + 0.5 * step_w, sy0, 1.8 * dpx);
                 }
                 canvas.fill_path(&dot, &vg::Paint::color(vg::Color::rgb(255, 244, 228)));
             }
+
+            // Dim inactive steps
+            for col in 0..MODSEQ_ROW_STEPS {
+                let s = row * MODSEQ_ROW_STEPS + col;
+                if !is_step_active(s) {
+                    let mut dim = vg::Path::new();
+                    dim.rect(rx + col as f32 * step_w, ry, step_w, rh);
+                    canvas.fill_path(
+                        &dim,
+                        &vg::Paint::color(super::theme::vg_color(&pal.scope_bg, 150)),
+                    );
+                }
+            }
+
+            // Subtle active-row outline + R1/R2 badge
+            if active_row == row {
+                let mut row_ring = vg::Path::new();
+                row_ring.rounded_rect(rx, ry, rw, rh, 2.0 * dpx);
+                let mut rp = vg::Paint::color(vg::Color::rgba(ar, ag, ab, 120));
+                rp.set_line_width(1.1 * dpx);
+                canvas.stroke_path(&row_ring, &rp);
+            }
+            if let Some(fid) = font_id {
+                let mut tp = vg::Paint::color(if active_row == row {
+                    vg::Color::rgba(ar, ag, ab, 220)
+                } else {
+                    super::theme::vg_color(&pal.text_dim, 160)
+                });
+                tp.set_font(&[fid]);
+                tp.set_font_size(8.5 * dpx);
+                tp.set_text_align(vg::Align::Left);
+                tp.set_text_baseline(vg::Baseline::Top);
+                let _ = canvas.fill_text(
+                    rx + 3.0 * dpx,
+                    ry + 2.0 * dpx,
+                    if row == 0 { "R1" } else { "R2" },
+                    &tp,
+                );
+            }
         }
 
-        // Real-time animated playhead from audio-thread telemetry
-        let phase = self.mod_ui.telemetry.modseq_phase(self.seq_idx).clamp(0.0, 1.0);
-        let ph_x = x0 + phase * w;
+        // Real-time animated playhead on the active row & step
+        let disp = self
+            .mod_ui
+            .telemetry
+            .modseq_display_phase(self.seq_idx)
+            .clamp(0.0, 0.999_999);
+        let ph_step_f = disp * MAX_MODSEQ_STEPS as f32;
+        let ph_step = (ph_step_f.floor() as usize).min(MAX_MODSEQ_STEPS - 1);
+        let ph_row = ph_step / MODSEQ_ROW_STEPS;
+        let ph_col_norm =
+            ((ph_step_f - (ph_row * MODSEQ_ROW_STEPS) as f32) / MODSEQ_ROW_STEPS as f32)
+                .clamp(0.0, 1.0);
+        let (rx, ry, rw, rh) = if ph_row == 0 { r1 } else { r2 };
+        let ph_x = rx + ph_col_norm * rw;
         let mut ph_line = vg::Path::new();
-        ph_line.move_to(ph_x, y0);
-        ph_line.line_to(ph_x, y0 + h);
+        ph_line.move_to(ph_x, ry);
+        ph_line.line_to(ph_x, ry + rh);
         let mut ph_paint = vg::Paint::color(vg::Color::rgba(255, 248, 232, 210));
         ph_paint.set_line_width(1.4 * dpx);
         canvas.stroke_path(&ph_line, &ph_paint);
 
-        let cur_val = if is_mseg {
-            evaluate_mseg_curve(mseg, phase.min(0.999_999))
-        } else {
-            evaluate_modseq_curve_with_swing(steps, num_steps, phase.min(0.999_999), groove_swing)
-        };
+        let mut ph_step_val = steps[ph_step];
+        if groove_swing {
+            const SWING: [f32; 8] = [-0.40, 0.0, -0.35, 0.0, -0.30, 0.0, -0.50, 0.0];
+            ph_step_val.tension = (ph_step_val.tension + SWING[ph_step % SWING.len()]).clamp(-1.0, 1.0);
+        }
+        let cur_val = evaluate_step_shape(ph_step_val, ph_step_f.fract());
         let mut ph_dot = vg::Path::new();
-        ph_dot.circle(ph_x, y0 + (1.0 - cur_val) * h, 3.0 * dpx);
+        ph_dot.circle(ph_x, ry + (1.0 - cur_val) * rh, 2.8 * dpx);
         canvas.fill_path(&ph_dot, &vg::Paint::color(vg::Color::rgb(ar, ag, ab)));
         let mut ph_ring = vg::Paint::color(vg::Color::rgb(255, 248, 232));
         ph_ring.set_line_width(1.1 * dpx);
@@ -815,12 +990,13 @@ impl View for LfoPresetBar {
     }
 }
 
-/// Interactive `2x9` graphical shape palette for `MODSEQ` step stamping & quick fill.
+/// Interactive `4x9` graphical shape palette for `MODSEQ` step stamping & quick fill.
 pub(super) struct ModSeqPaletteGrid {
     seq_idx: usize,
     params: Arc<JSynPluginParams>,
     mod_ui: Arc<ModUiState>,
     hovered_idx: Option<usize>,
+    bold_font: std::cell::Cell<Option<vg::FontId>>,
 }
 
 impl ModSeqPaletteGrid {
@@ -835,6 +1011,7 @@ impl ModSeqPaletteGrid {
             params,
             mod_ui,
             hovered_idx: None,
+            bold_font: std::cell::Cell::new(None),
         }
         .build(cx, |_| {})
         .class("palette-grid")
@@ -854,9 +1031,9 @@ impl View for ModSeqPaletteGrid {
                     cx.bounds(),
                     *x,
                     *y,
-                    ModSeqStepShape::PALETTE.len(),
+                    MODSEQ_PALETTE_TILES.len(),
                     9,
-                    2,
+                    4,
                     2.0 * dpx,
                     2.0 * dpx,
                 );
@@ -876,13 +1053,13 @@ impl View for ModSeqPaletteGrid {
                     cx.bounds(),
                     cx.mouse().cursorx,
                     cx.mouse().cursory,
-                    ModSeqStepShape::PALETTE.len(),
+                    MODSEQ_PALETTE_TILES.len(),
                     9,
-                    2,
+                    4,
                     2.0 * dpx,
                     2.0 * dpx,
                 ) {
-                    self.mod_ui.set_active_stamp(ModSeqStepShape::PALETTE[idx]);
+                    self.mod_ui.set_active_tile_idx(idx);
                     cx.emit(UiEvent::ModUiChanged);
                     cx.needs_redraw();
                     meta.consume();
@@ -894,21 +1071,28 @@ impl View for ModSeqPaletteGrid {
                     cx.bounds(),
                     cx.mouse().cursorx,
                     cx.mouse().cursory,
-                    ModSeqStepShape::PALETTE.len(),
+                    MODSEQ_PALETTE_TILES.len(),
                     9,
-                    2,
+                    4,
                     2.0 * dpx,
                     2.0 * dpx,
                 ) {
-                    let shape = ModSeqStepShape::PALETTE[idx];
-                    self.mod_ui.set_active_stamp(shape);
-                    let n = self.params.modseqs[self.seq_idx]
-                        .num_steps
-                        .value()
-                        .clamp(2, MAX_MODSEQ_STEPS as i32) as usize;
+                    self.mod_ui.set_active_tile_idx(idx);
+                    let tile = MODSEQ_PALETTE_TILES[idx];
+                    let row_start = self.mod_ui.active_modseq_row() * MODSEQ_ROW_STEPS;
                     let mut bank = self.params.modseq_steps.snapshot();
-                    for step in bank.seqs[self.seq_idx].iter_mut().take(n) {
-                        *step = ModSeqStep::stamped(shape, 1.0, 0.0);
+                    for col in 0..MODSEQ_ROW_STEPS {
+                        let span = if tile.two_step {
+                            if col % 2 == 0 {
+                                ModSeqStepSpan::HalfFirst
+                            } else {
+                                ModSeqStepSpan::HalfSecond
+                            }
+                        } else {
+                            tile.span
+                        };
+                        bank.seqs[self.seq_idx][row_start + col] =
+                            ModSeqStep::stamped_with_span(tile.shape, 1.0, 0.0, span);
                     }
                     self.params.modseq_steps.store_value(bank);
                     cx.emit(UiEvent::ModUiChanged);
@@ -932,13 +1116,14 @@ impl View for ModSeqPaletteGrid {
         let dpx = cx.scale_factor();
         let pad = 2.0 * dpx;
         let gap = 2.0 * dpx;
-        let active_shape = self.mod_ui.active_stamp();
+        let active_idx = self.mod_ui.active_tile_idx();
         let pal = super::theme::current_palette(cx);
         let accent = pal.mod_seq_rgb();
+        let font_id = j_syn_ui::shell::ensure_canvas_bold_font(canvas, &self.bold_font);
 
-        for (idx, &shape) in ModSeqStepShape::PALETTE.iter().enumerate() {
-            let (tx, ty, tw, th) = grid_tile_rect(bounds, idx, 9, 2, pad, gap);
-            let is_active = shape == active_shape;
+        for (idx, &tile_def) in MODSEQ_PALETTE_TILES.iter().enumerate() {
+            let (tx, ty, tw, th) = grid_tile_rect(bounds, idx, 9, 4, pad, gap);
+            let is_active = idx == active_idx;
             let hovered = self.hovered_idx == Some(idx);
 
             let mut tile = vg::Path::new();
@@ -963,7 +1148,7 @@ impl View for ModSeqPaletteGrid {
             border.set_line_width((if is_active { 1.25 } else { 0.9 }) * dpx);
             canvas.stroke_path(&tile, &border);
 
-            let sub = shape.subdivision();
+            let sub = tile_def.shape.subdivision();
             if sub > 1 {
                 let mut div_paint = vg::Paint::color(super::theme::vg_color(&pal.text_dim, 95));
                 div_paint.set_line_width(0.75 * dpx);
@@ -976,19 +1161,44 @@ impl View for ModSeqPaletteGrid {
                 }
             }
 
-            let step = ModSeqStep::stamped(shape, 1.0, 0.0);
-            stroke_tile_curve(
-                canvas,
-                tx,
-                ty,
-                tw,
-                th,
-                dpx,
-                accent,
-                is_active || hovered,
-                24,
-                |t| evaluate_step_shape(step, t),
-            );
+            if tile_def.two_step {
+                // Auto-2-step ½x curve preview draws the full shape across the tile + a subtle "2" pip
+                let step = ModSeqStep::stamped(tile_def.shape, 1.0, 0.0);
+                stroke_tile_curve(
+                    canvas,
+                    tx,
+                    ty,
+                    tw,
+                    th,
+                    dpx,
+                    accent,
+                    is_active || hovered,
+                    24,
+                    |t| evaluate_step_shape(step, t),
+                );
+                if let Some(fid) = font_id {
+                    let mut tp = vg::Paint::color(vg::Color::rgba(accent.0, accent.1, accent.2, 200));
+                    tp.set_font(&[fid]);
+                    tp.set_font_size(6.5 * dpx);
+                    tp.set_text_align(vg::Align::Right);
+                    tp.set_text_baseline(vg::Baseline::Top);
+                    let _ = canvas.fill_text(tx + tw - 2.0 * dpx, ty + 1.0 * dpx, "2", &tp);
+                }
+            } else {
+                let step = ModSeqStep::stamped_with_span(tile_def.shape, 1.0, 0.0, tile_def.span);
+                stroke_tile_curve(
+                    canvas,
+                    tx,
+                    ty,
+                    tw,
+                    th,
+                    dpx,
+                    accent,
+                    is_active || hovered,
+                    24,
+                    |t| evaluate_step_shape(step, t),
+                );
+            }
         }
     }
 }

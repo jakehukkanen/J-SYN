@@ -12,8 +12,8 @@ pub const FX_MOD_BUSES: usize = 3;
 pub const FX_MOD_SLOTS_PER_BUS: usize = 30;
 pub const FX_MOD_PARAMS_PER_SLOT: usize = 16;
 
-/// Non-FX-slot destinations (`Osc`, `Noise`, `Filter`, `Insert`, `Routing`, `Glide`, `ModSeqRate`, `Sub`, `Bus Level/Pan`).
-pub const NUM_VOICE_MOD_DESTS: usize = 84;
+/// Non-FX-slot destinations (`Osc`, `Noise`, `Filter`, `Insert`, `Routing`, `Glide`, `ModSeqRate`, `ModSeqRow`, `Sub`, `Bus Level/Pan`).
+pub const NUM_VOICE_MOD_DESTS: usize = 92;
 /// FX-slot parameter destinations (`3 buses × 30 slots × 16 params = 1,440`).
 pub const NUM_FX_MOD_DESTS: usize = FX_MOD_BUSES * FX_MOD_SLOTS_PER_BUS * FX_MOD_PARAMS_PER_SLOT;
 /// Total modulatable destinations (`80 + 1,440 = 1,520`).
@@ -374,6 +374,14 @@ pub enum ModDestination {
     ModSeq6Rate,
     ModSeq7Rate,
     ModSeq8Rate,
+    ModSeq1Row,
+    ModSeq2Row,
+    ModSeq3Row,
+    ModSeq4Row,
+    ModSeq5Row,
+    ModSeq6Row,
+    ModSeq7Row,
+    ModSeq8Row,
     FxSlotParam {
         bus: u8,
         slot: u8,
@@ -381,7 +389,7 @@ pub enum ModDestination {
     },
 }
 
-/// All 84 non-FX-slot destinations in canonical index order `0..NUM_VOICE_MOD_DESTS`.
+/// All 92 non-FX-slot destinations in canonical index order `0..NUM_VOICE_MOD_DESTS`.
 pub const BASE_MOD_DESTINATIONS: [ModDestination; NUM_VOICE_MOD_DESTS] = [
     ModDestination::Osc1WtPos,
     ModDestination::Osc2WtPos,
@@ -467,6 +475,14 @@ pub const BASE_MOD_DESTINATIONS: [ModDestination; NUM_VOICE_MOD_DESTS] = [
     ModDestination::ModSeq6Rate,
     ModDestination::ModSeq7Rate,
     ModDestination::ModSeq8Rate,
+    ModDestination::ModSeq1Row,
+    ModDestination::ModSeq2Row,
+    ModDestination::ModSeq3Row,
+    ModDestination::ModSeq4Row,
+    ModDestination::ModSeq5Row,
+    ModDestination::ModSeq6Row,
+    ModDestination::ModSeq7Row,
+    ModDestination::ModSeq8Row,
 ];
 
 const BASE_SERDE_NAMES: [&str; NUM_VOICE_MOD_DESTS] = [
@@ -554,6 +570,14 @@ const BASE_SERDE_NAMES: [&str; NUM_VOICE_MOD_DESTS] = [
     "ModSeq6Rate",
     "ModSeq7Rate",
     "ModSeq8Rate",
+    "ModSeq1Row",
+    "ModSeq2Row",
+    "ModSeq3Row",
+    "ModSeq4Row",
+    "ModSeq5Row",
+    "ModSeq6Row",
+    "ModSeq7Row",
+    "ModSeq8Row",
 ];
 
 const BASE_DISPLAY_NAMES: [&str; NUM_VOICE_MOD_DESTS] = [
@@ -641,6 +665,14 @@ const BASE_DISPLAY_NAMES: [&str; NUM_VOICE_MOD_DESTS] = [
     "MS6 RATE",
     "MS7 RATE",
     "MS8 RATE",
+    "MS1 ROW",
+    "MS2 ROW",
+    "MS3 ROW",
+    "MS4 ROW",
+    "MS5 ROW",
+    "MS6 ROW",
+    "MS7 ROW",
+    "MS8 ROW",
 ];
 
 impl ModDestination {
@@ -731,6 +763,14 @@ impl ModDestination {
             Self::ModSeq6Rate => 81,
             Self::ModSeq7Rate => 82,
             Self::ModSeq8Rate => 83,
+            Self::ModSeq1Row => 84,
+            Self::ModSeq2Row => 85,
+            Self::ModSeq3Row => 86,
+            Self::ModSeq4Row => 87,
+            Self::ModSeq5Row => 88,
+            Self::ModSeq6Row => 89,
+            Self::ModSeq7Row => 90,
+            Self::ModSeq8Row => 91,
             Self::FxSlotParam { bus, slot, param } => {
                 let b = if (bus as usize) < FX_MOD_BUSES {
                     bus as usize
@@ -961,6 +1001,20 @@ impl ModDestination {
             5 => Self::ModSeq6Rate,
             6 => Self::ModSeq7Rate,
             _ => Self::ModSeq8Rate,
+        }
+    }
+
+    #[inline]
+    pub const fn modseq_row(idx: usize) -> Self {
+        match idx {
+            0 => Self::ModSeq1Row,
+            1 => Self::ModSeq2Row,
+            2 => Self::ModSeq3Row,
+            3 => Self::ModSeq4Row,
+            4 => Self::ModSeq5Row,
+            5 => Self::ModSeq6Row,
+            6 => Self::ModSeq7Row,
+            _ => Self::ModSeq8Row,
         }
     }
 

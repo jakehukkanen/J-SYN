@@ -1,7 +1,8 @@
 //! Envelope and MODSEQ / LFO modulator parameters.
 
 use j_syn_dsp::{
-    AdsrParams, ModSeqMode, ModSeqParams, ModSeqPlayMode, ModSeqRetrig, ModSeqSyncMode,
+    AdsrParams, ModSeqMode, ModSeqParams, ModSeqPlayMode, ModSeqRetrig, ModSeqRowMode,
+    ModSeqRowStart, ModSeqSyncMode,
 };
 use nih_plug::prelude::*;
 
@@ -84,6 +85,40 @@ impl From<ModSeqRetrigParam> for ModSeqRetrig {
     }
 }
 
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModSeqRowStartParam {
+    #[name = "Row 1"]
+    Row1,
+    #[name = "Row 2"]
+    Row2,
+}
+
+impl From<ModSeqRowStartParam> for ModSeqRowStart {
+    fn from(val: ModSeqRowStartParam) -> Self {
+        match val {
+            ModSeqRowStartParam::Row1 => ModSeqRowStart::Row1,
+            ModSeqRowStartParam::Row2 => ModSeqRowStart::Row2,
+        }
+    }
+}
+
+#[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModSeqRowModeParam {
+    #[name = "Continue"]
+    Continue,
+    #[name = "Loop"]
+    LoopRow,
+}
+
+impl From<ModSeqRowModeParam> for ModSeqRowMode {
+    fn from(val: ModSeqRowModeParam) -> Self {
+        match val {
+            ModSeqRowModeParam::Continue => ModSeqRowMode::Continue,
+            ModSeqRowModeParam::LoopRow => ModSeqRowMode::LoopRow,
+        }
+    }
+}
+
 #[derive(Params)]
 pub struct ModEnvPluginParams {
     #[id = "atk"]
@@ -144,6 +179,12 @@ pub struct ModSeqPluginParams {
 
     #[id = "ms_smooth"]
     pub smooth: FloatParam,
+
+    #[id = "ms_row"]
+    pub start_row: EnumParam<ModSeqRowStartParam>,
+
+    #[id = "ms_row_mode"]
+    pub row_mode: EnumParam<ModSeqRowModeParam>,
 }
 
 impl Default for ModSeqPluginParams {
@@ -154,8 +195,10 @@ impl Default for ModSeqPluginParams {
             rate: percentage_param("Rate", 0.35),
             play_mode: EnumParam::new("Play Mode", ModSeqPlayParam::Loop),
             retrig: EnumParam::new("Retrig", ModSeqRetrigParam::PolyVoice),
-            num_steps: IntParam::new("Steps", 8, IntRange::Linear { min: 2, max: 16 }),
+            num_steps: IntParam::new("Steps", 8, IntRange::Linear { min: 2, max: 32 }),
             smooth: percentage_param("Smooth", 0.05),
+            start_row: EnumParam::new("Start Row", ModSeqRowStartParam::Row1),
+            row_mode: EnumParam::new("Row Mode", ModSeqRowModeParam::Continue),
         }
     }
 }
@@ -168,10 +211,13 @@ impl ModSeqPluginParams {
             rate_norm: self.rate.value(),
             play_mode: self.play_mode.value().into(),
             retrig: self.retrig.value().into(),
-            num_steps: self.num_steps.value().clamp(2, 16) as usize,
+            num_steps: self.num_steps.value().clamp(2, 32) as usize,
             smooth: self.smooth.value(),
             rate_mod: 0.0,
             groove_swing,
+            start_row: self.start_row.value().into(),
+            row_mode: self.row_mode.value().into(),
+            row_mod: 0.0,
         }
     }
 }

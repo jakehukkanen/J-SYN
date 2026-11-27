@@ -77,6 +77,7 @@ pub struct ModUiTelemetry {
     pub dest_offsets: Box<[AtomicU32]>,
     pub source_levels: [AtomicU32; NUM_ACTIVE_SOURCES],
     pub modseq_phases: [AtomicU32; NUM_MODSEQS],
+    pub modseq_display_phases: [AtomicU32; NUM_MODSEQS],
     pub env_levels: [AtomicU32; NUM_ENVS],
     /// Post-modulation `[cutoff_hz, resonance, drive, aux]` for `FILTER 1` and `FILTER 2`.
     pub filter_live: [[AtomicU32; 4]; 2],
@@ -109,6 +110,7 @@ impl ModUiTelemetry {
                 .into_boxed_slice(),
             source_levels: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             modseq_phases: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
+            modseq_display_phases: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             env_levels: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
             filter_live: std::array::from_fn(|_| {
                 [
@@ -210,6 +212,7 @@ impl ModUiTelemetry {
         dest_offsets: &[f32; NUM_MOD_DESTS],
         source_levels: &[f32; NUM_ACTIVE_SOURCES],
         modseq_phases: &[f32; NUM_MODSEQS],
+        modseq_display_phases: &[f32; NUM_MODSEQS],
         env_levels: &[f32; NUM_ENVS],
     ) {
         for (dst, &val) in self.dest_offsets.iter().zip(dest_offsets.iter()) {
@@ -219,6 +222,13 @@ impl ModUiTelemetry {
             dst.store(val.to_bits(), Ordering::Relaxed);
         }
         for (dst, &val) in self.modseq_phases.iter().zip(modseq_phases.iter()) {
+            dst.store(val.to_bits(), Ordering::Relaxed);
+        }
+        for (dst, &val) in self
+            .modseq_display_phases
+            .iter()
+            .zip(modseq_display_phases.iter())
+        {
             dst.store(val.to_bits(), Ordering::Relaxed);
         }
         for (dst, &val) in self.env_levels.iter().zip(env_levels.iter()) {
@@ -251,6 +261,15 @@ impl ModUiTelemetry {
     pub fn modseq_phase(&self, idx: usize) -> f32 {
         if idx < NUM_MODSEQS {
             f32::from_bits(self.modseq_phases[idx].load(Ordering::Relaxed))
+        } else {
+            0.0
+        }
+    }
+
+    #[inline]
+    pub fn modseq_display_phase(&self, idx: usize) -> f32 {
+        if idx < NUM_MODSEQS {
+            f32::from_bits(self.modseq_display_phases[idx].load(Ordering::Relaxed))
         } else {
             0.0
         }

@@ -1,12 +1,38 @@
-//! Hybrid 16-step Performer / MSEG modulator (`MODSEQ 1` – `MODSEQ 4`) with curve tension,
-//! shape presets, DAW tempo sync, loop/one-shot/ping-pong modes, and slew smoothing.
+//! Hybrid 32-step (2×16) Performer / MSEG modulator (`MODSEQ 1` – `MODSEQ 8`) with curve tension,
+//! half-speed curves, DAW tempo sync, loop/one-shot/ping-pong modes, and slew smoothing.
 
 use std::f32::consts::PI;
 
 use serde::{Deserialize, Serialize};
 
-pub const MAX_MODSEQ_STEPS: usize = 16;
+pub const MAX_MODSEQ_STEPS: usize = 32;
+pub const MODSEQ_ROW_STEPS: usize = 16;
 pub const MAX_MSEG_NODES: usize = 16;
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ModSeqStepSpan {
+    #[default]
+    Full = 0,
+    HalfFirst = 1,
+    HalfSecond = 2,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ModSeqRowStart {
+    #[default]
+    Row1 = 0,
+    Row2 = 1,
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ModSeqRowMode {
+    #[default]
+    Continue = 0,
+    LoopRow = 1,
+}
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -124,6 +150,88 @@ impl ModSeqStepShape {
     }
 }
 
+/// Single palette tile in the 4×9 `MODSEQ` stamp grid (supports 1×, 2×/3×, auto-2-step ½×, and single-half pieces).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModSeqPaletteTile {
+    pub shape: ModSeqStepShape,
+    pub span: ModSeqStepSpan,
+    pub two_step: bool,
+}
+
+impl ModSeqPaletteTile {
+    pub const fn full(shape: ModSeqStepShape) -> Self {
+        Self {
+            shape,
+            span: ModSeqStepSpan::Full,
+            two_step: false,
+        }
+    }
+
+    pub const fn half_2step(shape: ModSeqStepShape) -> Self {
+        Self {
+            shape,
+            span: ModSeqStepSpan::HalfFirst,
+            two_step: true,
+        }
+    }
+
+    pub const fn half_piece(shape: ModSeqStepShape, span: ModSeqStepSpan) -> Self {
+        Self {
+            shape,
+            span,
+            two_step: false,
+        }
+    }
+}
+
+/// Ordered 4×9 palette tiles (36 total):
+/// - Row 1: 9 primary 1× shapes
+/// - Row 2: 3 single 1× + 6 subdivided 2×/3× bursts
+/// - Row 3: 9 auto-2-step ½× (50%-speed) curves
+/// - Row 4: 8 single-step half-curve pieces (½A / ½B) + ½× S-Curve auto-2-step
+pub const MODSEQ_PALETTE_TILES: [ModSeqPaletteTile; 36] = [
+    // Row 1
+    ModSeqPaletteTile::full(ModSeqStepShape::Flat),
+    ModSeqPaletteTile::full(ModSeqStepShape::RampUp),
+    ModSeqPaletteTile::full(ModSeqStepShape::RampDown),
+    ModSeqPaletteTile::full(ModSeqStepShape::ExpUp),
+    ModSeqPaletteTile::full(ModSeqStepShape::ExpDown),
+    ModSeqPaletteTile::full(ModSeqStepShape::LogUp),
+    ModSeqPaletteTile::full(ModSeqStepShape::LogDown),
+    ModSeqPaletteTile::full(ModSeqStepShape::SineArchUp),
+    ModSeqPaletteTile::full(ModSeqStepShape::SineArchDown),
+    // Row 2
+    ModSeqPaletteTile::full(ModSeqStepShape::Triangle),
+    ModSeqPaletteTile::full(ModSeqStepShape::Pulse),
+    ModSeqPaletteTile::full(ModSeqStepShape::SCurve),
+    ModSeqPaletteTile::full(ModSeqStepShape::RampDown2x),
+    ModSeqPaletteTile::full(ModSeqStepShape::TriSine2x),
+    ModSeqPaletteTile::full(ModSeqStepShape::Square2x),
+    ModSeqPaletteTile::full(ModSeqStepShape::RampDown3x),
+    ModSeqPaletteTile::full(ModSeqStepShape::TriSine3x),
+    ModSeqPaletteTile::full(ModSeqStepShape::Square3x),
+    // Row 3 (auto-2-step ½×)
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::RampUp),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::RampDown),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::ExpUp),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::ExpDown),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::LogUp),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::LogDown),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::SineArchUp),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::SineArchDown),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::Triangle),
+    // Row 4 (single-step half pieces + ½× S-Curve)
+    ModSeqPaletteTile::half_piece(ModSeqStepShape::RampUp, ModSeqStepSpan::HalfFirst),
+    ModSeqPaletteTile::half_piece(ModSeqStepShape::RampUp, ModSeqStepSpan::HalfSecond),
+    ModSeqPaletteTile::half_piece(ModSeqStepShape::RampDown, ModSeqStepSpan::HalfFirst),
+    ModSeqPaletteTile::half_piece(ModSeqStepShape::RampDown, ModSeqStepSpan::HalfSecond),
+    ModSeqPaletteTile::half_piece(ModSeqStepShape::SineArchUp, ModSeqStepSpan::HalfFirst),
+    ModSeqPaletteTile::half_piece(ModSeqStepShape::SineArchUp, ModSeqStepSpan::HalfSecond),
+    ModSeqPaletteTile::half_piece(ModSeqStepShape::SCurve, ModSeqStepSpan::HalfFirst),
+    ModSeqPaletteTile::half_piece(ModSeqStepShape::SCurve, ModSeqStepSpan::HalfSecond),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::SCurve),
+];
+
 /// Cure Scream-style breakpoint preset templates for `LFO` (MSEG) mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LfoPreset {
@@ -232,6 +340,8 @@ pub struct ModSeqStep {
     pub end_level: f32,
     pub tension: f32,
     pub shape: ModSeqStepShape,
+    #[serde(default)]
+    pub span: ModSeqStepSpan,
 }
 
 #[derive(Deserialize)]
@@ -242,6 +352,8 @@ struct ModSeqStepWire {
     tension: f32,
     #[serde(deserialize_with = "crate::serde_lenient::known_variant")]
     shape: Option<ModSeqStepShape>,
+    #[serde(deserialize_with = "crate::serde_lenient::known_variant")]
+    span: Option<ModSeqStepSpan>,
 }
 
 impl Default for ModSeqStepWire {
@@ -252,6 +364,7 @@ impl Default for ModSeqStepWire {
             end_level: d.end_level,
             tension: d.tension,
             shape: Some(d.shape),
+            span: Some(d.span),
         }
     }
 }
@@ -266,6 +379,7 @@ impl<'de> Deserialize<'de> for ModSeqStep {
             end_level: crate::serde_lenient::finite_clamped(w.end_level, 0.5, 0.0, 1.0),
             tension: crate::serde_lenient::finite_clamped(w.tension, 0.0, -1.0, 1.0),
             shape: w.shape.unwrap_or(ModSeqStepShape::Linear),
+            span: w.span.unwrap_or(ModSeqStepSpan::Full),
         })
     }
 }
@@ -277,13 +391,19 @@ impl Default for ModSeqStep {
             end_level: 0.5,
             tension: 0.0,
             shape: ModSeqStepShape::Linear,
+            span: ModSeqStepSpan::Full,
         }
     }
 }
 
 impl ModSeqStep {
     #[inline]
-    pub fn stamped(shape: ModSeqStepShape, depth: f32, tension: f32) -> Self {
+    pub fn stamped_with_span(
+        shape: ModSeqStepShape,
+        depth: f32,
+        tension: f32,
+        span: ModSeqStepSpan,
+    ) -> Self {
         let d = depth.clamp(0.0, 1.0);
         let end = match shape {
             ModSeqStepShape::Flat
@@ -300,7 +420,13 @@ impl ModSeqStep {
             end_level: end,
             tension: tension.clamp(-1.0, 1.0),
             shape,
+            span,
         }
+    }
+
+    #[inline]
+    pub fn stamped(shape: ModSeqStepShape, depth: f32, tension: f32) -> Self {
+        Self::stamped_with_span(shape, depth, tension, ModSeqStepSpan::Full)
     }
 }
 
@@ -492,24 +618,28 @@ impl Default for ModSeqStepBank {
             end_level: 0.15,
             tension: 0.0,
             shape: ModSeqStepShape::Linear,
+            span: ModSeqStepSpan::Full,
         };
         s0[2] = ModSeqStep {
             start_level: 0.75,
             end_level: 0.1,
             tension: 0.0,
             shape: ModSeqStepShape::Linear,
+            span: ModSeqStepSpan::Full,
         };
         s0[4] = ModSeqStep {
             start_level: 0.9,
             end_level: 0.25,
             tension: 0.0,
             shape: ModSeqStepShape::Linear,
+            span: ModSeqStepSpan::Full,
         };
         s0[6] = ModSeqStep {
             start_level: 0.65,
             end_level: 0.0,
             tension: 0.0,
             shape: ModSeqStepShape::Linear,
+            span: ModSeqStepSpan::Full,
         };
 
         // MODSEQ 2: Smooth triangle wave
@@ -578,12 +708,14 @@ impl ModSeqShapePreset {
                     end_level: t1,
                     tension: 0.0,
                     shape: ModSeqStepShape::Linear,
+                    span: ModSeqStepSpan::Full,
                 },
                 Self::RampDown => ModSeqStep {
                     start_level: 1.0 - t0,
                     end_level: 1.0 - t1,
                     tension: 0.0,
                     shape: ModSeqStepShape::Linear,
+                    span: ModSeqStepSpan::Full,
                 },
                 Self::Pulse => {
                     let lvl = if idx < n / 2 { 1.0 } else { 0.0 };
@@ -592,6 +724,7 @@ impl ModSeqShapePreset {
                         end_level: lvl,
                         tension: 0.0,
                         shape: ModSeqStepShape::Linear,
+                        span: ModSeqStepSpan::Full,
                     }
                 }
                 Self::Triangle => {
@@ -607,6 +740,7 @@ impl ModSeqShapePreset {
                         end_level: tri(t1),
                         tension: 0.0,
                         shape: ModSeqStepShape::Linear,
+                        span: ModSeqStepSpan::Full,
                     }
                 }
                 Self::Sine => {
@@ -616,6 +750,7 @@ impl ModSeqShapePreset {
                         end_level: s(t1),
                         tension: 0.0,
                         shape: ModSeqStepShape::Linear,
+                        span: ModSeqStepSpan::Full,
                     }
                 }
                 Self::SampleAndHold => {
@@ -625,6 +760,7 @@ impl ModSeqShapePreset {
                         end_level: v,
                         tension: 0.0,
                         shape: ModSeqStepShape::Linear,
+                        span: ModSeqStepSpan::Full,
                     }
                 }
             };
@@ -766,6 +902,9 @@ pub struct ModSeqParams {
     pub smooth: f32,
     pub rate_mod: f32,
     pub groove_swing: bool,
+    pub start_row: ModSeqRowStart,
+    pub row_mode: ModSeqRowMode,
+    pub row_mod: f32,
 }
 
 impl Default for ModSeqParams {
@@ -780,6 +919,9 @@ impl Default for ModSeqParams {
             smooth: 0.05,
             rate_mod: 0.0,
             groove_swing: false,
+            start_row: ModSeqRowStart::Row1,
+            row_mode: ModSeqRowMode::Continue,
+            row_mod: 0.0,
         }
     }
 }
@@ -787,7 +929,12 @@ impl Default for ModSeqParams {
 /// Evaluates a single `ModSeqStep` at normalized step-local phase `local_t` in `[0.0, 1.0]`. Zero allocations.
 #[inline]
 pub fn evaluate_step_shape(step: ModSeqStep, local_t: f32) -> f32 {
-    let t = local_t.clamp(0.0, 1.0);
+    let raw_t = local_t.clamp(0.0, 1.0);
+    let t = match step.span {
+        ModSeqStepSpan::Full => raw_t,
+        ModSeqStepSpan::HalfFirst => raw_t * 0.5,
+        ModSeqStepSpan::HalfSecond => 0.5 + raw_t * 0.5,
+    };
     let d = step.start_level.clamp(0.0, 1.0);
     let exp = 2.0_f32.powf(step.tension.clamp(-1.0, 1.0) * 2.2);
     let ct = t.powf(exp);
@@ -824,15 +971,15 @@ pub fn evaluate_step_shape(step: ModSeqStep, local_t: f32) -> f32 {
         }
         ModSeqStepShape::SCurve => (d * (0.5 - 0.5 * (PI * ct).cos())).clamp(0.0, 1.0),
         ModSeqStepShape::RampDown2x => {
-            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 2.0).fract().powf(exp);
+            let sub_ct = (t.min(0.999_999) * 2.0).fract().powf(exp);
             (d * (1.0 - sub_ct)).clamp(0.0, 1.0)
         }
         ModSeqStepShape::TriSine2x => {
-            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 2.0).fract().powf(exp);
+            let sub_ct = (t.min(0.999_999) * 2.0).fract().powf(exp);
             (d * (0.5 - 0.5 * (2.0 * PI * sub_ct).cos())).clamp(0.0, 1.0)
         }
         ModSeqStepShape::Square2x => {
-            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 2.0).fract().powf(exp);
+            let sub_ct = (t.min(0.999_999) * 2.0).fract().powf(exp);
             if sub_ct < 0.5 {
                 d
             } else {
@@ -840,15 +987,15 @@ pub fn evaluate_step_shape(step: ModSeqStep, local_t: f32) -> f32 {
             }
         }
         ModSeqStepShape::RampDown3x => {
-            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 3.0).fract().powf(exp);
+            let sub_ct = (t.min(0.999_999) * 3.0).fract().powf(exp);
             (d * (1.0 - sub_ct)).clamp(0.0, 1.0)
         }
         ModSeqStepShape::TriSine3x => {
-            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 3.0).fract().powf(exp);
+            let sub_ct = (t.min(0.999_999) * 3.0).fract().powf(exp);
             (d * (0.5 - 0.5 * (2.0 * PI * sub_ct).cos())).clamp(0.0, 1.0)
         }
         ModSeqStepShape::Square3x => {
-            let sub_ct = (local_t.clamp(0.0, 0.999_999) * 3.0).fract().powf(exp);
+            let sub_ct = (t.min(0.999_999) * 3.0).fract().powf(exp);
             if sub_ct < 0.5 {
                 d
             } else {
@@ -856,6 +1003,55 @@ pub fn evaluate_step_shape(step: ModSeqStep, local_t: f32) -> f32 {
             }
         }
     }
+}
+
+/// Resolves `(actual_step_0_to_31, local_t)` for a cycle `phase` in `[0.0, 1.0)`.
+#[inline]
+pub fn resolve_modseq_step(
+    num_steps: usize,
+    start_row: ModSeqRowStart,
+    row_mode: ModSeqRowMode,
+    row_mod: f32,
+    phase: f32,
+) -> (usize, f32) {
+    let n = num_steps.clamp(2, MAX_MODSEQ_STEPS);
+    let base_row = if start_row == ModSeqRowStart::Row2 { 1.0 } else { 0.0 };
+    let row2 = (base_row + row_mod) >= 0.5;
+    let active_len = match row_mode {
+        ModSeqRowMode::LoopRow => n.min(MODSEQ_ROW_STEPS),
+        ModSeqRowMode::Continue => n,
+    };
+    let scaled = phase.clamp(0.0, 0.999_999) * (active_len as f32);
+    let step_pos = (scaled.floor() as usize).min(active_len - 1);
+    let local_t = (scaled - (step_pos as f32)).clamp(0.0, 1.0);
+    let actual_step = match row_mode {
+        ModSeqRowMode::LoopRow => {
+            if row2 {
+                MODSEQ_ROW_STEPS + step_pos
+            } else {
+                step_pos
+            }
+        }
+        ModSeqRowMode::Continue => {
+            if n <= MODSEQ_ROW_STEPS {
+                if row2 {
+                    MODSEQ_ROW_STEPS + step_pos
+                } else {
+                    step_pos
+                }
+            } else if !row2 {
+                step_pos
+            } else {
+                let r2_len = n - MODSEQ_ROW_STEPS;
+                if step_pos < r2_len {
+                    MODSEQ_ROW_STEPS + step_pos
+                } else {
+                    step_pos - r2_len
+                }
+            }
+        }
+    };
+    (actual_step.min(MAX_MODSEQ_STEPS - 1), local_t)
 }
 
 /// Experimental alternating step-phase swing tension pattern (`[-0.40, 0.0, -0.35, 0.0, ...]`).
@@ -869,10 +1065,13 @@ pub fn evaluate_modseq_curve_with_swing(
     phase: f32,
     groove_swing: bool,
 ) -> f32 {
-    let n = num_steps.clamp(2, MAX_MODSEQ_STEPS);
-    let scaled = phase.clamp(0.0, 0.999_999) * (n as f32);
-    let step_idx = (scaled.floor() as usize).min(n - 1);
-    let local_t = (scaled - (step_idx as f32)).clamp(0.0, 1.0);
+    let (step_idx, local_t) = resolve_modseq_step(
+        num_steps,
+        ModSeqRowStart::Row1,
+        ModSeqRowMode::Continue,
+        0.0,
+        phase,
+    );
     let mut step = steps[step_idx];
     if groove_swing {
         let swing_t = GROOVE_SWING_TENSIONS[step_idx % GROOVE_SWING_TENSIONS.len()];
@@ -917,6 +1116,7 @@ pub fn evaluate_mseg_curve(mseg: &MsegCurve, phase: f32) -> f32 {
 #[derive(Debug, Clone, Copy)]
 pub struct ModSeqState {
     pub phase: f32,
+    pub display_phase: f32,
     pub direction: f32,
     pub completed: bool,
     pub smoothed_out: f32,
@@ -932,6 +1132,7 @@ impl ModSeqState {
     pub fn new() -> Self {
         Self {
             phase: 0.0,
+            display_phase: 0.0,
             direction: 1.0,
             completed: false,
             smoothed_out: 0.0,
@@ -941,6 +1142,7 @@ impl ModSeqState {
     #[inline]
     pub fn trigger(&mut self) {
         self.phase = 0.0;
+        self.display_phase = 0.0;
         self.direction = 1.0;
         self.completed = false;
     }
@@ -948,6 +1150,7 @@ impl ModSeqState {
     #[inline]
     pub fn reset(&mut self) {
         self.phase = 0.0;
+        self.display_phase = 0.0;
         self.direction = 1.0;
         self.completed = false;
         self.smoothed_out = 0.0;
@@ -964,7 +1167,18 @@ impl ModSeqState {
         mseg: &MsegCurve,
     ) -> f32 {
         let eff_norm = (params.rate_norm + params.rate_mod).clamp(0.0, 1.0);
-        let freq_hz = modseq_rate_hz(params.sync_mode, eff_norm, tempo_bpm).clamp(0.01, 100.0);
+        let cycle_hz = modseq_rate_hz(params.sync_mode, eff_norm, tempo_bpm).clamp(0.01, 100.0);
+        let n = params.num_steps.clamp(2, MAX_MODSEQ_STEPS);
+        let freq_hz = match params.mode {
+            ModSeqMode::Performer => {
+                let active_len = match params.row_mode {
+                    ModSeqRowMode::LoopRow => n.min(MODSEQ_ROW_STEPS),
+                    ModSeqRowMode::Continue => n,
+                };
+                cycle_hz * (n as f32 / active_len as f32)
+            }
+            ModSeqMode::Mseg => cycle_hz,
+        };
         let d_phase = freq_hz * dt_seconds.max(0.0);
 
         match params.play_mode {
@@ -996,13 +1210,26 @@ impl ModSeqState {
         }
 
         let raw = match params.mode {
-            ModSeqMode::Performer => evaluate_modseq_curve_with_swing(
-                steps,
-                params.num_steps,
-                self.phase,
-                params.groove_swing,
-            ),
-            ModSeqMode::Mseg => evaluate_mseg_curve(mseg, self.phase),
+            ModSeqMode::Performer => {
+                let (step_idx, local_t) = resolve_modseq_step(
+                    n,
+                    params.start_row,
+                    params.row_mode,
+                    params.row_mod,
+                    self.phase,
+                );
+                self.display_phase = (step_idx as f32 + local_t) / (MAX_MODSEQ_STEPS as f32);
+                let mut step = steps[step_idx];
+                if params.groove_swing {
+                    let swing_t = GROOVE_SWING_TENSIONS[step_idx % GROOVE_SWING_TENSIONS.len()];
+                    step.tension = (step.tension + swing_t).clamp(-1.0, 1.0);
+                }
+                evaluate_step_shape(step, local_t)
+            }
+            ModSeqMode::Mseg => {
+                self.display_phase = self.phase;
+                evaluate_mseg_curve(mseg, self.phase)
+            }
         };
         let smooth = params.smooth.clamp(0.0, 1.0);
         if smooth <= 1e-4 {

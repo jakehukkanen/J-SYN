@@ -406,4 +406,20 @@ fn mod_matrix_256_slots_trimmed_json_roundtrip_and_4_slot_modseq_migration() {
     assert_eq!(decoded_bank.msegs[0..4], default_bank.msegs[0..4]);
     assert_eq!(decoded_bank.seqs.len(), NUM_MODSEQS);
     assert_eq!(decoded_bank.msegs.len(), NUM_MODSEQS);
+
+    // Legacy v0.4.x 16-step rows without `span` field deserialize cleanly and pad to 32 steps
+    let legacy_16step_row = serde_json::json!([
+        {"start_level": 1.0, "end_level": 0.0, "tension": 0.0, "shape": "RampDown"},
+        {"start_level": 0.5, "end_level": 0.5, "tension": 0.0, "shape": "Flat"}
+    ]);
+    let legacy_16_bank = serde_json::json!({
+        "seqs": [legacy_16step_row],
+        "msegs": [&default_bank.msegs[0]]
+    });
+    let decoded_16: ModSeqStepBank =
+        serde_json::from_value(legacy_16_bank).expect("deserialize legacy 16-step row");
+    assert_eq!(decoded_16.seqs[0].len(), 32);
+    assert_eq!(decoded_16.seqs[0][0].span, j_syn_dsp::ModSeqStepSpan::Full);
+    assert_eq!(decoded_16.seqs[0][0].start_level, 1.0);
+    assert_eq!(decoded_16.seqs[0][16], j_syn_dsp::ModSeqStep::default());
 }

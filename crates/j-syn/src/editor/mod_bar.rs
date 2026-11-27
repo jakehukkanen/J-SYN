@@ -7,7 +7,7 @@ use std::time::Duration;
 use j_syn_dsp::mod_matrix::{
     ModDestination, ModMatrixSource, ModSlot, ModUiTelemetry, NUM_MOD_DESTS, NUM_MOD_SLOTS,
 };
-use j_syn_dsp::modseq::ModSeqStepShape;
+use j_syn_dsp::modseq::{ModSeqPaletteTile, MODSEQ_PALETTE_TILES};
 use j_syn_dsp::{FxEngineSwapQueue, FxType, NUM_FX_BUSES, NUM_FX_SLOTS};
 use j_syn_ui::ModUiHost;
 use nih_plug_vizia::vizia::prelude::*;
@@ -50,6 +50,7 @@ pub(crate) struct ModUiState {
     inspected_dest: AtomicU16,
     inspected_slot: AtomicU8,
     active_stamp: AtomicU8,
+    active_modseq_row: AtomicU8,
     mseg_snap: AtomicBool,
     last_enabled_mask: AtomicU64,
     external_sync_rev: AtomicU64,
@@ -81,7 +82,8 @@ impl ModUiState {
             mb_dist_tab: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU8::new(0))),
             inspected_dest: AtomicU16::new(UNSET_DEST),
             inspected_slot: AtomicU8::new(UNSET_U8),
-            active_stamp: AtomicU8::new(ModSeqStepShape::RampDown as u8),
+            active_stamp: AtomicU8::new(2), // RampDown in MODSEQ_PALETTE_TILES
+            active_modseq_row: AtomicU8::new(0),
             mseg_snap: AtomicBool::new(false),
             last_enabled_mask: AtomicU64::new(initial_mask),
             external_sync_rev: AtomicU64::new(0),
@@ -114,8 +116,23 @@ impl ModUiState {
     }
 
     #[inline]
-    pub fn active_stamp(&self) -> ModSeqStepShape {
-        ModSeqStepShape::from_u8(self.active_stamp.load(Ordering::Relaxed))
+    pub fn active_tile_idx(&self) -> usize {
+        (self.active_stamp.load(Ordering::Relaxed) as usize).min(MODSEQ_PALETTE_TILES.len() - 1)
+    }
+
+    #[inline]
+    pub fn active_tile(&self) -> ModSeqPaletteTile {
+        MODSEQ_PALETTE_TILES[self.active_tile_idx()]
+    }
+
+    #[inline]
+    pub fn active_modseq_row(&self) -> usize {
+        (self.active_modseq_row.load(Ordering::Relaxed) as usize).min(1)
+    }
+
+    pub fn set_active_modseq_row(&self, row: usize) {
+        self.active_modseq_row
+            .store((row.min(1)) as u8, Ordering::Relaxed);
     }
 
     #[inline]
@@ -201,8 +218,11 @@ impl ModUiState {
         next
     }
 
-    pub fn set_active_stamp(&self, shape: ModSeqStepShape) {
-        self.active_stamp.store(shape as u8, Ordering::Relaxed);
+    pub fn set_active_tile_idx(&self, idx: usize) {
+        self.active_stamp.store(
+            idx.min(MODSEQ_PALETTE_TILES.len() - 1) as u8,
+            Ordering::Relaxed,
+        );
     }
 
     pub fn set_active_tab(&self, tab: BottomTab) {
