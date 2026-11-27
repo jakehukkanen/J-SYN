@@ -671,23 +671,36 @@ fn build_center_wing(
         let u_stage = mod_ui.clone();
         let u_tabs = mod_ui.clone();
         VStack::new(cx, move |cx| {
-            HStack::new(cx, move |cx| {
-                for &src in &ModMatrixSource::ALL_ACTIVE[0..4] {
-                    ModSourcePill::new(cx, src, u_tabs.clone())
-                        .width(Stretch(0.9))
-                        .height(Stretch(1.0));
-                }
-                for &src in &ModMatrixSource::ALL_ACTIVE[4..8] {
-                    ModSourcePill::new(cx, src, u_tabs.clone())
-                        .width(Stretch(1.0))
-                        .height(Stretch(1.0));
-                }
-                build_center_tab_button(cx, CenterStageTab::Voice, "VOICE", 1.2);
-                build_center_tab_button(cx, CenterStageTab::Routing, "ROUTE", 1.2);
+            let u_row1 = u_tabs.clone();
+            let u_row2 = u_tabs;
+            VStack::new(cx, move |cx| {
+                HStack::new(cx, move |cx| {
+                    for &src in &ModMatrixSource::MODSEQS {
+                        ModSourcePill::new(cx, src, u_row1.clone())
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0));
+                    }
+                    build_center_tab_button(cx, CenterStageTab::Voice, "VOICE", 1.2);
+                })
+                .col_between(Pixels(tokens::SPACE_XS))
+                .width(Stretch(1.0))
+                .height(Stretch(1.0));
+
+                HStack::new(cx, move |cx| {
+                    for &src in &ModMatrixSource::ENVS {
+                        ModSourcePill::new(cx, src, u_row2.clone())
+                            .width(Stretch(1.0))
+                            .height(Stretch(1.0));
+                    }
+                    build_center_tab_button(cx, CenterStageTab::Routing, "ROUTE", 1.2);
+                })
+                .col_between(Pixels(tokens::SPACE_XS))
+                .width(Stretch(1.0))
+                .height(Stretch(1.0));
             })
             .class("tab-bar")
-            .col_between(Pixels(tokens::SPACE_XS))
-            .height(Pixels(24.0))
+            .row_between(Pixels(2.0))
+            .height(Pixels(48.0))
             .width(Stretch(1.0));
 
             Binding::new(cx, UiData::active_tab, move |cx, active| {

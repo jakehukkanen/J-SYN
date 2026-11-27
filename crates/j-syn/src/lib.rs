@@ -80,11 +80,11 @@ impl JSynPlugin {
         sp.filters[0] = self.params.filters[0].to_dsp();
         sp.filters[1] = self.params.filters[1].to_dsp();
         sp.routing = self.params.routing.to_dsp();
-        for i in 0..3 {
+        for i in 0..j_syn_dsp::NUM_MOD_ENVS {
             sp.mod_envs[i] = self.params.mod_envs[i].to_dsp();
         }
         let swing = self.params.modseq_swing.value();
-        for i in 0..4 {
+        for i in 0..j_syn_dsp::NUM_MODSEQS {
             sp.modseqs[i] = self.params.modseqs[i].to_dsp(swing);
         }
         sp.modseq_steps = modseq_steps;

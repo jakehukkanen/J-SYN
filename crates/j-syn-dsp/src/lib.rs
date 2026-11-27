@@ -56,7 +56,7 @@ pub use modseq::{
     LfoPreset, ModSeqMode, ModSeqParams, ModSeqPlayMode, ModSeqRetrig, ModSeqShapePreset,
     ModSeqState, ModSeqStep, ModSeqStepBank, ModSeqStepShape, ModSeqSyncMode, MsegCurve,
     MsegNode, MAX_MODSEQ_STEPS, MAX_MSEG_NODES, MODSEQ_DOTTED_DIVS, MODSEQ_STRAIGHT_DIVS,
-    MODSEQ_TRIPLET_DIVS,
+    MODSEQ_TRIPLET_DIVS, NUM_ENVS, NUM_MODSEQS, NUM_MOD_ENVS,
 };
 pub use noise::{NoiseParams, NoiseState, NoiseType};
 pub use oscillator::{

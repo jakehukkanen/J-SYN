@@ -3,7 +3,10 @@
 use std::sync::{Arc, Mutex};
 
 use arc_swap::ArcSwap;
-use j_syn_dsp::{FxRackOrder, FxType, ModMatrixState, ModSeqStepBank, NUM_FX_BUSES, NUM_FX_SLOTS};
+use j_syn_dsp::{
+    FxRackOrder, FxType, ModMatrixState, ModSeqStepBank, NUM_FX_BUSES, NUM_FX_SLOTS, NUM_MODSEQS,
+    NUM_MOD_ENVS,
+};
 use nih_plug::params::persist::PersistentField;
 use nih_plug::prelude::*;
 use nih_plug_vizia::ViziaState;
@@ -36,6 +39,11 @@ impl<T: Default> Default for PersistedArcSwap<T> {
 }
 
 impl<T: Copy> PersistedArcSwap<T> {
+    #[inline]
+    pub fn load(&self) -> arc_swap::Guard<Arc<T>> {
+        self.0.load()
+    }
+
     #[inline]
     pub fn snapshot(&self) -> T {
         let guard = self.0.load();
@@ -179,10 +187,10 @@ pub struct JSynPluginParams {
     pub routing: RoutingPluginParams,
 
     #[nested(array, group = "Mod Envelopes")]
-    pub mod_envs: [ModEnvPluginParams; 3],
+    pub mod_envs: [ModEnvPluginParams; NUM_MOD_ENVS],
 
     #[nested(array, group = "Mod Sequencers")]
-    pub modseqs: [ModSeqPluginParams; 4],
+    pub modseqs: [ModSeqPluginParams; NUM_MODSEQS],
 
     #[nested(array, group = "Master FX")]
     pub fx_slots: [Box<FxSlotPluginParams>; NUM_FX_SLOTS],

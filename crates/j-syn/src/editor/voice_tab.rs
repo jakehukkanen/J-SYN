@@ -9,9 +9,9 @@ use nih_plug_vizia::vizia::prelude::*;
 
 use super::controls::{
     bold_label, build_bool_dropdown, build_flex_knob_cell_mod, build_flex_knob_cell_mod_dim,
-    build_knob_cell, build_mini_pill_cell, build_module_header,
+    build_flex_pill_cell, build_knob_cell, build_module_header,
 };
-use super::mod_bar::{bottom_tab_tag, ModUiState};
+use super::mod_bar::{ModUiState, bottom_tab_tag};
 use super::osc_panel::osc_enabled_fn;
 use super::tokens;
 use super::widgets::LedToggleSwitch;
@@ -115,13 +115,12 @@ pub(super) fn build_voice_tab(
                     .width(Stretch(1.0))
                     .height(Auto);
 
-                    build_mini_pill_cell(
+                    build_flex_pill_cell(
                         cx,
                         UiData::params,
                         |p| &p.pitch_bend_range,
                         "PB RANGE",
                         24,
-                        tokens::VOICE_COL_MODE_W,
                     );
                 })
                 .row_between(Pixels(tokens::SPACE_SM))
@@ -132,23 +131,16 @@ pub(super) fn build_voice_tab(
 
                 // Stacked MPE column: MPE toggle over MPE PB
                 VStack::new(cx, move |cx| {
-                    LedToggleSwitch::new(
-                        cx,
-                        UiData::params,
-                        |p| &p.mpe_enabled,
-                        "MPE",
-                        "MPE",
-                    )
-                    .width(Stretch(1.0))
-                    .height(Pixels(tokens::CONTROL_H));
+                    LedToggleSwitch::new(cx, UiData::params, |p| &p.mpe_enabled, "MPE", "MPE")
+                        .width(Stretch(1.0))
+                        .height(Pixels(tokens::CONTROL_H));
 
-                    build_mini_pill_cell(
+                    build_flex_pill_cell(
                         cx,
                         UiData::params,
                         |p| &p.mpe_pitch_bend_range,
                         "MPE PB",
                         48,
-                        tokens::VOICE_COL_MPE_W,
                     );
                 })
                 .row_between(Pixels(tokens::SPACE_SM))

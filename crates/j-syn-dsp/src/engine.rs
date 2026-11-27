@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use crate::fx::{FxEngineSwapQueue, FxRackState};
 use crate::mod_matrix::{
-    ModDestination, ModUiTelemetry, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS, NUM_VOICE_MOD_DESTS,
+    ModDestination, ModMatrixSource, ModUiTelemetry, NUM_ACTIVE_SOURCES, NUM_MOD_DESTS,
+    NUM_VOICE_MOD_DESTS,
 };
-use crate::modseq::{ModSeqRetrig, ModSeqState};
+use crate::modseq::{ModSeqRetrig, ModSeqState, NUM_ENVS, NUM_MODSEQS};
 use crate::oscillator::EngineMode;
 use crate::voice::{
     PolyMode, SynthParams, TailVoice, Voice, VoiceBusOutput, VoiceControlOverrides,
@@ -129,8 +130,8 @@ pub struct SynthEngine {
     channel_pitch_bend: [f32; 16],
     channel_pressure: [f32; 16],
     channel_slide: [f32; 16],
-    global_modseqs: [ModSeqState; 4],
-    global_modseq_vals: [f32; 4],
+    global_modseqs: [ModSeqState; NUM_MODSEQS],
+    global_modseq_vals: [f32; NUM_MODSEQS],
     telemetry: Arc<ModUiTelemetry>,
     control_tick_counter: u32,
     control_tick_period: u32,
@@ -178,8 +179,8 @@ impl SynthEngine {
             channel_pitch_bend: [0.0; 16],
             channel_pressure: [0.0; 16],
             channel_slide: [0.0; 16],
-            global_modseqs: [ModSeqState::new(); 4],
-            global_modseq_vals: [0.0; 4],
+            global_modseqs: [ModSeqState::new(); NUM_MODSEQS],
+            global_modseq_vals: [0.0; NUM_MODSEQS],
             telemetry: Arc::new(ModUiTelemetry::new()),
             control_tick_counter: 0,
             control_tick_period: (sr / 1500.0).round().max(1.0) as u32,
@@ -248,7 +249,7 @@ impl SynthEngine {
         for ms in &mut self.global_modseqs {
             ms.reset();
         }
-        self.global_modseq_vals = [0.0; 4];
+        self.global_modseq_vals = [0.0; NUM_MODSEQS];
         self.mono_stack_len = 0;
         self.last_note = None;
         self.pitch_bend_norm = 0.0;
@@ -700,7 +701,7 @@ impl SynthEngine {
         if params.engine_mode == EngineMode::Hq {
             let dt_sample = 1.0 / self.sample_rate;
             let rate_mods = self.current_global_modseq_rate_mods();
-            for i in 0..4 {
+            for i in 0..NUM_MODSEQS {
                 let mut ms_p = params.modseqs[i];
                 ms_p.rate_mod = rate_mods[i];
                 self.global_modseq_vals[i] = self.global_modseqs[i].advance_with_mseg(
@@ -712,7 +713,14 @@ impl SynthEngine {
                 );
             }
             if any_voices {
-                for v in &mut self.voices {
+                let telemetry_voice_idx = self
+                    .voices
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| v.active)
+                    .max_by_key(|(_, v)| v.age)
+                    .map(|(idx, _)| idx);
+                for (v_idx, v) in self.voices.iter_mut().enumerate() {
                     if v.active {
                         v.update_modulation(
                             dt_sample,
@@ -722,6 +730,7 @@ impl SynthEngine {
                             self.aftertouch,
                             self.slide,
                             false,
+                            Some(v_idx) == telemetry_voice_idx,
                         );
                     }
                 }
@@ -730,7 +739,7 @@ impl SynthEngine {
         } else if is_control_tick {
             let dt_tick = (self.control_tick_period as f32) / self.sample_rate;
             let rate_mods = self.current_global_modseq_rate_mods();
-            for i in 0..4 {
+            for i in 0..NUM_MODSEQS {
                 let mut ms_p = params.modseqs[i];
                 ms_p.rate_mod = rate_mods[i];
                 self.global_modseq_vals[i] = self.global_modseqs[i].advance_with_mseg(
@@ -742,7 +751,14 @@ impl SynthEngine {
                 );
             }
             if any_voices {
-                for v in &mut self.voices {
+                let telemetry_voice_idx = self
+                    .voices
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, v)| v.active)
+                    .max_by_key(|(_, v)| v.age)
+                    .map(|(idx, _)| idx);
+                for (v_idx, v) in self.voices.iter_mut().enumerate() {
                     if v.active {
                         v.update_modulation(
                             dt_tick,
@@ -752,6 +768,7 @@ impl SynthEngine {
                             self.aftertouch,
                             self.slide,
                             true,
+                            Some(v_idx) == telemetry_voice_idx,
                         );
                     }
                 }
@@ -904,9 +921,11 @@ impl SynthEngine {
     #[inline]
     fn build_idle_sources(&self, params: &SynthParams) -> [f32; NUM_ACTIVE_SOURCES] {
         let mut idle_sources = [0.0_f32; NUM_ACTIVE_SOURCES];
-        for i in 0..4 {
+        for i in 0..NUM_MODSEQS {
             if params.modseqs[i].retrig == ModSeqRetrig::MonoGlobal {
-                idle_sources[4 + i] = self.global_modseq_vals[i];
+                if let Some(idx) = ModMatrixSource::MODSEQS[i].active_index() {
+                    idle_sources[idx] = self.global_modseq_vals[i];
+                }
             }
         }
         idle_sources[10] = self.mod_wheel.clamp(0.0, 1.0);
@@ -934,26 +953,25 @@ impl SynthEngine {
     }
 
     #[inline]
-    fn current_global_modseq_rate_mods(&self) -> [f32; 4] {
+    fn current_global_modseq_rate_mods(&self) -> [f32; NUM_MODSEQS] {
         std::array::from_fn(|i| self.global_mod_offsets[ModDestination::modseq_rate(i).index()])
     }
 
     fn publish_telemetry(&self, params: &SynthParams) {
         if let Some(v) = self.voices.iter().filter(|v| v.active).max_by_key(|v| v.age) {
-            let mut modseq_phases = [0.0_f32; 4];
-            for i in 0..4 {
+            let mut modseq_phases = [0.0_f32; NUM_MODSEQS];
+            for i in 0..NUM_MODSEQS {
                 modseq_phases[i] = if params.modseqs[i].retrig == ModSeqRetrig::PolyVoice {
                     v.modseqs[i].phase
                 } else {
                     self.global_modseqs[i].phase
                 };
             }
-            let env_levels = [
-                v.amp_env.level(),
-                v.mod_envs[0].level(),
-                v.mod_envs[1].level(),
-                v.mod_envs[2].level(),
-            ];
+            let mut env_levels = [0.0_f32; NUM_ENVS];
+            env_levels[0] = v.amp_env.level();
+            for i in 0..(NUM_ENVS - 1) {
+                env_levels[1 + i] = v.mod_envs[i].level();
+            }
             self.telemetry.store_voice_snapshot(
                 &self.global_mod_offsets,
                 &v.last_sources,
@@ -969,8 +987,8 @@ impl SynthEngine {
             }
         } else {
             let idle_sources = self.build_idle_sources(params);
-            let mut modseq_phases = [0.0_f32; 4];
-            for i in 0..4 {
+            let mut modseq_phases = [0.0_f32; NUM_MODSEQS];
+            for i in 0..NUM_MODSEQS {
                 if params.modseqs[i].retrig == ModSeqRetrig::MonoGlobal {
                     modseq_phases[i] = self.global_modseqs[i].phase;
                 }
@@ -979,7 +997,7 @@ impl SynthEngine {
                 &self.global_mod_offsets,
                 &idle_sources,
                 &modseq_phases,
-                &[0.0; 4],
+                &[0.0; NUM_ENVS],
             );
             for (i, flt) in params.filters.iter().enumerate() {
                 let mf =
@@ -1006,7 +1024,7 @@ impl SynthEngine {
         start_note: f32,
         target_note: f32,
         params: &SynthParams,
-        global_modseq_vals: &[f32; 4],
+        global_modseq_vals: &[f32; NUM_MODSEQS],
         mod_wheel: f32,
         aftertouch: f32,
         slide: f32,
@@ -1068,6 +1086,7 @@ impl SynthEngine {
             mod_wheel,
             aftertouch,
             slide,
+            true,
             true,
         );
     }

@@ -6,6 +6,7 @@ use super::destinations::{
     ModDestination, ModMatrixSource, FX_MOD_BUSES, FX_MOD_SLOTS_PER_BUS, NUM_ACTIVE_SOURCES,
     NUM_MOD_DESTS,
 };
+use crate::modseq::{NUM_ENVS, NUM_MODSEQS};
 
 pub const FX_SCOPE_LEN: usize = 256;
 
@@ -75,8 +76,8 @@ impl FxScopeRing {
 pub struct ModUiTelemetry {
     pub dest_offsets: Box<[AtomicU32]>,
     pub source_levels: [AtomicU32; NUM_ACTIVE_SOURCES],
-    pub modseq_phases: [AtomicU32; 4],
-    pub env_levels: [AtomicU32; 4],
+    pub modseq_phases: [AtomicU32; NUM_MODSEQS],
+    pub env_levels: [AtomicU32; NUM_ENVS],
     /// Post-modulation `[cutoff_hz, resonance, drive, aux]` for `FILTER 1` and `FILTER 2`.
     pub filter_live: [[AtomicU32; 4]; 2],
     /// Lock-free FX scopes for `Bus A` (`0..30`), `Bus B` (`30..60`), and `Bus C` (`60..90`).
@@ -208,8 +209,8 @@ impl ModUiTelemetry {
         &self,
         dest_offsets: &[f32; NUM_MOD_DESTS],
         source_levels: &[f32; NUM_ACTIVE_SOURCES],
-        modseq_phases: &[f32; 4],
-        env_levels: &[f32; 4],
+        modseq_phases: &[f32; NUM_MODSEQS],
+        env_levels: &[f32; NUM_ENVS],
     ) {
         for (dst, &val) in self.dest_offsets.iter().zip(dest_offsets.iter()) {
             dst.store(val.to_bits(), Ordering::Relaxed);
@@ -248,7 +249,7 @@ impl ModUiTelemetry {
 
     #[inline]
     pub fn modseq_phase(&self, idx: usize) -> f32 {
-        if idx < 4 {
+        if idx < NUM_MODSEQS {
             f32::from_bits(self.modseq_phases[idx].load(Ordering::Relaxed))
         } else {
             0.0
@@ -257,7 +258,7 @@ impl ModUiTelemetry {
 
     #[inline]
     pub fn env_level(&self, idx: usize) -> f32 {
-        if idx < 4 {
+        if idx < NUM_ENVS {
             f32::from_bits(self.env_levels[idx].load(Ordering::Relaxed))
         } else {
             0.0

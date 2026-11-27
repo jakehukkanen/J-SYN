@@ -126,6 +126,7 @@ fn audio_thread_polyphony_mpe_voice_stealing_and_all_fx_zero_alloc() {
             curve: 0.2,
         };
     }
+    params.mod_matrix.rebuild_index();
     params.macros = [0.6, 0.4, 0.5, 0.2, 0.1, 0.7, 0.8, 0.9];
 
     let all_fx: Vec<FxType> = FxType::ALL

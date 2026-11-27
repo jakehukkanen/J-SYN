@@ -5,15 +5,15 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-pub const NUM_MOD_SLOTS: usize = 32;
-pub const NUM_ACTIVE_SOURCES: usize = 21;
+pub const NUM_MOD_SLOTS: usize = 256;
+pub const NUM_ACTIVE_SOURCES: usize = 29;
 
 pub const FX_MOD_BUSES: usize = 3;
 pub const FX_MOD_SLOTS_PER_BUS: usize = 30;
 pub const FX_MOD_PARAMS_PER_SLOT: usize = 16;
 
 /// Non-FX-slot destinations (`Osc`, `Noise`, `Filter`, `Insert`, `Routing`, `Glide`, `ModSeqRate`, `Sub`, `Bus Level/Pan`).
-pub const NUM_VOICE_MOD_DESTS: usize = 80;
+pub const NUM_VOICE_MOD_DESTS: usize = 84;
 /// FX-slot parameter destinations (`3 buses × 30 slots × 16 params = 1,440`).
 pub const NUM_FX_MOD_DESTS: usize = FX_MOD_BUSES * FX_MOD_SLOTS_PER_BUS * FX_MOD_PARAMS_PER_SLOT;
 /// Total modulatable destinations (`80 + 1,440 = 1,520`).
@@ -46,6 +46,14 @@ pub enum ModMatrixSource {
     Macro7 = 19,
     Macro8 = 20,
     Slide = 21,
+    Env5 = 22,
+    Env6 = 23,
+    Env7 = 24,
+    Env8 = 25,
+    ModSeq5 = 26,
+    ModSeq6 = 27,
+    ModSeq7 = 28,
+    ModSeq8 = 29,
 }
 
 impl ModMatrixSource {
@@ -54,10 +62,18 @@ impl ModMatrixSource {
         Self::Env2,
         Self::Env3,
         Self::Env4,
+        Self::Env5,
+        Self::Env6,
+        Self::Env7,
+        Self::Env8,
         Self::ModSeq1,
         Self::ModSeq2,
         Self::ModSeq3,
         Self::ModSeq4,
+        Self::ModSeq5,
+        Self::ModSeq6,
+        Self::ModSeq7,
+        Self::ModSeq8,
         Self::Velocity,
         Self::Keytrack,
         Self::ModWheel,
@@ -71,6 +87,36 @@ impl ModMatrixSource {
         Self::Macro6,
         Self::Macro7,
         Self::Macro8,
+    ];
+
+    pub const ENVS: [ModMatrixSource; 8] = [
+        Self::Env1,
+        Self::Env2,
+        Self::Env3,
+        Self::Env4,
+        Self::Env5,
+        Self::Env6,
+        Self::Env7,
+        Self::Env8,
+    ];
+
+    pub const MODSEQS: [ModMatrixSource; 8] = [
+        Self::ModSeq1,
+        Self::ModSeq2,
+        Self::ModSeq3,
+        Self::ModSeq4,
+        Self::ModSeq5,
+        Self::ModSeq6,
+        Self::ModSeq7,
+        Self::ModSeq8,
+    ];
+
+    pub const PERF: [ModMatrixSource; 5] = [
+        Self::Velocity,
+        Self::Keytrack,
+        Self::ModWheel,
+        Self::Aftertouch,
+        Self::Slide,
     ];
 
     pub const MACROS: [ModMatrixSource; 8] = [
@@ -108,6 +154,14 @@ impl ModMatrixSource {
             19 => Self::Macro7,
             20 => Self::Macro8,
             21 => Self::Slide,
+            22 => Self::Env5,
+            23 => Self::Env6,
+            24 => Self::Env7,
+            25 => Self::Env8,
+            26 => Self::ModSeq5,
+            27 => Self::ModSeq6,
+            28 => Self::ModSeq7,
+            29 => Self::ModSeq8,
             _ => Self::None,
         }
     }
@@ -130,10 +184,18 @@ impl ModMatrixSource {
             Self::Env2 => "E2",
             Self::Env3 => "E3",
             Self::Env4 => "E4",
+            Self::Env5 => "E5",
+            Self::Env6 => "E6",
+            Self::Env7 => "E7",
+            Self::Env8 => "E8",
             Self::ModSeq1 => "MS1",
             Self::ModSeq2 => "MS2",
             Self::ModSeq3 => "MS3",
             Self::ModSeq4 => "MS4",
+            Self::ModSeq5 => "MS5",
+            Self::ModSeq6 => "MS6",
+            Self::ModSeq7 => "MS7",
+            Self::ModSeq8 => "MS8",
             Self::Velocity => "VEL",
             Self::Keytrack => "KEY",
             Self::ModWheel => "MW",
@@ -158,10 +220,18 @@ impl ModMatrixSource {
             Self::Env2 => "ENV 2",
             Self::Env3 => "ENV 3",
             Self::Env4 => "ENV 4",
+            Self::Env5 => "ENV 5",
+            Self::Env6 => "ENV 6",
+            Self::Env7 => "ENV 7",
+            Self::Env8 => "ENV 8",
             Self::ModSeq1 => "MODSEQ 1",
             Self::ModSeq2 => "MODSEQ 2",
             Self::ModSeq3 => "MODSEQ 3",
             Self::ModSeq4 => "MODSEQ 4",
+            Self::ModSeq5 => "MODSEQ 5",
+            Self::ModSeq6 => "MODSEQ 6",
+            Self::ModSeq7 => "MODSEQ 7",
+            Self::ModSeq8 => "MODSEQ 8",
             Self::Velocity => "VELOCITY",
             Self::Keytrack => "KEYTRACK",
             Self::ModWheel => "MOD WHEEL",
@@ -186,10 +256,18 @@ impl ModMatrixSource {
             Self::Env2 => (46, 242, 150),
             Self::Env3 => (0, 212, 142),
             Self::Env4 => (92, 248, 172),
+            Self::Env5 => (24, 218, 128),
+            Self::Env6 => (68, 236, 162),
+            Self::Env7 => (18, 198, 134),
+            Self::Env8 => (114, 244, 184),
             Self::ModSeq1 => (0, 229, 255),
             Self::ModSeq2 => (56, 206, 255),
             Self::ModSeq3 => (0, 245, 232),
             Self::ModSeq4 => (100, 220, 255),
+            Self::ModSeq5 => (24, 214, 250),
+            Self::ModSeq6 => (76, 196, 255),
+            Self::ModSeq7 => (20, 234, 224),
+            Self::ModSeq8 => (118, 212, 255),
             Self::Velocity => (255, 82, 82),
             Self::Keytrack => (255, 112, 96),
             Self::ModWheel => (255, 92, 130),
@@ -292,6 +370,10 @@ pub enum ModDestination {
     BusBPan,
     BusCLevel,
     BusCPan,
+    ModSeq5Rate,
+    ModSeq6Rate,
+    ModSeq7Rate,
+    ModSeq8Rate,
     FxSlotParam {
         bus: u8,
         slot: u8,
@@ -299,7 +381,7 @@ pub enum ModDestination {
     },
 }
 
-/// All 80 non-FX-slot destinations in canonical index order `0..NUM_VOICE_MOD_DESTS`.
+/// All 84 non-FX-slot destinations in canonical index order `0..NUM_VOICE_MOD_DESTS`.
 pub const BASE_MOD_DESTINATIONS: [ModDestination; NUM_VOICE_MOD_DESTS] = [
     ModDestination::Osc1WtPos,
     ModDestination::Osc2WtPos,
@@ -381,6 +463,10 @@ pub const BASE_MOD_DESTINATIONS: [ModDestination; NUM_VOICE_MOD_DESTS] = [
     ModDestination::BusBPan,
     ModDestination::BusCLevel,
     ModDestination::BusCPan,
+    ModDestination::ModSeq5Rate,
+    ModDestination::ModSeq6Rate,
+    ModDestination::ModSeq7Rate,
+    ModDestination::ModSeq8Rate,
 ];
 
 const BASE_SERDE_NAMES: [&str; NUM_VOICE_MOD_DESTS] = [
@@ -464,6 +550,10 @@ const BASE_SERDE_NAMES: [&str; NUM_VOICE_MOD_DESTS] = [
     "BusBPan",
     "BusCLevel",
     "BusCPan",
+    "ModSeq5Rate",
+    "ModSeq6Rate",
+    "ModSeq7Rate",
+    "ModSeq8Rate",
 ];
 
 const BASE_DISPLAY_NAMES: [&str; NUM_VOICE_MOD_DESTS] = [
@@ -547,6 +637,10 @@ const BASE_DISPLAY_NAMES: [&str; NUM_VOICE_MOD_DESTS] = [
     "BUS B PAN",
     "BUS C LVL",
     "BUS C PAN",
+    "MS5 RATE",
+    "MS6 RATE",
+    "MS7 RATE",
+    "MS8 RATE",
 ];
 
 impl ModDestination {
@@ -633,6 +727,10 @@ impl ModDestination {
             Self::BusBPan => 77,
             Self::BusCLevel => 78,
             Self::BusCPan => 79,
+            Self::ModSeq5Rate => 80,
+            Self::ModSeq6Rate => 81,
+            Self::ModSeq7Rate => 82,
+            Self::ModSeq8Rate => 83,
             Self::FxSlotParam { bus, slot, param } => {
                 let b = if (bus as usize) < FX_MOD_BUSES {
                     bus as usize
@@ -858,7 +956,11 @@ impl ModDestination {
             0 => Self::ModSeq1Rate,
             1 => Self::ModSeq2Rate,
             2 => Self::ModSeq3Rate,
-            _ => Self::ModSeq4Rate,
+            3 => Self::ModSeq4Rate,
+            4 => Self::ModSeq5Rate,
+            5 => Self::ModSeq6Rate,
+            6 => Self::ModSeq7Rate,
+            _ => Self::ModSeq8Rate,
         }
     }
 

@@ -213,28 +213,12 @@ impl ModUiState {
     pub fn set_modseq_subtab(&self, sub: ModSeqSubTab) {
         let (code, src) = match sub {
             ModSeqSubTab::MSeq(i) => {
-                let idx = i.min(3);
-                (
-                    idx as u8,
-                    match idx {
-                        0 => ModMatrixSource::ModSeq1,
-                        1 => ModMatrixSource::ModSeq2,
-                        2 => ModMatrixSource::ModSeq3,
-                        _ => ModMatrixSource::ModSeq4,
-                    },
-                )
+                let idx = i.min(7);
+                (idx as u8, ModMatrixSource::MODSEQS[idx])
             }
             ModSeqSubTab::Env(i) => {
-                let idx = i.min(3);
-                (
-                    4 + idx as u8,
-                    match idx {
-                        0 => ModMatrixSource::Env1,
-                        1 => ModMatrixSource::Env2,
-                        2 => ModMatrixSource::Env3,
-                        _ => ModMatrixSource::Env4,
-                    },
-                )
+                let idx = i.min(7);
+                (8 + idx as u8, ModMatrixSource::ENVS[idx])
             }
         };
         self.active_modseq_subtab.store(code, Ordering::Relaxed);
@@ -263,10 +247,18 @@ impl ModUiState {
             ModMatrixSource::ModSeq2 => code == 1,
             ModMatrixSource::ModSeq3 => code == 2,
             ModMatrixSource::ModSeq4 => code == 3,
-            ModMatrixSource::Env1 => code == 4,
-            ModMatrixSource::Env2 => code == 5,
-            ModMatrixSource::Env3 => code == 6,
-            ModMatrixSource::Env4 => code == 7,
+            ModMatrixSource::ModSeq5 => code == 4,
+            ModMatrixSource::ModSeq6 => code == 5,
+            ModMatrixSource::ModSeq7 => code == 6,
+            ModMatrixSource::ModSeq8 => code == 7,
+            ModMatrixSource::Env1 => code == 8,
+            ModMatrixSource::Env2 => code == 9,
+            ModMatrixSource::Env3 => code == 10,
+            ModMatrixSource::Env4 => code == 11,
+            ModMatrixSource::Env5 => code == 12,
+            ModMatrixSource::Env6 => code == 13,
+            ModMatrixSource::Env7 => code == 14,
+            ModMatrixSource::Env8 => code == 15,
             _ => false,
         }
     }
@@ -546,7 +538,7 @@ impl ModUiState {
     }
 
     pub fn active_slot_count(&self) -> usize {
-        let mat = self.params.mod_matrix.snapshot();
+        let mat = self.params.mod_matrix.load();
         mat.slots
             .iter()
             .filter(|s| s.enabled && s.source != ModMatrixSource::None)
@@ -554,7 +546,7 @@ impl ModUiState {
     }
 
     pub fn active_entries(&self) -> Vec<(usize, ModSlot)> {
-        let mat = self.params.mod_matrix.snapshot();
+        let mat = self.params.mod_matrix.load();
         mat.slots
             .iter()
             .enumerate()
@@ -602,12 +594,13 @@ impl ModUiState {
         let mut mat = self.params.mod_matrix.snapshot();
         if mat.slots[slot_idx].enabled {
             mat.slots[slot_idx].bypassed = !mat.slots[slot_idx].bypassed;
+            mat.rebuild_index();
             self.params.mod_matrix.store_value(mat);
         }
     }
 
     pub fn all_slots_for_dest(&self, dest: ModDestination) -> Vec<(usize, ModSlot)> {
-        let mat = self.params.mod_matrix.snapshot();
+        let mat = self.params.mod_matrix.load();
         mat.slots
             .iter()
             .enumerate()
@@ -704,6 +697,7 @@ impl ModUiState {
         let mut mat = self.params.mod_matrix.snapshot();
         if mat.slots[slot_idx].enabled {
             mat.slots[slot_idx].source = source;
+            mat.rebuild_index();
             self.params.mod_matrix.store_value(mat);
         }
     }
@@ -715,6 +709,7 @@ impl ModUiState {
         let mut mat = self.params.mod_matrix.snapshot();
         if mat.slots[slot_idx].enabled {
             mat.slots[slot_idx].destination = destination;
+            mat.rebuild_index();
             self.params.mod_matrix.store_value(mat);
         }
     }
@@ -726,6 +721,7 @@ impl ModUiState {
         let mut mat = self.params.mod_matrix.snapshot();
         if mat.slots[slot_idx].enabled {
             mat.slots[slot_idx].aux_source = aux;
+            mat.rebuild_index();
             self.params.mod_matrix.store_value(mat);
         }
     }
@@ -857,10 +853,18 @@ impl ModSourcePill {
             ModMatrixSource::ModSeq2 => Some(ModSeqSubTab::MSeq(1)),
             ModMatrixSource::ModSeq3 => Some(ModSeqSubTab::MSeq(2)),
             ModMatrixSource::ModSeq4 => Some(ModSeqSubTab::MSeq(3)),
+            ModMatrixSource::ModSeq5 => Some(ModSeqSubTab::MSeq(4)),
+            ModMatrixSource::ModSeq6 => Some(ModSeqSubTab::MSeq(5)),
+            ModMatrixSource::ModSeq7 => Some(ModSeqSubTab::MSeq(6)),
+            ModMatrixSource::ModSeq8 => Some(ModSeqSubTab::MSeq(7)),
             ModMatrixSource::Env1 => Some(ModSeqSubTab::Env(0)),
             ModMatrixSource::Env2 => Some(ModSeqSubTab::Env(1)),
             ModMatrixSource::Env3 => Some(ModSeqSubTab::Env(2)),
             ModMatrixSource::Env4 => Some(ModSeqSubTab::Env(3)),
+            ModMatrixSource::Env5 => Some(ModSeqSubTab::Env(4)),
+            ModMatrixSource::Env6 => Some(ModSeqSubTab::Env(5)),
+            ModMatrixSource::Env7 => Some(ModSeqSubTab::Env(6)),
+            ModMatrixSource::Env8 => Some(ModSeqSubTab::Env(7)),
             _ => None,
         }
     }
