@@ -29,6 +29,7 @@ pub(super) struct ModSeqCurveCanvas {
 enum CanvasDragMode {
     StampLevel {
         row: usize,
+        anchor_col: usize,
     },
     EndLevel {
         step_idx: usize,
@@ -178,61 +179,38 @@ impl ModSeqCurveCanvas {
     ) {
         let mut bank = self.params.modseq_steps.snapshot();
         match mode {
-            CanvasDragMode::StampLevel { row } => {
+            CanvasDragMode::StampLevel { row, anchor_col } => {
                 let col = Self::col_for_x(bounds, x, scale);
                 let level = Self::level_for_row(bounds, row, y, scale);
                 self.mod_ui.set_active_modseq_row(self.seq_idx, row);
                 let tile = self.mod_ui.active_tile();
                 let swing = self.params.modseq_swing.value();
-                match tile.stamp_steps {
-                    4 => {
-                        let c0 = col.min(MODSEQ_ROW_STEPS - 4);
-                        let s0 = row * MODSEQ_ROW_STEPS + c0;
-                        let spans = [
-                            ModSeqStepSpan::Quarter1,
-                            ModSeqStepSpan::Quarter2,
-                            ModSeqStepSpan::Quarter3,
-                            ModSeqStepSpan::Quarter4,
-                        ];
-                        for (offset, &span) in spans.iter().enumerate() {
-                            let s = s0 + offset;
-                            let tension = if swing {
-                                bank.seqs[self.seq_idx][s].tension
-                            } else {
-                                0.0
-                            };
-                            bank.seqs[self.seq_idx][s] =
-                                ModSeqStep::stamped_with_span(tile.shape, level, tension, span);
-                        }
-                    }
-                    2 => {
-                        let c0 = col.min(MODSEQ_ROW_STEPS - 2);
-                        let s0 = row * MODSEQ_ROW_STEPS + c0;
-                        for (offset, span) in
-                            [ModSeqStepSpan::HalfFirst, ModSeqStepSpan::HalfSecond]
-                                .into_iter()
-                                .enumerate()
-                        {
-                            let s = s0 + offset;
-                            let tension = if swing {
-                                bank.seqs[self.seq_idx][s].tension
-                            } else {
-                                0.0
-                            };
-                            bank.seqs[self.seq_idx][s] =
-                                ModSeqStep::stamped_with_span(tile.shape, level, tension, span);
-                        }
-                    }
-                    _ => {
-                        let step_idx = row * MODSEQ_ROW_STEPS + col;
-                        let tension = if swing {
-                            bank.seqs[self.seq_idx][step_idx].tension
-                        } else {
-                            0.0
-                        };
-                        bank.seqs[self.seq_idx][step_idx] =
-                            ModSeqStep::stamped_with_span(tile.shape, level, tension, tile.span);
-                    }
+                let spans: &[ModSeqStepSpan] = match tile.stamp_steps {
+                    4 => &[
+                        ModSeqStepSpan::Quarter1,
+                        ModSeqStepSpan::Quarter2,
+                        ModSeqStepSpan::Quarter3,
+                        ModSeqStepSpan::Quarter4,
+                    ],
+                    2 => &[ModSeqStepSpan::HalfFirst, ModSeqStepSpan::HalfSecond],
+                    _ => &[tile.span],
+                };
+                let span_n = spans.len();
+                let stride = span_n as isize;
+                let delta_groups = (col as isize - anchor_col as isize).div_euclid(stride);
+                let c0 = (anchor_col as isize + delta_groups * stride)
+                    .clamp(0, (MODSEQ_ROW_STEPS - span_n) as isize)
+                    as usize;
+                let s0 = row * MODSEQ_ROW_STEPS + c0;
+                for (offset, &span) in spans.iter().enumerate() {
+                    let s = s0 + offset;
+                    let tension = if swing {
+                        bank.seqs[self.seq_idx][s].tension
+                    } else {
+                        0.0
+                    };
+                    bank.seqs[self.seq_idx][s] =
+                        ModSeqStep::stamped_with_span(tile.shape, level, tension, span);
                 }
             }
             CanvasDragMode::EndLevel { step_idx } => {
@@ -499,7 +477,12 @@ impl View for ModSeqCurveCanvas {
                 } else if cx.modifiers().shift() {
                     CanvasDragMode::EndLevel { step_idx }
                 } else {
-                    CanvasDragMode::StampLevel { row }
+                    let span_n =
+                        (self.mod_ui.active_tile().stamp_steps as usize).clamp(1, MODSEQ_ROW_STEPS);
+                    CanvasDragMode::StampLevel {
+                        row,
+                        anchor_col: col.min(MODSEQ_ROW_STEPS - span_n),
+                    }
                 };
                 self.drag_mode = Some(mode);
                 self.apply_drag_edit(mx, my, bounds, mode, scale, cx.modifiers().shift());
@@ -679,8 +662,8 @@ impl View for ModSeqCurveCanvas {
         let (r1, r2) = Self::row_rects(bounds, dpx);
         let sep_y = r1.1 + r1.3;
         let sep_h = (r2.1 - sep_y).max(1.0);
-        let sep_x0 = bounds.x + 1.0 * dpx;
-        let sep_w = (bounds.w - 2.0 * dpx).max(1.0);
+        let sep_x0 = bounds.x + 0.5 * dpx;
+        let sep_w = (bounds.w - 1.0 * dpx).max(1.0);
         let mut sep_rect = vg::Path::new();
         sep_rect.rect(sep_x0, sep_y, sep_w, sep_h);
         canvas.fill_path(

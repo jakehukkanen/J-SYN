@@ -1554,13 +1554,38 @@ fn modseq_32_steps_half_speed_spans_and_row_modulation() {
             let s_b = ModSeqStep::stamped_with_span(shape, 1.0, 0.0, w[1]);
             let end_a = evaluate_step_shape(s_a, 1.0);
             let start_b = evaluate_step_shape(s_b, 0.0);
-            if shape == ModSeqStepShape::TriSine3x {
-                assert!(
-                    (end_a - start_b).abs() < 1e-4,
-                    "Quarter boundary continuity failed for {shape:?}: {end_a} vs {start_b}"
-                );
-            }
+            assert!(
+                (end_a - start_b).abs() < 1e-4,
+                "Quarter boundary continuity failed for {shape:?}: {end_a} vs {start_b}"
+            );
         }
+    }
+    // Verify RampDown3x falls across cycle 1 and Square3x pulses inside Quarter1
+    let ramp_q1 = ModSeqStep::stamped_with_span(ModSeqStepShape::RampDown3x, 1.0, 0.0, ModSeqStepSpan::Quarter1);
+    assert!(evaluate_step_shape(ramp_q1, 0.1) > evaluate_step_shape(ramp_q1, 0.8));
+    let sqr_q1 = ModSeqStep::stamped_with_span(ModSeqStepShape::Square3x, 1.0, 0.0, ModSeqStepSpan::Quarter1);
+    assert!((evaluate_step_shape(sqr_q1, 0.1) - 1.0).abs() < 1e-4);
+    assert!(evaluate_step_shape(sqr_q1, 0.8).abs() < 1e-4);
+
+    // Verify 2-step (24th-note) triplet tiles MODSEQ_PALETTE_TILES[27..=29]
+    for (idx, expected_shape) in [
+        (27usize, ModSeqStepShape::RampDown3x),
+        (28, ModSeqStepShape::TriSine3x),
+        (29, ModSeqStepShape::Square3x),
+    ] {
+        let tile = MODSEQ_PALETTE_TILES[idx];
+        assert_eq!(tile.shape, expected_shape);
+        assert_eq!(tile.stamp_steps, 2);
+        let mut seq_24 = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
+        fill_modseq_row_with_tile(&mut seq_24, 0, tile);
+        assert_eq!(seq_24[0].span, ModSeqStepSpan::HalfFirst);
+        assert_eq!(seq_24[1].span, ModSeqStepSpan::HalfSecond);
+        let end_a = evaluate_step_shape(seq_24[0], 1.0);
+        let start_b = evaluate_step_shape(seq_24[1], 0.0);
+        assert!(
+            (end_a - start_b).abs() < 1e-4,
+            "24th-note Half boundary continuity failed for {expected_shape:?}: {end_a} vs {start_b}"
+        );
     }
     // Verify 4-step TriSine3x produces 3 peaks at 1/6, 3/6, 5/6 of the 4-step span
     let tri_tile = MODSEQ_PALETTE_TILES[31]; // 4-step TriSine3x

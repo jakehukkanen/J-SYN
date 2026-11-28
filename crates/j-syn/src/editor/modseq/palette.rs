@@ -382,8 +382,12 @@ impl View for ModSeqPaletteGrid {
                     24,
                     |t| evaluate_step_shape(step, t),
                 );
-                if let Some(fid) = font_id {
-                    let badge = if tile_def.stamp_steps == 4 { "4" } else { "2" };
+                let badge = match tile_def.stamp_steps {
+                    2 => Some("2"),
+                    4 => Some("4"),
+                    _ => None,
+                };
+                if let (Some(fid), Some(badge)) = (font_id, badge) {
                     let mut tp =
                         vg::Paint::color(vg::Color::rgba(accent.0, accent.1, accent.2, 200));
                     tp.set_font(&[fid]);

@@ -98,7 +98,7 @@ pub(super) fn build_voice_tab(
                     VStack::new(cx, move |cx| {
                         bold_label(cx, "MODE", "mini-label")
                             .width(Stretch(1.0))
-                            .height(Pixels(12.0))
+                            .height(Pixels(tokens::KNOB_TITLE_COMPACT_H))
                             .child_space(Stretch(1.0));
                         build_bool_dropdown(
                             cx,
@@ -132,7 +132,9 @@ pub(super) fn build_voice_tab(
                 // Stacked MPE column: MPE toggle over MPE PB (with 12 px spacer to align with MODE/PB RANGE)
                 VStack::new(cx, move |cx| {
                     VStack::new(cx, move |cx| {
-                        Element::new(cx).width(Stretch(1.0)).height(Pixels(12.0));
+                        Element::new(cx)
+                            .width(Stretch(1.0))
+                            .height(Pixels(tokens::KNOB_TITLE_COMPACT_H));
                         LedToggleSwitch::new(cx, UiData::params, |p| &p.mpe_enabled, "MPE", "MPE")
                             .width(Stretch(1.0))
                             .height(Pixels(tokens::CONTROL_H));
