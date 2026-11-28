@@ -10,192 +10,11 @@ use std::f32::consts::PI;
 use crate::adaa::TanhAdaa2;
 use crate::oscillator::EngineMode;
 
-pub const COMB_BUF_LEN: usize = 2048;
+mod response;
+mod types;
 
-/// Skew factor matching `nih_plug::prelude::FloatRange::skew_factor(-2.2)` (`2.0_f32.powf(-2.2)`).
-pub const CUTOFF_SKEW_FACTOR: f32 = 0.217_637_64;
-
-/// Maps a filter cutoff frequency (`20.0..=20_000.0 Hz`) to normalized `0.0..=1.0` space.
-#[inline]
-pub fn cutoff_hz_to_norm(hz: f32) -> f32 {
-    let t = ((hz.clamp(20.0, 20_000.0) - 20.0) / (20_000.0 - 20.0)).clamp(0.0, 1.0);
-    t.powf(CUTOFF_SKEW_FACTOR)
-}
-
-/// Maps normalized `0.0..=1.0` cutoff position back to `20.0..=20_000.0 Hz`.
-#[inline]
-pub fn cutoff_norm_to_hz(norm: f32) -> f32 {
-    let t = norm.clamp(0.0, 1.0).powf(1.0 / CUTOFF_SKEW_FACTOR);
-    (20.0 + (20_000.0 - 20.0) * t).clamp(20.0, 20_000.0)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FilterMode {
-    Lp = 0,
-    Bp = 1,
-    Hp = 2,
-    Scream = 3,
-    Daft = 4,
-    Comb = 5,
-    HpPeak = 6,
-    HpNotch = 7,
-    LpNotch = 8,
-    LpPeak = 9,
-    Notch = 10,
-    Peak = 11,
-    Bandreject = 12,
-    PeakPeak = 13,
-    NotchNotch = 14,
-}
-
-impl FilterMode {
-    pub fn from_index(idx: usize) -> Self {
-        match idx {
-            1 => Self::Bp,
-            2 => Self::Hp,
-            3 => Self::Scream,
-            4 => Self::Daft,
-            5 => Self::Comb,
-            6 => Self::HpPeak,
-            7 => Self::HpNotch,
-            8 => Self::LpNotch,
-            9 => Self::LpPeak,
-            10 => Self::Notch,
-            11 => Self::Peak,
-            12 => Self::Bandreject,
-            13 => Self::PeakPeak,
-            14 => Self::NotchNotch,
-            _ => Self::Lp,
-        }
-    }
-
-    #[inline]
-    pub fn is_multi(self) -> bool {
-        matches!(
-            self,
-            Self::HpPeak
-                | Self::HpNotch
-                | Self::LpNotch
-                | Self::LpPeak
-                | Self::PeakPeak
-                | Self::NotchNotch
-        )
-    }
-
-    /// True for fixed 2-pole / 12 dB filter topologies whose Slope control is disabled.
-    #[inline]
-    pub fn has_fixed_12db_slope(self) -> bool {
-        matches!(
-            self,
-            Self::Scream | Self::Daft | Self::Comb | Self::Bandreject
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FilterSlope {
-    Db6 = 0,
-    Db12 = 1,
-    Db24 = 2,
-    Db36 = 3,
-    Db48 = 4,
-}
-
-impl FilterSlope {
-    pub fn from_index(idx: usize) -> Self {
-        match idx {
-            0 => Self::Db6,
-            2 => Self::Db24,
-            3 => Self::Db36,
-            4 => Self::Db48,
-            _ => Self::Db12,
-        }
-    }
-
-    #[inline]
-    pub fn num_2pole_stages(self) -> usize {
-        match self {
-            Self::Db6 => 0,
-            Self::Db12 => 1,
-            Self::Db24 => 2,
-            Self::Db36 => 3,
-            Self::Db48 => 4,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct FilterParams {
-    pub enabled: bool,
-    pub mode: FilterMode,
-    pub slope: FilterSlope,
-    pub cutoff_hz: f32,
-    pub resonance: f32,
-    pub drive: f32,
-    pub keytrack: f32,
-    /// Context-sensitive 4th parameter (`0.0..1.0`):
-    /// - `Scream`: feedback scream amount
-    /// - Multi-filter (`HP+Peak`, `HP+Notch`, `LP+Notch`, `LP+Peak`, `Peak+Peak`, `Notch+Notch`): secondary `FREQ 2` (`20 Hz`..`20 kHz`)
-    /// - `Comb`: high-frequency feedback damping
-    /// - Other single modes: wet/dry `MIX`
-    pub aux: f32,
-}
-
-impl FilterParams {
-    pub fn default_filter_1() -> Self {
-        Self {
-            enabled: true,
-            mode: FilterMode::Lp,
-            slope: FilterSlope::Db12,
-            cutoff_hz: 20_000.0,
-            resonance: 0.0,
-            drive: 0.0,
-            keytrack: 0.0,
-            aux: 1.0,
-        }
-    }
-
-    pub fn default_filter_2() -> Self {
-        Self {
-            enabled: false,
-            mode: FilterMode::Lp,
-            slope: FilterSlope::Db12,
-            cutoff_hz: 2_000.0,
-            resonance: 0.0,
-            drive: 0.0,
-            keytrack: 0.0,
-            aux: 1.0,
-        }
-    }
-}
-
-impl Default for FilterParams {
-    fn default() -> Self {
-        Self::default_filter_1()
-    }
-}
-
-#[inline]
-pub fn aux_to_freq2_hz(aux: f32) -> f32 {
-    20.0 * 1000.0_f32.powf(aux.clamp(0.0, 1.0))
-}
-
-/// Fast rational Pade approximation of `tanh(x)` suitable for real-time audio saturation.
-#[inline]
-pub fn fast_tanh(x: f32) -> f32 {
-    let x = x.clamp(-4.5, 4.5);
-    let x2 = x * x;
-    x * (27.0 + x2) / (27.0 + 9.0 * x2)
-}
-
-#[inline]
-fn soft_limit_state(x: f32) -> f32 {
-    if x.abs() <= 1.25 {
-        x
-    } else {
-        fast_tanh(x * 0.25) * 4.0
-    }
-}
+pub use response::*;
+pub use types::*;
 
 /// Pre-allocated per-channel 2-pole stereo ZDF SVF state.
 #[derive(Debug, Clone, Copy, Default)]
@@ -406,7 +225,11 @@ impl FilterSvfCore {
         let aux = params.aux.clamp(0.0, 1.0);
 
         match params.mode {
-            FilterMode::Lp | FilterMode::Bp | FilterMode::Hp | FilterMode::Notch | FilterMode::Peak => {
+            FilterMode::Lp
+            | FilterMode::Bp
+            | FilterMode::Hp
+            | FilterMode::Notch
+            | FilterMode::Peak => {
                 let g = (PI * fc / sr).tan().min(8.0);
                 let mut out = [0.0_f32; 2];
                 if params.slope == FilterSlope::Db6
@@ -671,7 +494,7 @@ impl FilterSvfCore {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ComboBandKind {
+pub(super) enum ComboBandKind {
     Hp,
     Lp,
     Peak,
@@ -680,7 +503,7 @@ enum ComboBandKind {
 
 impl ComboBandKind {
     #[inline]
-    fn from_mode(mode: FilterMode) -> (Self, Self) {
+    pub(super) fn from_mode(mode: FilterMode) -> (Self, Self) {
         match mode {
             FilterMode::HpPeak => (Self::Hp, Self::Peak),
             FilterMode::HpNotch => (Self::Hp, Self::Notch),
@@ -693,7 +516,7 @@ impl ComboBandKind {
     }
 
     #[inline]
-    fn is_peak_or_notch(self) -> bool {
+    pub(super) fn is_peak_or_notch(self) -> bool {
         matches!(self, Self::Peak | Self::Notch)
     }
 }
@@ -750,8 +573,14 @@ impl FilterSvfCore {
             } else {
                 sig
             };
-            let (lp_s, bp_s, hp_s) =
-                Self::svf_step(g, k_helper, mid, &mut stage.ic1eq[ch], &mut stage.ic2eq[ch], sat);
+            let (lp_s, bp_s, hp_s) = Self::svf_step(
+                g,
+                k_helper,
+                mid,
+                &mut stage.ic1eq[ch],
+                &mut stage.ic2eq[ch],
+                sat,
+            );
             sig = match kind {
                 ComboBandKind::Hp => hp_s,
                 ComboBandKind::Lp => lp_s,
@@ -761,64 +590,6 @@ impl FilterSvfCore {
         }
         sig
     }
-}
-
-fn evaluate_combo_band_mag(
-    kind: ComboBandKind,
-    w: f32,
-    slope: FilterSlope,
-    res: f32,
-    drive_gain: f32,
-) -> f32 {
-    let w2 = w * w;
-    let one_minus_w2 = 1.0 - w2;
-    if slope == FilterSlope::Db6 && !kind.is_peak_or_notch() {
-        let den = (1.0 + w2).sqrt().max(1e-4);
-        let base = match kind {
-            ComboBandKind::Hp => w / den,
-            _ => 1.0 / den,
-        };
-        return base * drive_gain;
-    }
-
-    let stages = slope.num_2pole_stages().max(1);
-    let k0 = if kind.is_peak_or_notch() {
-        (1.4 - 1.25 * res).max(0.08)
-    } else {
-        (2.0 - 1.95 * res).max(0.05)
-    };
-    let d0 = (one_minus_w2 * one_minus_w2 + (k0 * w).powi(2))
-        .sqrt()
-        .max(1e-4);
-    let peak_boost = (0.6 + 1.8 * res) / (stages as f32).sqrt();
-    let mut m = match kind {
-        ComboBandKind::Hp => (w2 * drive_gain) / d0,
-        ComboBandKind::Lp => drive_gain / d0,
-        ComboBandKind::Peak => {
-            let num = (one_minus_w2 * one_minus_w2 + ((1.0 + peak_boost) * k0 * w).powi(2)).sqrt();
-            (num * drive_gain) / d0
-        }
-        ComboBandKind::Notch => (one_minus_w2.abs() * drive_gain) / d0,
-    };
-    if stages > 1 {
-        let k_helper = (std::f32::consts::SQRT_2 - 0.45 * res).max(0.75);
-        let d_h = (one_minus_w2 * one_minus_w2 + (k_helper * w).powi(2))
-            .sqrt()
-            .max(1e-4);
-        let stage_gain = match kind {
-            ComboBandKind::Hp => w2 / d_h,
-            ComboBandKind::Lp => 1.0 / d_h,
-            ComboBandKind::Peak => {
-                let num =
-                    (one_minus_w2 * one_minus_w2 + ((1.0 + 0.5 * peak_boost) * k_helper * w).powi(2))
-                        .sqrt();
-                num / d_h
-            }
-            ComboBandKind::Notch => one_minus_w2.abs() / d_h,
-        };
-        m *= stage_gain.powi((stages - 1) as i32);
-    }
-    m
 }
 
 /// Full per-voice multimode filter including pre-allocated Comb delay buffers.
@@ -860,7 +631,8 @@ impl FilterState {
 
     pub fn on_note_on(&mut self, target_cutoff_hz: f32, target_res: f32, target_drive: f32) {
         self.reset();
-        self.core.snap_params(target_cutoff_hz, target_res, target_drive);
+        self.core
+            .snap_params(target_cutoff_hz, target_res, target_drive);
     }
 
     #[inline]
@@ -878,14 +650,18 @@ impl FilterState {
         }
 
         if params.mode != FilterMode::Comb {
-            return self
-                .core
-                .process_core_stereo(in_l, in_r, params, midi_note, sample_rate, engine_mode);
+            return self.core.process_core_stereo(
+                in_l,
+                in_r,
+                params,
+                midi_note,
+                sample_rate,
+                engine_mode,
+            );
         }
 
         const PARAM_COEFF: f32 = 0.04;
-        self.core.smooth_cutoff_hz +=
-            (params.cutoff_hz - self.core.smooth_cutoff_hz) * PARAM_COEFF;
+        self.core.smooth_cutoff_hz += (params.cutoff_hz - self.core.smooth_cutoff_hz) * PARAM_COEFF;
         self.core.smooth_res += (params.resonance - self.core.smooth_res) * PARAM_COEFF;
         self.core.smooth_drive += (params.drive - self.core.smooth_drive) * PARAM_COEFF;
 
@@ -924,136 +700,4 @@ impl FilterState {
 
         (out[0], out[1])
     }
-}
-
-/// Evaluates an approximate steady-state magnitude response in dB (`-36.0` .. `+24.0` dB)
-/// for visualizing the filter curve in `FilterResponseScope`.
-pub fn evaluate_filter_response_db(params: &FilterParams, freq_hz: f32) -> f32 {
-    let fc = params.cutoff_hz.clamp(20.0, 20_000.0);
-    let res = params.resonance.clamp(0.0, 1.0);
-    let drive = params.drive.clamp(0.0, 1.0);
-    let aux = params.aux.clamp(0.0, 1.0);
-    let w = (freq_hz.max(1.0) / fc).max(1e-4);
-    let w2 = w * w;
-    let one_minus_w2 = 1.0 - w2;
-
-    let mag = match params.mode {
-        FilterMode::Lp | FilterMode::Bp | FilterMode::Hp | FilterMode::Notch | FilterMode::Peak => {
-            let wet = if params.slope == FilterSlope::Db6
-                && !matches!(params.mode, FilterMode::Notch | FilterMode::Peak)
-            {
-                let den = (1.0 + w2).sqrt().max(1e-4);
-                let base = match params.mode {
-                    FilterMode::Lp => 1.0 / den,
-                    FilterMode::Hp => w / den,
-                    FilterMode::Bp => (2.0 * w) / (1.0 + w2).max(1e-4),
-                    _ => 1.0 / den,
-                };
-                base * (1.0 + 0.15 * drive)
-            } else {
-                let stages = params.slope.num_2pole_stages().max(1);
-                let k0 = (2.0 - 1.95 * res).max(0.05);
-                let d0 = (one_minus_w2 * one_minus_w2 + (k0 * w).powi(2))
-                    .sqrt()
-                    .max(1e-4);
-                let peak_boost = 0.6 + 1.8 * res;
-                let mut m = match params.mode {
-                    FilterMode::Lp => (1.0 + 0.15 * drive) / d0,
-                    FilterMode::Bp => ((1.0 + res * 0.5) * w) / d0,
-                    FilterMode::Hp => (w2 * (1.0 + 0.15 * drive)) / d0,
-                    FilterMode::Notch => (one_minus_w2.abs() * (1.0 + 0.15 * drive)) / d0,
-                    FilterMode::Peak => {
-                        let num =
-                            (one_minus_w2 * one_minus_w2 + ((1.0 + peak_boost) * k0 * w).powi(2))
-                                .sqrt();
-                        (num * (1.0 + 0.15 * drive)) / d0
-                    }
-                    _ => 1.0 / d0,
-                };
-                if stages > 1 {
-                    let k_helper = (std::f32::consts::SQRT_2 - 0.45 * res).max(0.75);
-                    let d_h = (one_minus_w2 * one_minus_w2 + (k_helper * w).powi(2))
-                        .sqrt()
-                        .max(1e-4);
-                    let stage_gain = match params.mode {
-                        FilterMode::Lp => 1.0 / d_h,
-                        FilterMode::Bp => (k_helper * w) / d_h,
-                        FilterMode::Hp => w2 / d_h,
-                        FilterMode::Notch => one_minus_w2.abs() / d_h,
-                        FilterMode::Peak => {
-                            let num = (one_minus_w2 * one_minus_w2
-                                + ((1.0 + 0.5 * peak_boost) * k_helper * w).powi(2))
-                            .sqrt();
-                            num / d_h
-                        }
-                        _ => 1.0 / d_h,
-                    };
-                    m *= stage_gain.powi((stages - 1) as i32);
-                }
-                m
-            };
-            (1.0 - aux) + aux * wet
-        }
-        FilterMode::Scream => {
-            const MIDI_20HZ: f32 = 15.486_821;
-            const MIDI_20KHZ: f32 = 135.076_23;
-            const HP_CUTOFF_MIN: f32 = MIDI_20HZ - 12.0;
-
-            let lp_midi = 69.0 + 12.0 * (fc / 440.0).log2();
-            let hp_midi =
-                HP_CUTOFF_MIN + aux * (MIDI_20KHZ - HP_CUTOFF_MIN) - (MIDI_20KHZ - lp_midi);
-            let hp_fc = (440.0 * 2.0_f32.powf((hp_midi - 69.0) / 12.0)).clamp(20.0, 20_000.0);
-            let w_hp = (freq_hz.max(1.0) / hp_fc).max(1e-4);
-            let hp_res = (w_hp * w_hp)
-                / ((1.0 - w_hp * w_hp).powi(2) + ((1.414 - 0.7 * res) * w_hp).powi(2))
-                    .sqrt()
-                    .max(1e-4);
-            let k_lp = std::f32::consts::SQRT_2;
-            let lp_den = (one_minus_w2 * one_minus_w2 + (k_lp * w).powi(2)).sqrt().max(1e-4);
-            let fb_lift = 1.0 + res * (0.4 + 0.8 * aux) * hp_res.min(2.5);
-            ((1.0 + 0.25 * drive) * fb_lift) / lp_den
-        }
-        FilterMode::Daft => {
-            let k0 = (1.65 - 1.3 * res).max(0.2);
-            let k1 = (1.85 - 1.75 * res).max(0.08);
-            let d0 = (one_minus_w2 * one_minus_w2 + (k0 * w).powi(2)).sqrt();
-            let d1 = (one_minus_w2 * one_minus_w2 + (k1 * w).powi(2)).sqrt();
-            let bass_shelf = 1.0 + 0.30 * res * (-w).exp();
-            let wet = bass_shelf / (d0 * d1).max(1e-4);
-            (1.0 - aux) + aux * wet
-        }
-        FilterMode::Comb => {
-            let fb = res * 0.90;
-            let phase = 2.0 * PI * (freq_hz.max(1.0) / fc);
-            let hf_damp = (1.0 - aux * 0.65 * (freq_hz / 20_000.0)).max(0.2);
-            let eff_fb = fb * hf_damp;
-            let den = (1.0 + eff_fb * eff_fb - 2.0 * eff_fb * phase.cos())
-                .max(0.02)
-                .sqrt();
-            (1.0 + 0.15 * drive) / den
-        }
-        FilterMode::Bandreject => {
-            let k = 1.0 + 3.5 * res;
-            let den = (one_minus_w2 * one_minus_w2 + (k * w).powi(2))
-                .sqrt()
-                .max(1e-4);
-            let wet = (one_minus_w2.abs() * (1.0 + 0.15 * drive)) / den;
-            (1.0 - aux) + aux * wet
-        }
-        FilterMode::HpPeak
-        | FilterMode::HpNotch
-        | FilterMode::LpNotch
-        | FilterMode::LpPeak
-        | FilterMode::PeakPeak
-        | FilterMode::NotchNotch => {
-            let (band1, band2) = ComboBandKind::from_mode(params.mode);
-            let mag1 = evaluate_combo_band_mag(band1, w, params.slope, res, 1.0 + 0.15 * drive);
-            let freq2 = aux_to_freq2_hz(aux);
-            let w2_s = (freq_hz.max(1.0) / freq2).max(1e-4);
-            let mag2 = evaluate_combo_band_mag(band2, w2_s, params.slope, res, 1.0);
-            mag1 * mag2
-        }
-    };
-
-    (20.0 * mag.max(1e-4).log10()).clamp(-36.0, 24.0)
 }

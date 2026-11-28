@@ -155,6 +155,31 @@ pub fn build_knob_cell_with_readout<L, Params, P, FMap>(
     .row_between(Pixels(1.0));
 }
 
+fn knob_cell_frame(
+    cx: &mut Context,
+    title: &'static str,
+    width: Units,
+    knob_sz: f32,
+    build_knob: impl FnOnce(&mut Context) -> Handle<'_, RotaryKnob>,
+) {
+    VStack::new(cx, move |cx| {
+        bold_label(cx, title, "knob-title")
+            .width(Stretch(1.0))
+            .height(Pixels(tokens::KNOB_TITLE_H))
+            .child_space(Stretch(1.0));
+
+        build_knob(cx)
+            .width(Pixels(knob_sz))
+            .height(Pixels(knob_sz))
+            .left(Stretch(1.0))
+            .right(Stretch(1.0));
+    })
+    .class("knob-cell")
+    .width(width)
+    .height(Auto)
+    .row_between(Pixels(tokens::SPACE_XS));
+}
+
 pub fn build_knob_cell<L, Params, P, FMap>(
     cx: &mut Context,
     params: L,
@@ -169,22 +194,9 @@ pub fn build_knob_cell<L, Params, P, FMap>(
     P: Param + 'static,
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
-    VStack::new(cx, move |cx| {
-        bold_label(cx, title, "knob-title")
-            .width(Stretch(1.0))
-            .height(Pixels(tokens::KNOB_TITLE_H))
-            .child_space(Stretch(1.0));
-
+    knob_cell_frame(cx, title, Pixels(cell_w), knob_sz, move |cx| {
         build_rotary_knob_with_opt_mod(cx, params, params_to_param, bipolar, None)
-            .width(Pixels(knob_sz))
-            .height(Pixels(knob_sz))
-            .left(Stretch(1.0))
-            .right(Stretch(1.0));
-    })
-    .class("knob-cell")
-    .width(Pixels(cell_w))
-    .height(Auto)
-    .row_between(Pixels(tokens::SPACE_XS));
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -206,12 +218,7 @@ pub fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
     P: Param + 'static,
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
-    VStack::new(cx, move |cx| {
-        bold_label(cx, title, "knob-title")
-            .width(Stretch(1.0))
-            .height(Pixels(tokens::KNOB_TITLE_H))
-            .child_space(Stretch(1.0));
-
+    knob_cell_frame(cx, title, Pixels(cell_w), knob_sz, move |cx| {
         RotaryKnob::new_with_mod_formatter(
             cx,
             params,
@@ -222,15 +229,7 @@ pub fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
             tab_tag,
             value_formatter,
         )
-        .width(Pixels(knob_sz))
-        .height(Pixels(knob_sz))
-        .left(Stretch(1.0))
-        .right(Stretch(1.0));
-    })
-    .class("knob-cell")
-    .width(Pixels(cell_w))
-    .height(Auto)
-    .row_between(Pixels(tokens::SPACE_XS));
+    });
 }
 
 pub fn build_flex_knob_cell<L, Params, P, FMap>(
@@ -246,22 +245,9 @@ pub fn build_flex_knob_cell<L, Params, P, FMap>(
     P: Param + 'static,
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
-    VStack::new(cx, move |cx| {
-        bold_label(cx, title, "knob-title")
-            .width(Stretch(1.0))
-            .height(Pixels(tokens::KNOB_TITLE_H))
-            .child_space(Stretch(1.0));
-
+    knob_cell_frame(cx, title, Stretch(1.0), knob_sz, move |cx| {
         build_rotary_knob_with_opt_mod(cx, params, params_to_param, bipolar, None)
-            .width(Pixels(knob_sz))
-            .height(Pixels(knob_sz))
-            .left(Stretch(1.0))
-            .right(Stretch(1.0));
-    })
-    .class("knob-cell")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .row_between(Pixels(tokens::SPACE_XS));
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -282,12 +268,7 @@ pub fn build_flex_knob_cell_mod_fmt<L, Params, P, FMap>(
     P: Param + 'static,
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
-    VStack::new(cx, move |cx| {
-        bold_label(cx, title, "knob-title")
-            .width(Stretch(1.0))
-            .height(Pixels(tokens::KNOB_TITLE_H))
-            .child_space(Stretch(1.0));
-
+    knob_cell_frame(cx, title, Stretch(1.0), knob_sz, move |cx| {
         RotaryKnob::new_with_mod_formatter(
             cx,
             params,
@@ -298,15 +279,7 @@ pub fn build_flex_knob_cell_mod_fmt<L, Params, P, FMap>(
             tab_tag,
             value_formatter,
         )
-        .width(Pixels(knob_sz))
-        .height(Pixels(knob_sz))
-        .left(Stretch(1.0))
-        .right(Stretch(1.0));
-    })
-    .class("knob-cell")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .row_between(Pixels(tokens::SPACE_XS));
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -326,12 +299,7 @@ pub fn build_flex_knob_cell_mod<L, Params, P, FMap>(
     P: Param + 'static,
     FMap: Fn(&Params) -> &P + Copy + 'static,
 {
-    VStack::new(cx, move |cx| {
-        bold_label(cx, title, "knob-title")
-            .width(Stretch(1.0))
-            .height(Pixels(tokens::KNOB_TITLE_H))
-            .child_space(Stretch(1.0));
-
+    knob_cell_frame(cx, title, Stretch(1.0), knob_sz, move |cx| {
         RotaryKnob::new_with_mod(
             cx,
             params,
@@ -341,15 +309,7 @@ pub fn build_flex_knob_cell_mod<L, Params, P, FMap>(
             mod_ui,
             tab_tag,
         )
-        .width(Pixels(knob_sz))
-        .height(Pixels(knob_sz))
-        .left(Stretch(1.0))
-        .right(Stretch(1.0));
-    })
-    .class("knob-cell")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .row_between(Pixels(tokens::SPACE_XS));
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -373,12 +333,7 @@ pub fn build_flex_knob_cell_mod_dim<L, Params, DimParams, P, FMap, FDim>(
     FMap: Fn(&Params) -> &P + Copy + 'static,
     FDim: Fn(&DimParams) -> bool + Send + Sync + 'static,
 {
-    VStack::new(cx, move |cx| {
-        bold_label(cx, title, "knob-title")
-            .width(Stretch(1.0))
-            .height(Pixels(tokens::KNOB_TITLE_H))
-            .child_space(Stretch(1.0));
-
+    knob_cell_frame(cx, title, Stretch(1.0), knob_sz, move |cx| {
         RotaryKnob::new_with_mod(
             cx,
             params,
@@ -389,15 +344,7 @@ pub fn build_flex_knob_cell_mod_dim<L, Params, DimParams, P, FMap, FDim>(
             tab_tag,
         )
         .enabled_by(dim_params, dim_check)
-        .width(Pixels(knob_sz))
-        .height(Pixels(knob_sz))
-        .left(Stretch(1.0))
-        .right(Stretch(1.0));
-    })
-    .class("knob-cell")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .row_between(Pixels(tokens::SPACE_XS));
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -423,12 +370,7 @@ pub fn build_flex_knob_cell_mod_dim_tooltip<L, Params, DimParams, P, FMap, FDim,
     FDim: Fn(&DimParams) -> bool + Send + Sync + 'static,
     FTt: Fn(&DimParams) -> String + Send + Sync + 'static,
 {
-    VStack::new(cx, move |cx| {
-        bold_label(cx, title, "knob-title")
-            .width(Stretch(1.0))
-            .height(Pixels(tokens::KNOB_TITLE_H))
-            .child_space(Stretch(1.0));
-
+    knob_cell_frame(cx, title, Stretch(1.0), knob_sz, move |cx| {
         RotaryKnob::new_with_mod(
             cx,
             params,
@@ -440,15 +382,7 @@ pub fn build_flex_knob_cell_mod_dim_tooltip<L, Params, DimParams, P, FMap, FDim,
         )
         .enabled_by(dim_params.clone(), dim_check)
         .disabled_tooltip(dim_params, tooltip_fmt)
-        .width(Pixels(knob_sz))
-        .height(Pixels(knob_sz))
-        .left(Stretch(1.0))
-        .right(Stretch(1.0));
-    })
-    .class("knob-cell")
-    .width(Stretch(1.0))
-    .height(Auto)
-    .row_between(Pixels(tokens::SPACE_XS));
+    });
 }
 
 pub fn build_inline_pill_cell<'a, L, Params, P, FMap>(

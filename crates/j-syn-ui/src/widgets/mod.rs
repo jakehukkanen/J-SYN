@@ -203,11 +203,13 @@ pub fn is_scroll_wheel_guarded(cursor_x: f32, cursor_y: f32) -> bool {
 
 mod knob;
 mod pill;
+mod pitch_box;
 mod ratio;
 mod switch;
 
 pub use knob::{KnobDimExt, RotaryKnob};
-pub use pill::{ParamStepPill, PitchDragBox, PitchGroupModOverlay, PitchPart, decompose_pitch_st};
+pub use pill::ParamStepPill;
+pub use pitch_box::{PitchDragBox, PitchGroupModOverlay, PitchPart, decompose_pitch_st};
 pub use ratio::RatioDragBox;
 pub use switch::{LedToggleSwitch, LedToggleSwitchExt};
 

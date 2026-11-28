@@ -1,11 +1,12 @@
 //! `j-syn`: Zero-allocation 64-voice polyphonic wavetable synthesizer (VST3 + CLAP).
 
 use std::num::NonZeroU32;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use j_syn_dsp::{
-    EngineMode, FxBusParams, FxRackOrder, FxType, PolyMode, SynthEngine, SynthParams, Wavetable,
-    WavetableBank, NUM_FX_BUSES, NUM_FX_SLOTS,
+    EngineMode, FxBusParams, FxEngineSwapQueue, FxRackOrder, FxType, PolyMode, SynthEngine,
+    SynthParams, Wavetable, WavetableBank, NUM_FX_BUSES, NUM_FX_SLOTS,
 };
 use nih_plug::prelude::*;
 
@@ -15,13 +16,61 @@ pub mod presets;
 
 pub use params::*;
 
-pub enum JSynBgTask {
-    ProvisionFx {
-        bus: usize,
-        slot: usize,
-        fx_type: FxType,
-        stack: usize,
-    },
+struct FxProvisionWorker {
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl FxProvisionWorker {
+    fn spawn(params: Arc<JSynPluginParams>, swap_queue: Arc<FxEngineSwapQueue>) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_bg = stop.clone();
+        let handle = std::thread::Builder::new()
+            .name("j-syn-fx-prov".to_string())
+            .spawn(move || {
+                while !stop_bg.load(Ordering::Acquire) {
+                    let masks = swap_queue.take_provision_masks();
+                    let mut did_work = false;
+                    for (bus, &mask) in masks.iter().enumerate() {
+                        if mask == 0 {
+                            continue;
+                        }
+                        did_work = true;
+                        let slots = params.fx_bus_slots(bus);
+                        for (slot, slot_params) in slots.iter().enumerate() {
+                            if ((mask >> (slot as u32)) & 1) != 0 {
+                                let fx_type = FxType::from(slot_params.fx_type.value());
+                                let stack = slot_params.stack.value().clamp(1, 4) as usize;
+                                swap_queue.provision_slot(bus, slot, fx_type, stack);
+                            }
+                        }
+                    }
+                    swap_queue.drain_garbage();
+                    if !did_work && !stop_bg.load(Ordering::Acquire) {
+                        std::thread::park();
+                    }
+                }
+            })
+            .ok();
+        Self { stop, handle }
+    }
+
+    #[inline]
+    fn wake(&self) {
+        if let Some(ref handle) = self.handle {
+            handle.thread().unpark();
+        }
+    }
+}
+
+impl Drop for FxProvisionWorker {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            handle.thread().unpark();
+            let _ = handle.join();
+        }
+    }
 }
 
 pub struct JSynPlugin {
@@ -29,6 +78,7 @@ pub struct JSynPlugin {
     engine: Box<SynthEngine>,
     wavetable_bank: Arc<WavetableBank>,
     scratch_params: Box<SynthParams>,
+    provision_worker: Option<FxProvisionWorker>,
 }
 
 impl Default for JSynPlugin {
@@ -38,6 +88,7 @@ impl Default for JSynPlugin {
             engine: Box::new(SynthEngine::new(44100.0)),
             wavetable_bank: Arc::new(WavetableBank::new()),
             scratch_params: Box::new(SynthParams::default()),
+            provision_worker: None,
         }
     }
 }
@@ -161,24 +212,10 @@ impl Plugin for JSynPlugin {
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
-    type BackgroundTask = JSynBgTask;
+    type BackgroundTask = ();
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
-    }
-
-    fn task_executor(&mut self) -> TaskExecutor<Self> {
-        let swap_queue = self.engine.fx_swap_queue();
-        Box::new(move |task| match task {
-            JSynBgTask::ProvisionFx {
-                bus,
-                slot,
-                fx_type,
-                stack,
-            } => {
-                swap_queue.provision_slot(bus, slot, fx_type, stack);
-            }
-        })
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
@@ -203,6 +240,9 @@ impl Plugin for JSynPlugin {
         self.populate_scratch_params(120.0);
         self.engine.prepare_fx_for_params(&self.scratch_params);
         self.reload_persisted_wavetables();
+        self.provision_worker.get_or_insert_with(|| {
+            FxProvisionWorker::spawn(self.params.clone(), self.engine.fx_swap_queue())
+        });
         true
     }
 
@@ -387,24 +427,10 @@ impl Plugin for JSynPlugin {
             right[sample_idx] = r;
         }
 
-        // Dispatch background provisioning for any slot whose type/stack changed via host automation
-        let prov_masks = self.engine.fx_swap_queue().take_provision_masks();
-        for (bus, &mask) in prov_masks.iter().enumerate() {
-            if mask == 0 {
-                continue;
-            }
-            let slots = self.params.fx_bus_slots(bus);
-            for (slot, slot_params) in slots.iter().enumerate() {
-                if ((mask >> (slot as u32)) & 1) != 0 {
-                    let fx_type = FxType::from(slot_params.fx_type.value());
-                    let stack = slot_params.stack.value().clamp(1, 4) as usize;
-                    context.execute_background(JSynBgTask::ProvisionFx {
-                        bus,
-                        slot,
-                        fx_type,
-                        stack,
-                    });
-                }
+        // Wake dedicated provisioning thread for any slot whose type/stack changed via host automation
+        if self.engine.fx_swap_queue().has_pending_provision() {
+            if let Some(ref worker) = self.provision_worker {
+                worker.wake();
             }
         }
 
@@ -616,6 +642,37 @@ mod tests {
                 (param_hz - dsp_hz).abs() < 1e-2,
                 "hz_offset mismatch at norm={norm}: param={param_hz}, dsp={dsp_hz}"
             );
+        }
+    }
+
+    #[test]
+    fn fx_provision_worker_provisions_slots_and_drops_cleanly_under_rapid_teardown() {
+        for _ in 0..20 {
+            let params = Arc::new(JSynPluginParams::default());
+            let mut engine = SynthEngine::new(48_000.0);
+            let swap_queue = engine.fx_swap_queue();
+            let worker = FxProvisionWorker::spawn(params.clone(), swap_queue.clone());
+
+            // Simulate headless DAW automation requesting provisioning for Bus A Slot 0
+            swap_queue.mark_needs_provision(0, 0);
+            worker.wake();
+
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while swap_queue.has_pending_provision() && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            assert!(
+                !swap_queue.has_pending_provision(),
+                "FxProvisionWorker should drain pending provision masks"
+            );
+
+            // Also push a real Chorus engine swap, consume it on the engine, and tear down immediately
+            swap_queue.provision_slot(0, 0, FxType::Chorus, 1);
+            let sp = SynthParams::default();
+            let bank = WavetableBank::new();
+            let _ = engine.process_sample(&sp, &bank);
+            worker.wake();
+            drop(worker);
         }
     }
 }
