@@ -422,6 +422,28 @@ fn mod_matrix_256_slots_trimmed_json_roundtrip_and_4_slot_modseq_migration() {
     assert_eq!(decoded_16.seqs[0][0].span, j_syn_dsp::ModSeqStepSpan::Full);
     assert_eq!(decoded_16.seqs[0][0].start_level, 1.0);
     assert_eq!(decoded_16.seqs[0][16], j_syn_dsp::ModSeqStep::default());
+
+    // ModSeqStepSpan::Quarter1..=Quarter4 JSON serde roundtrip
+    let mut quarter_bank = ModSeqStepBank::default();
+    let q_spans = [
+        j_syn_dsp::ModSeqStepSpan::Quarter1,
+        j_syn_dsp::ModSeqStepSpan::Quarter2,
+        j_syn_dsp::ModSeqStepSpan::Quarter3,
+        j_syn_dsp::ModSeqStepSpan::Quarter4,
+    ];
+    let q_shapes = [
+        j_syn_dsp::ModSeqStepShape::RampDown3x,
+        j_syn_dsp::ModSeqStepShape::TriSine3x,
+        j_syn_dsp::ModSeqStepShape::Square3x,
+        j_syn_dsp::ModSeqStepShape::TriSine3x,
+    ];
+    for (i, (&span, &shape)) in q_spans.iter().zip(q_shapes.iter()).enumerate() {
+        quarter_bank.seqs[0][i] = j_syn_dsp::ModSeqStep::stamped_with_span(shape, 0.8, 0.0, span);
+    }
+    let q_json = serde_json::to_string(&quarter_bank).expect("serialize quarter spans");
+    let q_decoded: ModSeqStepBank =
+        serde_json::from_str(&q_json).expect("deserialize quarter spans");
+    assert_eq!(q_decoded.seqs[0][..4], quarter_bank.seqs[0][..4]);
 }
 
 #[test]
