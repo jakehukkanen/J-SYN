@@ -78,6 +78,7 @@ pub fn standalone_default_state(fx_type: FxType) -> Arc<ViziaState> {
 #[derive(Debug, Clone, Copy)]
 pub enum StandaloneShellEvent {
     ToggleSettings,
+    SyncInitialScale(f64),
 }
 
 #[derive(Lens)]
@@ -89,7 +90,7 @@ pub struct StandaloneFxUiData<Params: Send + Sync + 'static> {
 }
 
 impl<Params: Send + Sync + 'static> Model for StandaloneFxUiData<Params> {
-    fn event(&mut self, _cx: &mut EventContext, event: &mut Event) {
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|kit_event, meta| match kit_event {
             UiKitEvent::ModUiChanged => {
                 self.ui_rev = self.ui_rev.wrapping_add(1);
@@ -104,6 +105,13 @@ impl<Params: Send + Sync + 'static> Model for StandaloneFxUiData<Params> {
         event.map(|shell_event, meta| match shell_event {
             StandaloneShellEvent::ToggleSettings => {
                 self.show_settings = !self.show_settings;
+                meta.consume();
+            }
+            StandaloneShellEvent::SyncInitialScale(scale) => {
+                if (cx.user_scale_factor() - *scale).abs() > 0.005 {
+                    cx.set_user_scale_factor(*scale);
+                    notify_baseview_resize_macos();
+                }
                 meta.consume();
             }
         });
@@ -268,12 +276,12 @@ pub fn build_standalone_fx_shell<Params, FEnabled, FBody>(
     let body_fn = Arc::new(build_body);
 
     VStack::new(cx, move |cx| {
-        // Sync shared UI scale immediately on open if another standalone FX changed it.
-        // (`vizia_baseview` drives 60 Hz redraws directly via `on_frame` and never ticks `cx.add_timer`.)
+        // Defer shared UI scale sync to the first event pass so `vizia_baseview`'s
+        // `ApplicationRunner::new` captures the initial window scale first and triggers
+        // `window.resize(...)` cleanly when another standalone FX changed `standalone-fx.json`.
         let target_scale = (initial_scale_pct as f64) / 100.0;
         if persist_settings && (cx.user_scale_factor() - target_scale).abs() > 0.005 {
-            EventContext::new(cx).set_user_scale_factor(target_scale);
-            notify_baseview_resize_macos();
+            cx.emit(StandaloneShellEvent::SyncInitialScale(target_scale));
         }
 
         // Compact standalone header bar: [Brand Pill] [J-<FX>] ... [⚙]

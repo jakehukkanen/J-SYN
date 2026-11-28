@@ -313,10 +313,11 @@ fn anti_slop_no_raw_hex_colors_in_editor_or_ui_rust_outside_theme() {
 fn anti_slop_no_add_timer_no_zindex_in_fx_scrollview_and_no_focus_within() {
     let root = workspace_root();
 
-    // 1. Zero cx.add_timer calls across editor/ and j-syn-ui/ (vizia_baseview never calls cx.process_timers())
+    // 1. Zero cx.add_timer calls across editor/, j-syn-ui/, and plugins/ (vizia_baseview never calls cx.process_timers())
     let mut ui_files = Vec::new();
     collect_rs_files(&root.join("crates/j-syn/src/editor"), &mut ui_files);
     collect_rs_files(&root.join("crates/j-syn-ui/src"), &mut ui_files);
+    collect_rs_files(&root.join("crates/plugins"), &mut ui_files);
     let mut timer_hits = Vec::new();
     for path in &ui_files {
         let src = std::fs::read_to_string(path).expect("read ui file");
