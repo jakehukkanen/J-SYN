@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use j_syn_dsp::{
     AdsrParams, LfoPreset, MODSEQ_PALETTE_TILES, ModSeqStep, evaluate_adsr_preview,
-    evaluate_mseg_curve, evaluate_step_shape, fill_modseq_row_with_tile,
+    evaluate_step_shape, fill_modseq_row_with_tile,
 };
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
@@ -201,9 +201,35 @@ impl View for LfoPresetBar {
             canvas.stroke_path(&tile, &border);
 
             let mseg = preset.to_mseg();
-            stroke_tile_curve(canvas, tx, ty, tw, th, dpx, accent, hovered, 20, |t| {
-                evaluate_mseg_curve(&mseg, t)
-            });
+            let mx = (tw * 0.14).max(2.0 * dpx);
+            let my = (th * 0.18).max(2.0 * dpx);
+            let cw = (tw - 2.0 * mx).max(1.0);
+            let ch = (th - 2.0 * my).max(1.0);
+            let mut path = vg::Path::new();
+            let mut first = true;
+            super::mseg_canvas::emit_mseg_curve_points(
+                &mseg,
+                tx + mx,
+                ty + my,
+                cw,
+                ch,
+                0.5 * dpx,
+                |px, py| {
+                    if first {
+                        path.move_to(px, py);
+                        first = false;
+                    } else {
+                        path.line_to(px, py);
+                    }
+                },
+            );
+            let (ar, ag, ab) = accent;
+            let mut paint =
+                vg::Paint::color(vg::Color::rgba(ar, ag, ab, if hovered { 255 } else { 215 }));
+            paint.set_line_width((if hovered { 1.5 } else { 1.25 }) * dpx);
+            paint.set_line_cap(vg::LineCap::Round);
+            paint.set_line_join(vg::LineJoin::Round);
+            canvas.stroke_path(&path, &paint);
         }
     }
 }
