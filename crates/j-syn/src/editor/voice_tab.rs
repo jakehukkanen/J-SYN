@@ -129,11 +129,17 @@ pub(super) fn build_voice_tab(
                 .width(Pixels(tokens::VOICE_COL_MODE_W))
                 .height(Stretch(1.0));
 
-                // Stacked MPE column: MPE toggle over MPE PB
+                // Stacked MPE column: MPE toggle over MPE PB (with 12 px spacer to align with MODE/PB RANGE)
                 VStack::new(cx, move |cx| {
-                    LedToggleSwitch::new(cx, UiData::params, |p| &p.mpe_enabled, "MPE", "MPE")
-                        .width(Stretch(1.0))
-                        .height(Pixels(tokens::CONTROL_H));
+                    VStack::new(cx, move |cx| {
+                        Element::new(cx).width(Stretch(1.0)).height(Pixels(12.0));
+                        LedToggleSwitch::new(cx, UiData::params, |p| &p.mpe_enabled, "MPE", "MPE")
+                            .width(Stretch(1.0))
+                            .height(Pixels(tokens::CONTROL_H));
+                    })
+                    .row_between(Pixels(tokens::SPACE_XS))
+                    .width(Stretch(1.0))
+                    .height(Auto);
 
                     build_flex_pill_cell(
                         cx,

@@ -368,7 +368,7 @@ impl View for ModSeqPaletteGrid {
                 }
             }
 
-            if tile_def.two_step {
+            if tile_def.stamp_steps > 1 {
                 let step = ModSeqStep::stamped(tile_def.shape, 1.0, 0.0);
                 stroke_tile_curve(
                     canvas,
@@ -383,13 +383,14 @@ impl View for ModSeqPaletteGrid {
                     |t| evaluate_step_shape(step, t),
                 );
                 if let Some(fid) = font_id {
+                    let badge = if tile_def.stamp_steps == 4 { "4" } else { "2" };
                     let mut tp =
                         vg::Paint::color(vg::Color::rgba(accent.0, accent.1, accent.2, 200));
                     tp.set_font(&[fid]);
                     tp.set_font_size(6.5 * dpx);
                     tp.set_text_align(vg::Align::Right);
                     tp.set_text_baseline(vg::Baseline::Top);
-                    let _ = canvas.fill_text(tx + tw - 2.0 * dpx, ty + 1.0 * dpx, "2", &tp);
+                    let _ = canvas.fill_text(tx + tw - 2.0 * dpx, ty + 1.0 * dpx, badge, &tp);
                 }
             } else {
                 let step = ModSeqStep::stamped_with_span(tile_def.shape, 1.0, 0.0, tile_def.span);

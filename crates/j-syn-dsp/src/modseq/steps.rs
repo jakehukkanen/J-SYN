@@ -14,6 +14,10 @@ pub enum ModSeqStepSpan {
     Full = 0,
     HalfFirst = 1,
     HalfSecond = 2,
+    Quarter1 = 3,
+    Quarter2 = 4,
+    Quarter3 = 5,
+    Quarter4 = 6,
 }
 
 #[repr(u8)]
@@ -124,12 +128,12 @@ impl ModSeqStepShape {
     }
 }
 
-/// Single palette tile in the 4×9 `MODSEQ` stamp grid (supports 1×, 2×/3×, auto-2-step ½×, and single-half pieces).
+/// Single palette tile in the 4×9 `MODSEQ` stamp grid (supports 1×, 2×/3×, 2-step ½×/24th, 4-step 12th, and half pieces).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModSeqPaletteTile {
     pub shape: ModSeqStepShape,
     pub span: ModSeqStepSpan,
-    pub two_step: bool,
+    pub stamp_steps: u8,
 }
 
 impl ModSeqPaletteTile {
@@ -137,7 +141,7 @@ impl ModSeqPaletteTile {
         Self {
             shape,
             span: ModSeqStepSpan::Full,
-            two_step: false,
+            stamp_steps: 1,
         }
     }
 
@@ -145,7 +149,15 @@ impl ModSeqPaletteTile {
         Self {
             shape,
             span: ModSeqStepSpan::HalfFirst,
-            two_step: true,
+            stamp_steps: 2,
+        }
+    }
+
+    pub const fn quarter_4step(shape: ModSeqStepShape) -> Self {
+        Self {
+            shape,
+            span: ModSeqStepSpan::Quarter1,
+            stamp_steps: 4,
         }
     }
 
@@ -153,7 +165,7 @@ impl ModSeqPaletteTile {
         Self {
             shape,
             span,
-            two_step: false,
+            stamp_steps: 1,
         }
     }
 }
@@ -162,7 +174,7 @@ impl ModSeqPaletteTile {
 /// - Row 1: 9 primary 1× shapes
 /// - Row 2: 3 single 1× + 6 subdivided 2×/3× bursts
 /// - Row 3: 9 auto-2-step ½× (50%-speed) curves
-/// - Row 4: 8 single-step half-curve pieces (½A / ½B) + ½× S-Curve auto-2-step
+/// - Row 4: 2-step (24th-note) & 4-step (12th-note) triplet bursts + ArchUp halves + ½× S-Curve
 pub const MODSEQ_PALETTE_TILES: [ModSeqPaletteTile; 36] = [
     // Row 1
     ModSeqPaletteTile::full(ModSeqStepShape::Flat),
@@ -194,15 +206,15 @@ pub const MODSEQ_PALETTE_TILES: [ModSeqPaletteTile; 36] = [
     ModSeqPaletteTile::half_2step(ModSeqStepShape::SineArchUp),
     ModSeqPaletteTile::half_2step(ModSeqStepShape::SineArchDown),
     ModSeqPaletteTile::half_2step(ModSeqStepShape::Triangle),
-    // Row 4 (single-step half pieces + ½× S-Curve)
-    ModSeqPaletteTile::half_piece(ModSeqStepShape::RampUp, ModSeqStepSpan::HalfFirst),
-    ModSeqPaletteTile::half_piece(ModSeqStepShape::RampUp, ModSeqStepSpan::HalfSecond),
-    ModSeqPaletteTile::half_piece(ModSeqStepShape::RampDown, ModSeqStepSpan::HalfFirst),
-    ModSeqPaletteTile::half_piece(ModSeqStepShape::RampDown, ModSeqStepSpan::HalfSecond),
+    // Row 4: 2-step (24th) & 4-step (12th) triplet bursts + ArchUp halves + ½× S-Curve
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::RampDown3x),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::TriSine3x),
+    ModSeqPaletteTile::half_2step(ModSeqStepShape::Square3x),
+    ModSeqPaletteTile::quarter_4step(ModSeqStepShape::RampDown3x),
+    ModSeqPaletteTile::quarter_4step(ModSeqStepShape::TriSine3x),
+    ModSeqPaletteTile::quarter_4step(ModSeqStepShape::Square3x),
     ModSeqPaletteTile::half_piece(ModSeqStepShape::SineArchUp, ModSeqStepSpan::HalfFirst),
     ModSeqPaletteTile::half_piece(ModSeqStepShape::SineArchUp, ModSeqStepSpan::HalfSecond),
-    ModSeqPaletteTile::half_piece(ModSeqStepShape::SCurve, ModSeqStepSpan::HalfFirst),
-    ModSeqPaletteTile::half_piece(ModSeqStepShape::SCurve, ModSeqStepSpan::HalfSecond),
     ModSeqPaletteTile::half_2step(ModSeqStepShape::SCurve),
 ];
 
@@ -313,14 +325,21 @@ pub fn fill_modseq_row_with_tile(
 ) {
     let row_start = row.min(1) * MODSEQ_ROW_STEPS;
     for col in 0..MODSEQ_ROW_STEPS {
-        let span = if tile.two_step {
-            if col % 2 == 0 {
-                ModSeqStepSpan::HalfFirst
-            } else {
-                ModSeqStepSpan::HalfSecond
+        let span = match tile.stamp_steps {
+            4 => match col % 4 {
+                0 => ModSeqStepSpan::Quarter1,
+                1 => ModSeqStepSpan::Quarter2,
+                2 => ModSeqStepSpan::Quarter3,
+                _ => ModSeqStepSpan::Quarter4,
+            },
+            2 => {
+                if col % 2 == 0 {
+                    ModSeqStepSpan::HalfFirst
+                } else {
+                    ModSeqStepSpan::HalfSecond
+                }
             }
-        } else {
-            tile.span
+            _ => tile.span,
         };
         seq[row_start + col] = ModSeqStep::stamped_with_span(tile.shape, 1.0, 0.0, span);
     }
@@ -433,6 +452,10 @@ pub fn evaluate_step_shape(step: ModSeqStep, local_t: f32) -> f32 {
         ModSeqStepSpan::Full => raw_t,
         ModSeqStepSpan::HalfFirst => raw_t * 0.5,
         ModSeqStepSpan::HalfSecond => 0.5 + raw_t * 0.5,
+        ModSeqStepSpan::Quarter1 => raw_t * 0.25,
+        ModSeqStepSpan::Quarter2 => 0.25 + raw_t * 0.25,
+        ModSeqStepSpan::Quarter3 => 0.50 + raw_t * 0.25,
+        ModSeqStepSpan::Quarter4 => 0.75 + raw_t * 0.25,
     };
     let d = step.start_level.clamp(0.0, 1.0);
     let exp = 2.0_f32.powf(step.tension.clamp(-1.0, 1.0) * 2.2);
