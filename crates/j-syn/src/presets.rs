@@ -842,11 +842,12 @@ pub fn init_patch(
     names
 }
 
-pub fn load_wavetable_file_for_osc(
+/// Loads a custom `.wav` wavetable from disk into `bank` and records its path in `params`.
+/// Safe to call from a background worker thread (does not touch host `GuiContext`).
+pub fn load_wavetable_into_bank(
     osc_idx: usize,
     path: &Path,
     params: &Arc<JSynPluginParams>,
-    gui_context: &Arc<dyn GuiContext>,
     bank: &Arc<WavetableBank>,
 ) -> Result<(), String> {
     let wt = Wavetable::load_from_wav(path)?;
@@ -854,6 +855,17 @@ pub fn load_wavetable_file_for_osc(
     if let Ok(mut guard) = params.wavetable_paths.lock() {
         guard[osc_idx] = path.to_string_lossy().into_owned();
     }
+    Ok(())
+}
+
+pub fn load_wavetable_file_for_osc(
+    osc_idx: usize,
+    path: &Path,
+    params: &Arc<JSynPluginParams>,
+    gui_context: &Arc<dyn GuiContext>,
+    bank: &Arc<WavetableBank>,
+) -> Result<(), String> {
+    load_wavetable_into_bank(osc_idx, path, params, bank)?;
     let setter = ParamSetter::new(gui_context.as_ref());
     setter.begin_set_parameter(&params.oscs[osc_idx].wt_select);
     setter.set_parameter(&params.oscs[osc_idx].wt_select, WavetableChoice::Custom);

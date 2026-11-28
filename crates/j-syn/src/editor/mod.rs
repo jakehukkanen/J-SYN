@@ -368,9 +368,6 @@ impl Model for UiData {
                 meta.consume();
             }
             UiEvent::LoadPatchDialog => {
-                let params = self.params.clone();
-                let gui_context = self.gui_context.clone();
-                let bank = self.bank.clone();
                 let mod_ui = self.mod_ui.clone();
                 let start_dir = crate::presets::JSynConfig::load().presets_dir;
                 std::thread::spawn(move || {
@@ -388,9 +385,8 @@ impl Model for UiData {
                             } else {
                                 patch.name.clone()
                             };
-                            let _ = patch.apply(&params, &gui_context, &bank);
-                            crate::presets::provision_active_fx(&params, &mod_ui.fx_swap_queue);
-                            mod_ui.notify_external_sync(Some(name));
+                            // Apply parameter edits on the UI thread via SyncExternalState.
+                            mod_ui.queue_pending_patch(patch, name);
                         }
                     }
                 });
@@ -541,6 +537,24 @@ impl Model for UiData {
                 meta.consume();
             }
             UiEvent::SyncExternalState => {
+                if let Some((patch, name)) = self.mod_ui.take_pending_patch() {
+                    self.macro_names = patch.apply(&self.params, &self.gui_context, &self.bank);
+                    crate::presets::provision_active_fx(&self.params, &self.mod_ui.fx_swap_queue);
+                    self.fx_menu.kind = FxOverlayMenuKind::None;
+                    self.current_preset_name = name;
+                }
+                for osc_idx in 0..4 {
+                    if let Some(load_gen) = self.mod_ui.take_pending_wt_custom(osc_idx) {
+                        if load_gen == controls::current_wt_load_gen(osc_idx) {
+                            controls::set_wavetable_choice(
+                                &self.params,
+                                &self.gui_context,
+                                osc_idx,
+                                crate::WavetableChoice::Custom,
+                            );
+                        }
+                    }
+                }
                 if let Some(name) = self.mod_ui.take_pending_preset_name() {
                     self.current_preset_name = name;
                 }

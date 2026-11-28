@@ -21,6 +21,7 @@ pub(crate) use j_syn_ui::controls::{
     build_ui_scale_dropdown,
 };
 
+use super::mod_bar::ModUiState;
 use super::{BottomTab, CenterStageTab, UiData, UiEvent};
 use crate::{JSynPluginParams, WavetableChoice};
 
@@ -132,7 +133,11 @@ static WT_LOAD_GEN: [AtomicU64; 4] = [
     AtomicU64::new(0),
 ];
 
-fn set_wavetable_choice(
+pub(crate) fn current_wt_load_gen(osc_idx: usize) -> u64 {
+    WT_LOAD_GEN[osc_idx].load(Ordering::Acquire)
+}
+
+pub(crate) fn set_wavetable_choice(
     params: &JSynPluginParams,
     gui_context: &Arc<dyn GuiContext>,
     osc_idx: usize,
@@ -183,7 +188,7 @@ fn spawn_load_wavetable(
     osc_idx: usize,
     path: std::path::PathBuf,
     params: Arc<JSynPluginParams>,
-    gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
     bank: Arc<WavetableBank>,
 ) {
     let load_gen = WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel) + 1;
@@ -191,19 +196,25 @@ fn spawn_load_wavetable(
         if WT_LOAD_GEN[osc_idx].load(Ordering::Acquire) != load_gen {
             return;
         }
-        let _ = crate::presets::load_wavetable_file_for_osc(
-            osc_idx,
-            &path,
-            &params,
-            &gui_context,
-            &bank,
-        );
+        let Ok(wt) = j_syn_dsp::Wavetable::load_from_wav(&path) else {
+            return;
+        };
+        if WT_LOAD_GEN[osc_idx].load(Ordering::Acquire) != load_gen {
+            return;
+        }
+        bank.swap_custom(osc_idx, Arc::new(wt));
+        if let Ok(mut guard) = params.wavetable_paths.lock() {
+            guard[osc_idx] = path.to_string_lossy().into_owned();
+        }
+        // Marshal the VST3/CLAP parameter edit back to the UI thread via the 60 Hz timer.
+        mod_ui.queue_pending_wt_custom(osc_idx, load_gen);
     });
 }
 
 pub(crate) fn step_wavetable(
     params: &Arc<JSynPluginParams>,
     gui_context: &Arc<dyn GuiContext>,
+    mod_ui: &Arc<ModUiState>,
     bank: &Arc<WavetableBank>,
     osc_idx: usize,
     delta: isize,
@@ -231,7 +242,7 @@ pub(crate) fn step_wavetable(
                             osc_idx,
                             files[next].clone(),
                             params.clone(),
-                            gui_context.clone(),
+                            mod_ui.clone(),
                             bank.clone(),
                         );
                     }
@@ -255,6 +266,7 @@ pub(crate) fn build_wavetable_dropdown(
     bank: Arc<WavetableBank>,
     params: Arc<JSynPluginParams>,
     gui_context: Arc<dyn GuiContext>,
+    mod_ui: Arc<ModUiState>,
 ) -> Handle<'_, HStack> {
     HStack::new(cx, move |cx| {
         let p_trigger = params.clone();
@@ -297,6 +309,7 @@ pub(crate) fn build_wavetable_dropdown(
                 let bank_dir = bank.clone();
                 let p_dir = params.clone();
                 let g_dir = gui_context.clone();
+                let m_dir = mod_ui.clone();
                 Binding::new(cx, UiData::wavetables_dir_rev, move |cx, _| {
                     let cfg = crate::presets::JSynConfig::load();
                     let tree = crate::presets::scan_wavetable_tree(cfg.wavetables_dir.as_deref());
@@ -305,7 +318,7 @@ pub(crate) fn build_wavetable_dropdown(
                     let g_hdr = g_dir.clone();
                     let bank_d = bank_dir.clone();
                     let p_d = p_dir.clone();
-                    let g_d = g_dir.clone();
+                    let m_d = m_dir.clone();
                     build_directory_tree_panes(
                         cx,
                         tree,
@@ -333,7 +346,7 @@ pub(crate) fn build_wavetable_dropdown(
                                 osc_idx,
                                 entry.path.clone(),
                                 p_d.clone(),
-                                g_d.clone(),
+                                m_d.clone(),
                                 bank_d.clone(),
                             );
                         },
