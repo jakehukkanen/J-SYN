@@ -625,27 +625,29 @@ pub(in super::super) fn build_modseq_tab(
                                                                                 1 => {
                                                                                     HStack::new(cx, move |cx| {
                                                                                         VStack::new(cx, move |cx| {
-                                                                                            build_flex_pill_cell(
+                                                                                            bold_label(cx, "RATIO", "mini-label")
+                                                                                                .width(Stretch(1.0))
+                                                                                                .height(Pixels(tokens::KNOB_TITLE_COMPACT_H))
+                                                                                                .child_space(Stretch(1.0));
+                                                                                            j_syn_ui::widgets::ParamStepPill::new(
                                                                                                 cx,
                                                                                                 UiData::params,
                                                                                                 move |pr| &pr.modseqs[seq_idx].step_ratio_num,
-                                                                                                "NUM",
                                                                                                 15,
-                                                                                            );
-                                                                                        })
-                                                                                        .width(Pixels(36.0))
-                                                                                        .height(Auto);
-
-                                                                                        VStack::new(cx, move |cx| {
-                                                                                            build_flex_pill_cell(
+                                                                                            )
+                                                                                            .width(Stretch(1.0))
+                                                                                            .height(Pixels(tokens::READOUT_H));
+                                                                                            j_syn_ui::widgets::ParamStepPill::new(
                                                                                                 cx,
                                                                                                 UiData::params,
                                                                                                 move |pr| &pr.modseqs[seq_idx].step_ratio_den,
-                                                                                                "DEN",
                                                                                                 63,
-                                                                                            );
+                                                                                            )
+                                                                                            .width(Stretch(1.0))
+                                                                                            .height(Pixels(tokens::READOUT_H));
                                                                                         })
-                                                                                        .width(Pixels(36.0))
+                                                                                        .row_between(Pixels(2.0))
+                                                                                        .width(Pixels(46.0))
                                                                                         .height(Auto);
 
                                                                                         build_knob_cell(
@@ -658,7 +660,7 @@ pub(in super::super) fn build_modseq_tab(
                                                                                             44.0,
                                                                                         );
                                                                                     })
-                                                                                    .col_between(Pixels(tokens::SPACE_XS))
+                                                                                    .col_between(Pixels(tokens::SPACE_SM))
                                                                                     .child_left(Stretch(1.0))
                                                                                     .child_right(Stretch(1.0))
                                                                                     .width(Stretch(1.0))
