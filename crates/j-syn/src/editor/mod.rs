@@ -884,7 +884,7 @@ pub fn build_j_syn_ui(
             });
         });
 
-        mod_bar::start_ui_redraw_timer(cx, mod_ui_for_ui.clone());
+        mod_bar::mount_ui_frame_sync(cx, mod_ui_for_ui.clone());
 
         build_header_bar(cx, mod_ui_for_ui.clone());
 

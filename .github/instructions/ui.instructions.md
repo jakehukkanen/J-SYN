@@ -4,7 +4,7 @@ applyTo: "crates/j-syn/src/editor/**,crates/j-syn-ui/**,crates/plugins/**"
 
 # Vizia UI & FX Unit Review Checklist
 
-1. **Single Timer Rule:** Never introduce a new `cx.add_timer(...)` in `crates/j-syn/src/editor/` — extend the single 60 Hz timer in `mod_bar.rs`.
+1. **Zero `cx.add_timer(...)` Rule:** Never call `cx.add_timer(...)` in `crates/j-syn/src/editor/` or `crates/j-syn-ui/` (`vizia_baseview` never calls `cx.process_timers()`, so timers silently never tick in DAWs) — extend `mount_ui_frame_sync` (`FrameSyncView` + `FrameSyncToken` `Binding`) in `mod_bar.rs`.
 2. **Drag Safety:** Never emit `UiEvent::ModUiChanged` / `UiKitEvent::ModUiChanged` during continuous pointer drags inside a `mod_ui_rev` `Binding`; use `ModValChanged` so `cx.capture()` widgets survive drags.
 3. **ScrollView & Overlay Rules:**
    - Never use `.z_index(...)` inside a `ScrollView` or anywhere under `crates/j-syn/src/editor/fx_rack/` (place top-level `SelfDirected` overlays at `crates/j-syn/src/editor/` root).

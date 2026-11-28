@@ -163,6 +163,11 @@ impl FxDragState {
     }
 
     #[inline]
+    pub fn is_active(&self) -> bool {
+        self.inner.lock().ok().is_some_and(|g| g.active.is_some())
+    }
+
+    #[inline]
     pub fn is_dragging_source_move(&self, bus: usize, slot: usize) -> bool {
         self.inner.lock().ok().is_some_and(|g| {
             g.active

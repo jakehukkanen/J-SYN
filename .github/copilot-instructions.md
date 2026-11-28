@@ -22,7 +22,7 @@ Flag any violation of the four sections below as **Blocking**.
 
 ## 3. Vizia GUI, Theme & FX Unit Hygiene (`crates/j-syn/src/editor/`, `crates/j-syn-ui/`, `crates/plugins/`)
 
-- **Single 60 Hz timer:** Do not add any new `cx.add_timer(...)` loop; extend the single 60 Hz timer in `crates/j-syn/src/editor/mod_bar.rs`.
+- **Never use `cx.add_timer(...)`:** `vizia_baseview` never calls `cx.process_timers()`, so `cx.add_timer(...)` callbacks silently never fire in VST3/CLAP hosts. Extend `mount_ui_frame_sync` (`FrameSyncView` + `FrameSyncToken` `Binding`) in `crates/j-syn/src/editor/mod_bar.rs` instead.
 - **Split structural vs. value lenses:** Never emit `UiEvent::ModUiChanged` (`mod_ui_rev` structural rebuild) during continuous knob/slider drags inside `Binding::new(..., UiData::mod_ui_rev, ...)`; emit `UiEvent::ModValChanged` so `cx.capture()` widgets are not destroyed mid-drag.
 - **Vizia CSS, `femtovg` & widget traps:**
   - Never use unsupported Vizia CSS selectors (especially `:focus-within`, which crashes Ableton Live).
