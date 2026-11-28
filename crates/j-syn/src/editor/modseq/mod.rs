@@ -235,20 +235,43 @@ fn build_modseq_dropdown_cols(
         col1.top(Stretch(1.0)).bottom(Stretch(1.0));
     }
 
-    let sync_items = if include_row_controls {
-        SYNC_ITEMS
-    } else {
-        LFO_SYNC_ITEMS
-    };
     let col2 = VStack::new(cx, move |cx| {
-        build_labeled_dropdown(
-            cx,
-            "SYNC",
-            params.clone(),
-            gui_context.clone(),
-            move |pr| &pr.modseqs[seq_idx].sync_mode,
-            sync_items,
-        );
+        if include_row_controls {
+            build_labeled_dropdown(
+                cx,
+                "SYNC",
+                params.clone(),
+                gui_context.clone(),
+                move |pr| &pr.modseqs[seq_idx].sync_mode,
+                SYNC_ITEMS,
+            );
+        } else {
+            let p_sync = params.clone();
+            let g_sync = gui_context.clone();
+            VStack::new(cx, move |cx| {
+                bold_label(cx, "SYNC", "mini-label")
+                    .width(Stretch(1.0))
+                    .height(Pixels(tokens::KNOB_TITLE_COMPACT_H))
+                    .child_space(Stretch(1.0));
+                j_syn_ui::controls::build_enum_dropdown_with_override(
+                    cx,
+                    UiData::params,
+                    p_sync,
+                    g_sync,
+                    move |pr| &pr.modseqs[seq_idx].sync_mode,
+                    LFO_SYNC_ITEMS,
+                    move |pr| match pr.modseqs[seq_idx].sync_mode.value() {
+                        ModSeqSyncParam::StepRatio | ModSeqSyncParam::StepMs => Some("Free"),
+                        _ => None,
+                    },
+                )
+                .width(Stretch(1.0))
+                .height(Pixels(tokens::CONTROL_H));
+            })
+            .width(Stretch(1.0))
+            .height(Auto)
+            .row_between(Pixels(1.0));
+        }
         build_labeled_dropdown(
             cx,
             "RETRIG",
@@ -306,7 +329,12 @@ fn build_modseq_rate_smooth_knobs(
         bottom_tab_tag(BottomTab::ModSeq),
         Arc::new(move |norm, _opt_mod_offset| {
             let mode: j_syn_dsp::ModSeqSyncMode = p_fmt.modseqs[seq_idx].sync_mode.value().into();
-            if mode == j_syn_dsp::ModSeqSyncMode::Free {
+            if matches!(
+                mode,
+                j_syn_dsp::ModSeqSyncMode::Free
+                    | j_syn_dsp::ModSeqSyncMode::StepRatio
+                    | j_syn_dsp::ModSeqSyncMode::StepMs
+            ) {
                 format!("{:.2} Hz", j_syn_dsp::modseq_free_norm_to_hz(norm))
             } else {
                 j_syn_dsp::modseq_division_label(mode, norm).to_string()
@@ -323,6 +351,135 @@ fn build_modseq_rate_smooth_knobs(
         tokens::KNOB_STD,
         44.0,
     );
+}
+
+fn format_step_ms(ms: f32) -> String {
+    if ms < 10.0 {
+        format!("{ms:.2} ms")
+    } else if ms < 100.0 {
+        format!("{ms:.1} ms")
+    } else {
+        format!("{ms:.0} ms")
+    }
+}
+
+fn build_modseq_timing_controls(
+    cx: &mut Context,
+    seq_idx: usize,
+    params: Arc<JSynPluginParams>,
+    mod_ui: Arc<ModUiState>,
+) {
+    HStack::new(
+        cx,
+        ParamWidgetBase::build_view(
+            UiData::params,
+            move |pr| &pr.modseqs[seq_idx].sync_mode,
+            move |cx, param_data| {
+                let sync_lens = param_data.make_lens(|pr| match pr.unmodulated_plain_value() {
+                    ModSeqSyncParam::StepRatio => 1_u8,
+                    ModSeqSyncParam::StepMs => 2_u8,
+                    _ => 0_u8,
+                });
+                let p_t = params.clone();
+                let u_t = mod_ui.clone();
+                Binding::new(cx, sync_lens, move |cx, sync_m| {
+                    let p_cur = p_t.clone();
+                    let u_cur = u_t.clone();
+                    match sync_m.get(cx) {
+                        1 => {
+                            HStack::new(cx, move |cx| {
+                                VStack::new(cx, move |cx| {
+                                    bold_label(cx, "RATIO", "mini-label")
+                                        .width(Stretch(1.0))
+                                        .height(Pixels(tokens::KNOB_TITLE_COMPACT_H))
+                                        .child_space(Stretch(1.0));
+                                    j_syn_ui::widgets::ParamStepPill::new(
+                                        cx,
+                                        UiData::params,
+                                        move |pr| &pr.modseqs[seq_idx].step_ratio_num,
+                                        16,
+                                    )
+                                    .width(Stretch(1.0))
+                                    .height(Pixels(tokens::READOUT_H));
+                                    j_syn_ui::widgets::ParamStepPill::new(
+                                        cx,
+                                        UiData::params,
+                                        move |pr| &pr.modseqs[seq_idx].step_ratio_den,
+                                        64,
+                                    )
+                                    .width(Stretch(1.0))
+                                    .height(Pixels(tokens::READOUT_H));
+                                })
+                                .row_between(Pixels(2.0))
+                                .width(Pixels(46.0))
+                                .height(Auto);
+
+                                build_knob_cell(
+                                    cx,
+                                    UiData::params,
+                                    move |pr| &pr.modseqs[seq_idx].smooth,
+                                    "SMOOTH",
+                                    false,
+                                    tokens::KNOB_STD,
+                                    44.0,
+                                );
+                            })
+                            .col_between(Pixels(tokens::SPACE_SM))
+                            .child_left(Stretch(1.0))
+                            .child_right(Stretch(1.0))
+                            .width(Stretch(1.0))
+                            .height(Auto);
+                        }
+                        2 => {
+                            HStack::new(cx, move |cx| {
+                                build_knob_cell_mod_fmt(
+                                    cx,
+                                    UiData::params,
+                                    move |pr| &pr.modseqs[seq_idx].rate,
+                                    "STEP MS",
+                                    false,
+                                    tokens::KNOB_STD,
+                                    46.0,
+                                    ModDestination::modseq_rate(seq_idx),
+                                    u_cur,
+                                    bottom_tab_tag(BottomTab::ModSeq),
+                                    Arc::new(move |norm, _opt_mod_offset| {
+                                        format_step_ms(j_syn_dsp::modseq_step_ms_from_norm(norm))
+                                    }),
+                                );
+                                build_knob_cell(
+                                    cx,
+                                    UiData::params,
+                                    move |pr| &pr.modseqs[seq_idx].smooth,
+                                    "SMOOTH",
+                                    false,
+                                    tokens::KNOB_STD,
+                                    44.0,
+                                );
+                            })
+                            .col_between(Pixels(tokens::SPACE_SM))
+                            .child_left(Stretch(1.0))
+                            .child_right(Stretch(1.0))
+                            .width(Stretch(1.0))
+                            .height(Auto);
+                        }
+                        _ => {
+                            HStack::new(cx, move |cx| {
+                                build_modseq_rate_smooth_knobs(cx, seq_idx, p_cur, u_cur);
+                            })
+                            .col_between(Pixels(tokens::SPACE_SM))
+                            .child_left(Stretch(1.0))
+                            .child_right(Stretch(1.0))
+                            .width(Stretch(1.0))
+                            .height(Auto);
+                        }
+                    }
+                });
+            },
+        ),
+    )
+    .width(Stretch(1.0))
+    .height(Auto);
 }
 
 fn build_preset_action_btn<'a>(
@@ -539,7 +696,7 @@ pub(in super::super) fn build_modseq_tab(
                                                                 &pr.modseqs[seq_idx].num_steps
                                                             },
                                                             "STEPS",
-                                                            30,
+                                                            31,
                                                         );
 
                                                         HStack::new(cx, {
@@ -597,135 +754,9 @@ pub(in super::super) fn build_modseq_tab(
                                                         .width(Stretch(1.0))
                                                         .height(Pixels(18.0));
 
-                                                        HStack::new(
-                                                            cx,
-                                                            ParamWidgetBase::build_view(
-                                                                UiData::params,
-                                                                move |pr| {
-                                                                    &pr.modseqs[seq_idx].sync_mode
-                                                                },
-                                                                move |cx, param_data| {
-                                                                    let sync_lens = param_data
-                                                                        .make_lens(|pr| match pr
-                                                                            .unmodulated_plain_value()
-                                                                        {
-                                                                            ModSeqSyncParam::StepRatio => 1_u8,
-                                                                            ModSeqSyncParam::StepMs => 2_u8,
-                                                                            _ => 0_u8,
-                                                                        });
-                                                                    let p_t = p_col3.clone();
-                                                                    let u_t = u_col3.clone();
-                                                                    Binding::new(
-                                                                        cx,
-                                                                        sync_lens,
-                                                                        move |cx, sync_m| {
-                                                                            let p_cur = p_t.clone();
-                                                                            let u_cur = u_t.clone();
-                                                                            match sync_m.get(cx) {
-                                                                                1 => {
-                                                                                    HStack::new(cx, move |cx| {
-                                                                                        VStack::new(cx, move |cx| {
-                                                                                            bold_label(cx, "RATIO", "mini-label")
-                                                                                                .width(Stretch(1.0))
-                                                                                                .height(Pixels(tokens::KNOB_TITLE_COMPACT_H))
-                                                                                                .child_space(Stretch(1.0));
-                                                                                            j_syn_ui::widgets::ParamStepPill::new(
-                                                                                                cx,
-                                                                                                UiData::params,
-                                                                                                move |pr| &pr.modseqs[seq_idx].step_ratio_num,
-                                                                                                15,
-                                                                                            )
-                                                                                            .width(Stretch(1.0))
-                                                                                            .height(Pixels(tokens::READOUT_H));
-                                                                                            j_syn_ui::widgets::ParamStepPill::new(
-                                                                                                cx,
-                                                                                                UiData::params,
-                                                                                                move |pr| &pr.modseqs[seq_idx].step_ratio_den,
-                                                                                                63,
-                                                                                            )
-                                                                                            .width(Stretch(1.0))
-                                                                                            .height(Pixels(tokens::READOUT_H));
-                                                                                        })
-                                                                                        .row_between(Pixels(2.0))
-                                                                                        .width(Pixels(46.0))
-                                                                                        .height(Auto);
-
-                                                                                        build_knob_cell(
-                                                                                            cx,
-                                                                                            UiData::params,
-                                                                                            move |pr| &pr.modseqs[seq_idx].smooth,
-                                                                                            "SMOOTH",
-                                                                                            false,
-                                                                                            tokens::KNOB_STD,
-                                                                                            44.0,
-                                                                                        );
-                                                                                    })
-                                                                                    .col_between(Pixels(tokens::SPACE_SM))
-                                                                                    .child_left(Stretch(1.0))
-                                                                                    .child_right(Stretch(1.0))
-                                                                                    .width(Stretch(1.0))
-                                                                                    .height(Auto);
-                                                                                }
-                                                                                2 => {
-                                                                                    HStack::new(cx, move |cx| {
-                                                                                        build_knob_cell_mod_fmt(
-                                                                                            cx,
-                                                                                            UiData::params,
-                                                                                            move |pr| &pr.modseqs[seq_idx].rate,
-                                                                                            "STEP MS",
-                                                                                            false,
-                                                                                            tokens::KNOB_STD,
-                                                                                            46.0,
-                                                                                            ModDestination::modseq_rate(seq_idx),
-                                                                                            u_cur,
-                                                                                            bottom_tab_tag(BottomTab::ModSeq),
-                                                                                            Arc::new(move |norm, _opt_mod_offset| {
-                                                                                                let ms = j_syn_dsp::modseq_step_ms_from_norm(norm);
-                                                                                                if ms < 10.0 {
-                                                                                                    format!("{ms:.2} ms")
-                                                                                                } else if ms < 100.0 {
-                                                                                                    format!("{ms:.1} ms")
-                                                                                                } else {
-                                                                                                    format!("{ms:.0} ms")
-                                                                                                }
-                                                                                            }),
-                                                                                        );
-                                                                                        build_knob_cell(
-                                                                                            cx,
-                                                                                            UiData::params,
-                                                                                            move |pr| &pr.modseqs[seq_idx].smooth,
-                                                                                            "SMOOTH",
-                                                                                            false,
-                                                                                            tokens::KNOB_STD,
-                                                                                            44.0,
-                                                                                        );
-                                                                                    })
-                                                                                    .col_between(Pixels(tokens::SPACE_SM))
-                                                                                    .child_left(Stretch(1.0))
-                                                                                    .child_right(Stretch(1.0))
-                                                                                    .width(Stretch(1.0))
-                                                                                    .height(Auto);
-                                                                                }
-                                                                                _ => {
-                                                                                    HStack::new(cx, move |cx| {
-                                                                                        build_modseq_rate_smooth_knobs(
-                                                                                            cx, seq_idx, p_cur, u_cur,
-                                                                                        );
-                                                                                    })
-                                                                                    .col_between(Pixels(tokens::SPACE_SM))
-                                                                                    .child_left(Stretch(1.0))
-                                                                                    .child_right(Stretch(1.0))
-                                                                                    .width(Stretch(1.0))
-                                                                                    .height(Auto);
-                                                                                }
-                                                                            }
-                                                                        },
-                                                                    );
-                                                                },
-                                                            ),
-                                                        )
-                                                        .width(Stretch(1.0))
-                                                        .height(Auto);
+                                                        build_modseq_timing_controls(
+                                                            cx, seq_idx, p_col3, u_col3,
+                                                        );
                                                     })
                                                     .row_between(Pixels(tokens::SPACE_SM))
                                                     .width(Stretch(1.0))
