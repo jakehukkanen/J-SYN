@@ -268,11 +268,11 @@ pub(super) fn apply_mseg_tension_relative(
     if seg_idx + 1 >= n {
         return;
     }
-    let sign = if mseg.nodes[seg_idx + 1].level_y >= mseg.nodes[seg_idx].level_y {
-        -1.0
-    } else {
-        1.0
-    };
+    let level_diff = mseg.nodes[seg_idx + 1].level_y - mseg.nodes[seg_idx].level_y;
+    if level_diff.abs() < 1e-3 {
+        return;
+    }
+    let sign = if level_diff >= 0.0 { -1.0 } else { 1.0 };
     let dy = sign * (start_y - y) / (75.0 * scale.max(1.0));
     mseg.nodes[seg_idx].tension = (start_tension + dy).clamp(-1.0, 1.0);
 }
@@ -477,7 +477,7 @@ pub(super) fn draw_mseg(
     ph_paint.set_line_width(1.4 * dpx);
     canvas.stroke_path(&ph_line, &ph_paint);
 
-    let cur_val = evaluate_mseg_curve(mseg, ph.min(0.999_999));
+    let cur_val = evaluate_mseg_curve(mseg, ph);
     let mut ph_dot = vg::Path::new();
     ph_dot.circle(ph_x, y0 + (1.0 - cur_val) * h, 3.0 * dpx);
     canvas.fill_path(&ph_dot, &vg::Paint::color(vg::Color::rgb(ar, ag, ab)));

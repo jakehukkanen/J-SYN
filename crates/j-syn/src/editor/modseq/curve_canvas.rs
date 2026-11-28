@@ -335,6 +335,7 @@ impl View for ModSeqCurveCanvas {
                         mseg_canvas::hit_mseg_tension_handle(mseg, rect, mx, my, scale)
                     {
                         mseg.nodes[seg_idx].tension = 0.0;
+                        self.mseg_hover = None;
                         self.params.modseq_steps.store_value(bank);
                         cx.emit(UiEvent::ModUiChanged);
                         cx.needs_redraw();
@@ -386,6 +387,7 @@ impl View for ModSeqCurveCanvas {
                         mseg_canvas::hit_mseg_tension_handle(mseg, rect, mx, my, scale)
                     {
                         mseg.nodes[seg_idx].tension = 0.0;
+                        self.mseg_hover = None;
                         self.params.modseq_steps.store_value(bank);
                         cx.emit(UiEvent::ModUiChanged);
                         cx.needs_redraw();

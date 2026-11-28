@@ -4426,4 +4426,20 @@ fn mseg_exponential_symmetry_inverse_vertical_walls_and_32_nodes() {
     }
     assert!((evaluate_mseg_curve(&curve_32, 0.0) - 0.2).abs() < 1e-6);
     assert!((evaluate_mseg_curve(&curve_32, 1.0) - 0.8).abs() < 1e-6);
+
+    // 6. OneShot MSEG with trailing vertical wall at x=1.0 settles at nodes[n-1].level_y
+    let mut st_oneshot = j_syn_dsp::ModSeqState::new();
+    let p_oneshot = j_syn_dsp::ModSeqParams {
+        mode: j_syn_dsp::ModSeqMode::Mseg,
+        sync_mode: j_syn_dsp::ModSeqSyncMode::Free,
+        rate_norm: 0.5,
+        play_mode: j_syn_dsp::ModSeqPlayMode::OneShot,
+        smooth: 0.0,
+        ..Default::default()
+    };
+    let dummy_steps = [j_syn_dsp::ModSeqStep::default(); j_syn_dsp::MAX_MODSEQ_STEPS];
+    let settled = st_oneshot.advance_with_mseg(2.0, 120.0, &p_oneshot, &dummy_steps, &wall_end);
+    assert!(st_oneshot.completed);
+    assert_eq!(st_oneshot.display_phase, 1.0);
+    assert!(settled.abs() < 1e-5, "Completed OneShot trailing wall should settle at 0.0, got {settled}");
 }

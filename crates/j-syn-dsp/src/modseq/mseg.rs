@@ -233,7 +233,7 @@ impl<'de> Deserialize<'de> for MsegNode {
     }
 }
 
-/// Fixed-size zero-allocation multi-segment envelope (`2..=16` nodes).
+/// Fixed-size zero-allocation multi-segment envelope (`2..=32` nodes).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct MsegCurve {

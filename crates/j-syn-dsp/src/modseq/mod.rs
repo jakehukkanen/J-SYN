@@ -562,8 +562,9 @@ impl ModSeqState {
                 evaluate_step_shape(step, local_t)
             }
             ModSeqMode::Mseg => {
-                self.display_phase = self.phase;
-                evaluate_mseg_curve(mseg, self.phase)
+                let eval_phase = if self.completed { 1.0 } else { self.phase };
+                self.display_phase = eval_phase;
+                evaluate_mseg_curve(mseg, eval_phase)
             }
         };
         let smooth = params.smooth.clamp(0.0, 1.0);
