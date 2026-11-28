@@ -2,6 +2,7 @@
 //! (`MSEQ 1`–`MSEQ 8`) and 8 envelopes (`ENV 1`–`ENV 8`).
 
 mod curve_canvas;
+mod mseg_canvas;
 mod palette;
 
 use std::sync::Arc;

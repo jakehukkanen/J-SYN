@@ -474,3 +474,15 @@ fn legacy_v1_modseq_num_steps_rescales_from_16_to_32_and_defaults_row_params() {
     assert!((rec.written_norm(&params, "ms_row_1") - 0.0).abs() < 1e-5);
     assert!((rec.written_norm(&params, "ms_row_mode_1") - 0.0).abs() < 1e-5);
 }
+
+#[test]
+fn legacy_16_node_mseg_curve_deserializes_into_32_node_array() {
+    let legacy_16_json = serde_json::json!({
+        "nodes": vec![serde_json::json!({"time_x": 0.0, "level_y": 0.25, "tension": 0.0}); 16],
+        "num_nodes": 2
+    });
+    let decoded: j_syn_dsp::MsegCurve =
+        serde_json::from_value(legacy_16_json).expect("decode legacy 16-node MsegCurve");
+    assert_eq!(decoded.num_nodes, 2);
+    assert!((decoded.nodes[0].level_y - 0.25).abs() < 1e-6);
+}

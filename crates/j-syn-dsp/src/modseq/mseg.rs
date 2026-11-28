@@ -3,7 +3,9 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const MAX_MSEG_NODES: usize = 16;
+pub const MAX_MSEG_NODES: usize = 32;
+pub const MSEG_CURVE_MAX_K: f32 = 12.0;
+pub const MSEG_WALL_EPS: f32 = 1e-6;
 
 /// Breakpoint preset templates for `LFO` (MSEG) mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,7 +94,7 @@ impl LfoPreset {
                 nodes[0] = MsegNode {
                     time_x: 0.0,
                     level_y: 0.0,
-                    tension: 0.55,
+                    tension: 0.30,
                 };
                 nodes[1] = MsegNode {
                     time_x: 1.0,
@@ -105,7 +107,7 @@ impl LfoPreset {
                 nodes[0] = MsegNode {
                     time_x: 0.0,
                     level_y: 0.0,
-                    tension: -0.55,
+                    tension: -0.30,
                 };
                 nodes[1] = MsegNode {
                     time_x: 1.0,
@@ -118,12 +120,12 @@ impl LfoPreset {
                 nodes[0] = MsegNode {
                     time_x: 0.0,
                     level_y: 0.0,
-                    tension: 0.42,
+                    tension: 0.25,
                 };
                 nodes[1] = MsegNode {
                     time_x: 0.5,
                     level_y: 0.5,
-                    tension: -0.42,
+                    tension: -0.25,
                 };
                 nodes[2] = MsegNode {
                     time_x: 1.0,
@@ -154,22 +156,22 @@ impl LfoPreset {
                 nodes[0] = MsegNode {
                     time_x: 0.0,
                     level_y: 0.5,
-                    tension: -0.35,
+                    tension: -0.1469,
                 };
                 nodes[1] = MsegNode {
                     time_x: 0.25,
                     level_y: 1.0,
-                    tension: 0.33,
+                    tension: 0.1469,
                 };
                 nodes[2] = MsegNode {
                     time_x: 0.5,
                     level_y: 0.5,
-                    tension: -0.35,
+                    tension: -0.1469,
                 };
                 nodes[3] = MsegNode {
                     time_x: 0.75,
                     level_y: 0.0,
-                    tension: 0.33,
+                    tension: 0.1469,
                 };
                 nodes[4] = MsegNode {
                     time_x: 1.0,
@@ -286,17 +288,17 @@ impl Default for MsegCurve {
         nodes[0] = MsegNode {
             time_x: 0.0,
             level_y: 0.0,
-            tension: -0.35,
+            tension: -0.22,
         };
         nodes[1] = MsegNode {
             time_x: 0.15,
             level_y: 1.0,
-            tension: 0.45,
+            tension: 0.28,
         };
         nodes[2] = MsegNode {
             time_x: 0.55,
             level_y: 0.35,
-            tension: 0.25,
+            tension: 0.16,
         };
         nodes[3] = MsegNode {
             time_x: 1.0,
@@ -310,23 +312,54 @@ impl Default for MsegCurve {
     }
 }
 
+/// Evaluates normalized exponential curve progress in `[0.0, 1.0]` for `local_t` in `[0.0, 1.0]`
+/// and `tension` in `[-1.0, 1.0]`: `f(t; k) = (e^(k*t) - 1) / (e^k - 1)` where `k = tension * MSEG_CURVE_MAX_K`.
+#[inline]
+pub fn evaluate_mseg_segment_t(local_t: f32, tension: f32) -> f32 {
+    let t = local_t.clamp(0.0, 1.0) as f64;
+    let k = (tension.clamp(-1.0, 1.0) as f64) * (MSEG_CURVE_MAX_K as f64);
+    if k.abs() < 1e-4 {
+        return t as f32;
+    }
+    let denom = k.exp_m1();
+    let numer = (k * t).exp_m1();
+    (numer / denom).clamp(0.0, 1.0) as f32
+}
+
+/// Evaluates a single MSEG segment from `a` to `b` at normalized segment progress `local_t` in `[0.0, 1.0]`.
+#[inline]
+pub fn evaluate_mseg_segment(a: MsegNode, b: MsegNode, local_t: f32) -> f32 {
+    let curved_t = evaluate_mseg_segment_t(local_t, a.tension);
+    (a.level_y + (b.level_y - a.level_y) * curved_t).clamp(0.0, 1.0)
+}
+
+/// Analytical inverse of `evaluate_mseg_segment_t(0.5, tension) == midpoint_frac`.
+/// Maps desired midpoint fraction `m` in `(0.0, 1.0)` to `tension` in `[-1.0, 1.0]`.
+#[inline]
+pub fn mseg_tension_for_midpoint(midpoint_frac: f32) -> f32 {
+    let m = (midpoint_frac as f64).clamp(1e-4, 1.0 - 1e-4);
+    let k = 2.0 * ((1.0 - m) / m).ln();
+    (k / (MSEG_CURVE_MAX_K as f64)).clamp(-1.0, 1.0) as f32
+}
+
 /// Evaluates a continuous multi-segment `MSEG` curve at normalized phase in `[0.0, 1.0]`.
 #[inline]
 pub fn evaluate_mseg_curve(mseg: &MsegCurve, phase: f32) -> f32 {
     let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
     let p = phase.clamp(0.0, 1.0);
-    if p <= mseg.nodes[0].time_x {
-        return mseg.nodes[0].level_y.clamp(0.0, 1.0);
+    if p >= mseg.nodes[n - 1].time_x {
+        return mseg.nodes[n - 1].level_y.clamp(0.0, 1.0);
     }
     for i in 0..(n - 1) {
         let a = mseg.nodes[i];
         let b = mseg.nodes[i + 1];
-        if p <= b.time_x || i + 2 == n {
-            let span = (b.time_x - a.time_x).max(1e-5);
+        let span = b.time_x - a.time_x;
+        if span <= MSEG_WALL_EPS {
+            continue;
+        }
+        if p < b.time_x {
             let local_t = ((p - a.time_x) / span).clamp(0.0, 1.0);
-            let exp = 2.0_f32.powf(a.tension.clamp(-1.0, 1.0) * 2.5);
-            let curved_t = local_t.powf(exp);
-            return (a.level_y + (b.level_y - a.level_y) * curved_t).clamp(0.0, 1.0);
+            return evaluate_mseg_segment(a, b, local_t);
         }
     }
     mseg.nodes[n - 1].level_y.clamp(0.0, 1.0)

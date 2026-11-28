@@ -5,9 +5,8 @@ use std::sync::Arc;
 
 use j_syn_dsp::mod_matrix::ModDestination;
 use j_syn_dsp::{
-    MAX_MODSEQ_STEPS, MAX_MSEG_NODES, MODSEQ_ROW_STEPS, ModSeqRowMode, ModSeqRowStart, ModSeqStep,
-    ModSeqStepShape, ModSeqStepSpan, MsegNode, apply_groove_swing_tension, evaluate_mseg_curve,
-    evaluate_step_shape,
+    MAX_MODSEQ_STEPS, MODSEQ_ROW_STEPS, ModSeqRowMode, ModSeqRowStart, ModSeqStep,
+    ModSeqStepShape, ModSeqStepSpan, apply_groove_swing_tension, evaluate_step_shape,
 };
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
@@ -15,6 +14,7 @@ use nih_plug_vizia::widgets::util::ModifiersExt;
 
 use super::super::mod_bar::ModUiState;
 use super::super::{UiEvent, theme, tokens};
+use super::mseg_canvas::{self, MsegHover};
 use crate::{JSynPluginParams, ModSeqModeParam};
 
 pub(super) struct ModSeqCurveCanvas {
@@ -22,6 +22,7 @@ pub(super) struct ModSeqCurveCanvas {
     params: Arc<JSynPluginParams>,
     mod_ui: Arc<ModUiState>,
     drag_mode: Option<CanvasDragMode>,
+    mseg_hover: Option<MsegHover>,
     bold_font: std::cell::Cell<Option<vg::FontId>>,
 }
 
@@ -44,6 +45,9 @@ enum CanvasDragMode {
     },
     MsegTension {
         seg_idx: usize,
+    },
+    MsegTensionRelative {
+        seg_idx: usize,
         start_y: f32,
         start_tension: f32,
     },
@@ -61,6 +65,7 @@ impl ModSeqCurveCanvas {
             params,
             mod_ui,
             drag_mode: None,
+            mseg_hover: None,
             bold_font: std::cell::Cell::new(None),
         }
         .build(cx, |_| {})
@@ -126,48 +131,6 @@ impl ModSeqCurveCanvas {
         (nx, ny)
     }
 
-    fn hit_mseg_node(&self, bounds: BoundingBox, x: f32, y: f32, scale: f32) -> Option<usize> {
-        let (x0, y0, w, h) = Self::inner_rect(bounds, scale);
-        let bank = self.params.modseq_steps.snapshot();
-        let mseg = &bank.msegs[self.seq_idx];
-        let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
-        let radius = 9.0 * scale.max(1.0);
-        let mut best: Option<(usize, f32)> = None;
-        for (i, node) in mseg.nodes.iter().enumerate().take(n) {
-            let px = x0 + node.time_x * w;
-            let py = y0 + (1.0 - node.level_y) * h;
-            let d = (x - px).hypot(y - py);
-            if d <= radius && best.is_none_or(|(_, bd)| d < bd) {
-                best = Some((i, d));
-            }
-        }
-        best.map(|(idx, _)| idx)
-    }
-
-    fn hit_mseg_tension_handle(
-        &self,
-        bounds: BoundingBox,
-        x: f32,
-        y: f32,
-        scale: f32,
-    ) -> Option<(usize, f32)> {
-        let (x0, y0, w, h) = Self::inner_rect(bounds, scale);
-        let bank = self.params.modseq_steps.snapshot();
-        let mseg = &bank.msegs[self.seq_idx];
-        let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
-        let radius = 8.5 * scale.max(1.0);
-        for i in 0..(n - 1) {
-            let mid_x = 0.5 * (mseg.nodes[i].time_x + mseg.nodes[i + 1].time_x);
-            let mid_y = evaluate_mseg_curve(mseg, mid_x);
-            let px = x0 + mid_x * w;
-            let py = y0 + (1.0 - mid_y) * h;
-            if (x - px).hypot(y - py) <= radius {
-                return Some((i, mseg.nodes[i].tension));
-            }
-        }
-        None
-    }
-
     fn apply_drag_edit(
         &self,
         x: f32,
@@ -176,6 +139,7 @@ impl ModSeqCurveCanvas {
         mode: CanvasDragMode,
         scale: f32,
         shift_held: bool,
+        alt_held: bool,
     ) {
         let mut bank = self.params.modseq_steps.snapshot();
         match mode {
@@ -231,176 +195,37 @@ impl ModSeqCurveCanvas {
                     (start_tension + dy).clamp(-1.0, 1.0);
             }
             CanvasDragMode::MsegNode { node_idx } => {
-                let (mut nx, mut ny) = Self::cursor_norm_xy(bounds, x, y, scale);
-                let mseg = &mut bank.msegs[self.seq_idx];
-                let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
-                let idx = node_idx.min(n - 1);
-                if self.mod_ui.mseg_snap() || shift_held {
-                    ny = (ny * 8.0).round() / 8.0;
-                    if idx > 0 && idx + 1 < n {
-                        nx = (nx * 16.0).round() / 16.0;
-                    }
-                }
-                mseg.nodes[idx].level_y = ny.clamp(0.0, 1.0);
-                if idx == 0 {
-                    mseg.nodes[idx].time_x = 0.0;
-                } else if idx + 1 == n {
-                    mseg.nodes[idx].time_x = 1.0;
-                } else {
-                    let min_x = (mseg.nodes[idx - 1].time_x + 0.015).min(0.98);
-                    let max_x = (mseg.nodes[idx + 1].time_x - 0.015).max(min_x);
-                    mseg.nodes[idx].time_x = nx.clamp(min_x, max_x);
-                }
+                let (nx, ny) = Self::cursor_norm_xy(bounds, x, y, scale);
+                let snap_on = self.mod_ui.mseg_snap();
+                let snap_active = (snap_on && !alt_held) || (!snap_on && shift_held);
+                mseg_canvas::apply_mseg_node_drag(
+                    &mut bank.msegs[self.seq_idx],
+                    node_idx,
+                    nx,
+                    ny,
+                    snap_active,
+                );
             }
-            CanvasDragMode::MsegTension {
+            CanvasDragMode::MsegTension { seg_idx } => {
+                let (_, ny) = Self::cursor_norm_xy(bounds, x, y, scale);
+                mseg_canvas::apply_mseg_tension_direct(&mut bank.msegs[self.seq_idx], seg_idx, ny);
+            }
+            CanvasDragMode::MsegTensionRelative {
                 seg_idx,
                 start_y,
                 start_tension,
             } => {
-                let mseg = &mut bank.msegs[self.seq_idx];
-                let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
-                if seg_idx + 1 < n {
-                    let sign = if mseg.nodes[seg_idx + 1].level_y >= mseg.nodes[seg_idx].level_y {
-                        -1.0
-                    } else {
-                        1.0
-                    };
-                    let dy = sign * (start_y - y) / (75.0 * scale.max(1.0));
-                    mseg.nodes[seg_idx].tension = (start_tension + dy).clamp(-1.0, 1.0);
-                }
+                mseg_canvas::apply_mseg_tension_relative(
+                    &mut bank.msegs[self.seq_idx],
+                    seg_idx,
+                    start_y,
+                    y,
+                    scale,
+                    start_tension,
+                );
             }
         }
         self.params.modseq_steps.store_value(bank);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn draw_mseg(
-        &self,
-        canvas: &mut Canvas,
-        bounds: BoundingBox,
-        dpx: f32,
-        pal: &j_syn_ui::ThemePalette,
-        accent: (u8, u8, u8),
-        mseg: &j_syn_dsp::MsegCurve,
-    ) {
-        let (x0, y0, w, h) = Self::inner_rect(bounds, dpx);
-        let (ar, ag, ab) = accent;
-
-        let mut grid_paint = vg::Paint::color(theme::vg_color(&pal.scope_grid, 175));
-        grid_paint.set_line_width(0.8 * dpx);
-        let mut snap_grid_paint = vg::Paint::color(theme::vg_color(&pal.scope_grid, 90));
-        snap_grid_paint.set_line_width(0.65 * dpx);
-        let snap_on = self.mod_ui.mseg_snap();
-
-        let h_divs = if snap_on { 8 } else { 4 };
-        for g in 1..h_divs {
-            let gy = y0 + (g as f32 / h_divs as f32) * h;
-            let mut line = vg::Path::new();
-            line.move_to(x0, gy);
-            line.line_to(x0 + w, gy);
-            let paint = if snap_on && g % 2 != 0 {
-                &snap_grid_paint
-            } else {
-                &grid_paint
-            };
-            canvas.stroke_path(&line, paint);
-        }
-        let v_divs = if snap_on { 16 } else { 4 };
-        for s in 1..v_divs {
-            let gx = x0 + (s as f32 / v_divs as f32) * w;
-            let mut line = vg::Path::new();
-            line.move_to(gx, y0);
-            line.line_to(gx, y0 + h);
-            let paint = if snap_on && s % 4 != 0 {
-                &snap_grid_paint
-            } else {
-                &grid_paint
-            };
-            canvas.stroke_path(&line, paint);
-        }
-
-        let samples = 128usize;
-        let mut fill_path = vg::Path::new();
-        let mut stroke_path = vg::Path::new();
-        fill_path.move_to(x0, y0 + h);
-        for i in 0..=samples {
-            let t = (i as f32 / samples as f32).min(0.999_999);
-            let val = evaluate_mseg_curve(mseg, t);
-            let px = x0 + (i as f32 / samples as f32) * w;
-            let py = y0 + (1.0 - val) * h;
-            fill_path.line_to(px, py);
-            if i == 0 {
-                stroke_path.move_to(px, py);
-            } else {
-                stroke_path.line_to(px, py);
-            }
-        }
-        fill_path.line_to(x0 + w, y0 + h);
-        fill_path.close();
-
-        let fill_paint = vg::Paint::linear_gradient(
-            x0,
-            y0,
-            x0,
-            y0 + h,
-            vg::Color::rgba(ar, ag, ab, 95),
-            vg::Color::rgba(ar, ag, ab, 14),
-        );
-        canvas.fill_path(&fill_path, &fill_paint);
-
-        let mut stroke_paint = vg::Paint::color(vg::Color::rgb(ar, ag, ab));
-        stroke_paint.set_line_width(1.8 * dpx);
-        stroke_paint.set_line_cap(vg::LineCap::Round);
-        stroke_paint.set_line_join(vg::LineJoin::Round);
-        canvas.stroke_path(&stroke_path, &stroke_paint);
-
-        let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
-        for i in 0..(n - 1) {
-            let mid_x = 0.5 * (mseg.nodes[i].time_x + mseg.nodes[i + 1].time_x);
-            let mid_y = evaluate_mseg_curve(mseg, mid_x);
-            let mx = x0 + mid_x * w;
-            let my = y0 + (1.0 - mid_y) * h;
-            let mut hdl = vg::Path::new();
-            hdl.circle(mx, my, 2.3 * dpx);
-            canvas.fill_path(
-                &hdl,
-                &vg::Paint::color(theme::vg_color(&pal.accent_primary, 185)),
-            );
-        }
-        for node in mseg.nodes.iter().take(n) {
-            let nx = x0 + node.time_x * w;
-            let ny = y0 + (1.0 - node.level_y) * h;
-            let mut ring = vg::Path::new();
-            ring.circle(nx, ny, 3.6 * dpx);
-            canvas.fill_path(&ring, &vg::Paint::color(vg::Color::rgb(ar, ag, ab)));
-            let mut inner = vg::Path::new();
-            inner.circle(nx, ny, 2.0 * dpx);
-            canvas.fill_path(
-                &inner,
-                &vg::Paint::color(theme::vg_color(&pal.text_primary, 255)),
-            );
-        }
-
-        let phase = self
-            .mod_ui
-            .telemetry
-            .modseq_phase(self.seq_idx)
-            .clamp(0.0, 1.0);
-        let ph_x = x0 + phase * w;
-        let mut ph_line = vg::Path::new();
-        ph_line.move_to(ph_x, y0);
-        ph_line.line_to(ph_x, y0 + h);
-        let mut ph_paint = vg::Paint::color(theme::vg_color(&pal.text_primary, 210));
-        ph_paint.set_line_width(1.4 * dpx);
-        canvas.stroke_path(&ph_line, &ph_paint);
-
-        let cur_val = evaluate_mseg_curve(mseg, phase.min(0.999_999));
-        let mut ph_dot = vg::Path::new();
-        ph_dot.circle(ph_x, y0 + (1.0 - cur_val) * h, 3.0 * dpx);
-        canvas.fill_path(&ph_dot, &vg::Paint::color(vg::Color::rgb(ar, ag, ab)));
-        let mut ph_ring = vg::Paint::color(theme::vg_color(&pal.text_primary, 255));
-        ph_ring.set_line_width(1.1 * dpx);
-        canvas.stroke_path(&ph_dot, &ph_ring);
     }
 }
 
@@ -418,23 +243,20 @@ impl View for ModSeqCurveCanvas {
                 let my = cx.mouse().cursory;
 
                 if self.is_mseg() {
-                    if let Some(node_idx) = self.hit_mseg_node(bounds, mx, my, scale) {
-                        let mode = CanvasDragMode::MsegNode { node_idx };
-                        self.drag_mode = Some(mode);
-                        self.apply_drag_edit(mx, my, bounds, mode, scale, cx.modifiers().shift());
+                    let rect = Self::inner_rect(bounds, scale);
+                    let bank = self.params.modseq_steps.snapshot();
+                    let mseg = &bank.msegs[self.seq_idx];
+                    if let Some(node_idx) = mseg_canvas::hit_mseg_node(mseg, rect, mx, my, scale) {
+                        self.drag_mode = Some(CanvasDragMode::MsegNode { node_idx });
                         cx.capture();
                         cx.needs_redraw();
                         meta.consume();
                         return;
                     }
-                    if let Some((seg_idx, start_tension)) =
-                        self.hit_mseg_tension_handle(bounds, mx, my, scale)
+                    if let Some(seg_idx) =
+                        mseg_canvas::hit_mseg_tension_handle(mseg, rect, mx, my, scale)
                     {
-                        self.drag_mode = Some(CanvasDragMode::MsegTension {
-                            seg_idx,
-                            start_y: my,
-                            start_tension,
-                        });
+                        self.drag_mode = Some(CanvasDragMode::MsegTension { seg_idx });
                         cx.capture();
                         cx.needs_redraw();
                         meta.consume();
@@ -442,24 +264,16 @@ impl View for ModSeqCurveCanvas {
                     }
                     if cx.modifiers().contains(Modifiers::ALT) {
                         let (nx, _) = Self::cursor_norm_xy(bounds, mx, my, scale);
-                        let bank = self.params.modseq_steps.snapshot();
-                        let mseg = &bank.msegs[self.seq_idx];
-                        let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
-                        let mut seg_idx = 0usize;
-                        for i in 0..(n - 1) {
-                            if nx <= mseg.nodes[i + 1].time_x || i + 2 == n {
-                                seg_idx = i;
-                                break;
-                            }
+                        if let Some(seg_idx) = mseg_canvas::segment_index_for_x(mseg, nx) {
+                            self.drag_mode = Some(CanvasDragMode::MsegTensionRelative {
+                                seg_idx,
+                                start_y: my,
+                                start_tension: mseg.nodes[seg_idx].tension,
+                            });
+                            cx.capture();
+                            cx.needs_redraw();
+                            meta.consume();
                         }
-                        self.drag_mode = Some(CanvasDragMode::MsegTension {
-                            seg_idx,
-                            start_y: my,
-                            start_tension: mseg.nodes[seg_idx].tension,
-                        });
-                        cx.capture();
-                        cx.needs_redraw();
-                        meta.consume();
                     }
                     return;
                 }
@@ -485,7 +299,15 @@ impl View for ModSeqCurveCanvas {
                     }
                 };
                 self.drag_mode = Some(mode);
-                self.apply_drag_edit(mx, my, bounds, mode, scale, cx.modifiers().shift());
+                self.apply_drag_edit(
+                    mx,
+                    my,
+                    bounds,
+                    mode,
+                    scale,
+                    cx.modifiers().shift(),
+                    cx.modifiers().contains(Modifiers::ALT),
+                );
                 cx.capture();
                 cx.needs_redraw();
                 meta.consume();
@@ -495,23 +317,41 @@ impl View for ModSeqCurveCanvas {
                 let scale = cx.scale_factor();
                 let mx = cx.mouse().cursorx;
                 let my = cx.mouse().cursory;
-                let bank = self.params.modseq_steps.snapshot();
+                let mut bank = self.params.modseq_steps.snapshot();
                 if self.is_mseg() {
-                    let (nx, _) = Self::cursor_norm_xy(bounds, mx, my, scale);
-                    let mseg = &bank.msegs[self.seq_idx];
-                    let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
-                    let mut seg_idx = 0usize;
-                    for i in 0..(n - 1) {
-                        if nx <= mseg.nodes[i + 1].time_x || i + 2 == n {
-                            seg_idx = i;
-                            break;
+                    let rect = Self::inner_rect(bounds, scale);
+                    let mseg = &mut bank.msegs[self.seq_idx];
+                    if let Some(hit) = mseg_canvas::hit_mseg_node(mseg, rect, mx, my, scale) {
+                        if mseg_canvas::delete_mseg_node(mseg, hit) {
+                            self.mseg_hover = None;
+                            self.params.modseq_steps.store_value(bank);
+                            cx.emit(UiEvent::ModUiChanged);
+                            cx.needs_redraw();
                         }
+                        meta.consume();
+                        return;
                     }
-                    self.drag_mode = Some(CanvasDragMode::MsegTension {
-                        seg_idx,
-                        start_y: my,
-                        start_tension: mseg.nodes[seg_idx].tension,
-                    });
+                    if let Some(seg_idx) =
+                        mseg_canvas::hit_mseg_tension_handle(mseg, rect, mx, my, scale)
+                    {
+                        mseg.nodes[seg_idx].tension = 0.0;
+                        self.params.modseq_steps.store_value(bank);
+                        cx.emit(UiEvent::ModUiChanged);
+                        cx.needs_redraw();
+                        meta.consume();
+                        return;
+                    }
+                    let (nx, _) = Self::cursor_norm_xy(bounds, mx, my, scale);
+                    if let Some(seg_idx) = mseg_canvas::segment_index_for_x(mseg, nx) {
+                        self.drag_mode = Some(CanvasDragMode::MsegTensionRelative {
+                            seg_idx,
+                            start_y: my,
+                            start_tension: mseg.nodes[seg_idx].tension,
+                        });
+                        cx.capture();
+                    }
+                    meta.consume();
+                    return;
                 } else {
                     let (row, col, _) = Self::cursor_row_col_level(bounds, mx, my, scale);
                     self.mod_ui.set_active_modseq_row(self.seq_idx, row);
@@ -532,52 +372,29 @@ impl View for ModSeqCurveCanvas {
                 let my = cx.mouse().cursory;
 
                 if self.is_mseg() {
+                    let rect = Self::inner_rect(bounds, scale);
                     let mut bank = self.params.modseq_steps.snapshot();
                     let mseg = &mut bank.msegs[self.seq_idx];
-                    let n = mseg.num_nodes.clamp(2, MAX_MSEG_NODES);
-                    if let Some(hit) = self.hit_mseg_node(bounds, mx, my, scale) {
-                        if hit > 0 && hit + 1 < n && n > 2 {
-                            for i in hit..(n - 1) {
-                                mseg.nodes[i] = mseg.nodes[i + 1];
-                            }
-                            mseg.num_nodes = n - 1;
+                    if let Some(hit) = mseg_canvas::hit_mseg_node(mseg, rect, mx, my, scale) {
+                        if mseg_canvas::delete_mseg_node(mseg, hit) {
+                            self.mseg_hover = None;
                             self.params.modseq_steps.store_value(bank);
                             cx.emit(UiEvent::ModUiChanged);
                             cx.needs_redraw();
                         }
-                    } else if n < MAX_MSEG_NODES {
+                    } else if let Some(seg_idx) =
+                        mseg_canvas::hit_mseg_tension_handle(mseg, rect, mx, my, scale)
+                    {
+                        mseg.nodes[seg_idx].tension = 0.0;
+                        self.params.modseq_steps.store_value(bank);
+                        cx.emit(UiEvent::ModUiChanged);
+                        cx.needs_redraw();
+                    } else {
                         let (raw_x, raw_y) = Self::cursor_norm_xy(bounds, mx, my, scale);
-                        let snap = self.mod_ui.mseg_snap() || cx.modifiers().shift();
-                        let nx = if snap {
-                            (raw_x * 16.0).round() / 16.0
-                        } else {
-                            raw_x
-                        };
-                        let ny = if snap {
-                            (raw_y * 8.0).round() / 8.0
-                        } else {
-                            raw_y
-                        };
-                        let tx = nx.clamp(0.02, 0.98);
-                        let mut insert_at = n - 1;
-                        for (i, node) in mseg.nodes.iter().enumerate().take(n).skip(1) {
-                            if tx < node.time_x {
-                                insert_at = i;
-                                break;
-                            }
-                        }
-                        let left_x = mseg.nodes[insert_at - 1].time_x + 0.015;
-                        let right_x = mseg.nodes[insert_at].time_x - 0.015;
-                        if left_x <= right_x {
-                            for i in (insert_at..n).rev() {
-                                mseg.nodes[i + 1] = mseg.nodes[i];
-                            }
-                            mseg.nodes[insert_at] = MsegNode {
-                                time_x: tx.clamp(left_x, right_x),
-                                level_y: ny.clamp(0.0, 1.0),
-                                tension: 0.0,
-                            };
-                            mseg.num_nodes = n + 1;
+                        let snap_on = self.mod_ui.mseg_snap();
+                        let snap_active = (snap_on && !cx.modifiers().contains(Modifiers::ALT))
+                            || (!snap_on && cx.modifiers().shift());
+                        if mseg_canvas::insert_mseg_node(mseg, raw_x, raw_y, snap_active) {
                             self.params.modseq_steps.store_value(bank);
                             cx.emit(UiEvent::ModUiChanged);
                             cx.needs_redraw();
@@ -606,9 +423,31 @@ impl View for ModSeqCurveCanvas {
                         mode,
                         cx.scale_factor(),
                         cx.modifiers().shift(),
+                        cx.modifiers().contains(Modifiers::ALT),
                     );
                     cx.needs_redraw();
                     meta.consume();
+                } else if self.is_mseg() {
+                    let bounds = cx.bounds();
+                    let scale = cx.scale_factor();
+                    let rect = Self::inner_rect(bounds, scale);
+                    let bank = self.params.modseq_steps.snapshot();
+                    let mseg = &bank.msegs[self.seq_idx];
+                    let next_hover = mseg_canvas::hit_mseg_node(mseg, rect, *x, *y, scale)
+                        .map(MsegHover::Node)
+                        .or_else(|| {
+                            mseg_canvas::hit_mseg_tension_handle(mseg, rect, *x, *y, scale)
+                                .map(MsegHover::Tension)
+                        });
+                    if next_hover != self.mseg_hover {
+                        self.mseg_hover = next_hover;
+                        cx.needs_redraw();
+                    }
+                }
+            }
+            WindowEvent::MouseOut => {
+                if self.mseg_hover.take().is_some() {
+                    cx.needs_redraw();
                 }
             }
             WindowEvent::MouseUp(MouseButton::Left) | WindowEvent::MouseUp(MouseButton::Right) => {
@@ -641,13 +480,24 @@ impl View for ModSeqCurveCanvas {
 
         let bank = self.params.modseq_steps.snapshot();
         if self.is_mseg() {
-            self.draw_mseg(
+            let active_hover = match self.drag_mode {
+                Some(CanvasDragMode::MsegNode { node_idx }) => Some(MsegHover::Node(node_idx)),
+                Some(CanvasDragMode::MsegTension { seg_idx })
+                | Some(CanvasDragMode::MsegTensionRelative { seg_idx, .. }) => {
+                    Some(MsegHover::Tension(seg_idx))
+                }
+                _ => self.mseg_hover,
+            };
+            mseg_canvas::draw_mseg(
                 canvas,
-                bounds,
+                Self::inner_rect(bounds, dpx),
                 dpx,
                 &pal,
                 (ar, ag, ab),
                 &bank.msegs[self.seq_idx],
+                self.mod_ui.mseg_snap(),
+                self.mod_ui.telemetry.modseq_phase(self.seq_idx),
+                active_hover,
             );
             return;
         }

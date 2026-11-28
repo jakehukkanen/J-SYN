@@ -4339,3 +4339,91 @@ fn modseq_step_ratio_and_step_ms_timing() {
         "Mseg Free/StepRatio/StepMs phases should match: {mseg_phases:?}"
     );
 }
+
+#[test]
+fn mseg_exponential_symmetry_inverse_vertical_walls_and_32_nodes() {
+    use j_syn_dsp::{
+        evaluate_mseg_curve, evaluate_mseg_segment_t, mseg_tension_for_midpoint, LfoPreset,
+        MsegCurve, MsegNode, MAX_MSEG_NODES,
+    };
+
+    assert_eq!(MAX_MSEG_NODES, 32);
+
+    // 1. Exact endpoints & mirror symmetry: f(u; -t) == 1 - f(1 - u; t)
+    for tension in [-1.0_f32, -0.5, 0.0, 0.5, 1.0] {
+        assert!((evaluate_mseg_segment_t(0.0, tension) - 0.0).abs() < 1e-6);
+        assert!((evaluate_mseg_segment_t(1.0, tension) - 1.0).abs() < 1e-6);
+        for k in 0..=20 {
+            let u = k as f32 / 20.0;
+            let f_neg = evaluate_mseg_segment_t(u, -tension);
+            let f_pos_mirror = 1.0 - evaluate_mseg_segment_t(1.0 - u, tension);
+            assert!(
+                (f_neg - f_pos_mirror).abs() < 1e-5,
+                "Symmetry mismatch at u={u}, tension={tension}: {f_neg} vs {f_pos_mirror}"
+            );
+        }
+    }
+
+    // 2. Analytical midpoint inverse roundtrip & extreme clamps
+    for m in [0.01_f32, 0.15, 0.5, 0.85, 0.99] {
+        let t = mseg_tension_for_midpoint(m);
+        let actual = evaluate_mseg_segment_t(0.5, t);
+        assert!(
+            (actual - m).abs() < 1e-4,
+            "Midpoint inverse roundtrip failed for m={m}: t={t}, actual={actual}"
+        );
+    }
+    assert_eq!(mseg_tension_for_midpoint(0.0), 1.0);
+    assert_eq!(mseg_tension_for_midpoint(1.0), -1.0);
+
+    // 3. Sine preset quarter-wave accuracy (0.5 ± 0.5 * sin(pi/4))
+    let sine = LfoPreset::Sine.to_mseg();
+    assert!((evaluate_mseg_curve(&sine, 0.125) - 0.853_55).abs() < 2e-3);
+    assert!((evaluate_mseg_curve(&sine, 0.625) - 0.146_45).abs() < 2e-3);
+
+    // 4. Zero-width vertical walls (interior, leading x=0, trailing x=1)
+    let mut wall_mid = MsegCurve {
+        nodes: [MsegNode::default(); MAX_MSEG_NODES],
+        num_nodes: 4,
+    };
+    wall_mid.nodes[0] = MsegNode { time_x: 0.0, level_y: 0.0, tension: 0.0 };
+    wall_mid.nodes[1] = MsegNode { time_x: 0.5, level_y: 1.0, tension: 0.0 };
+    wall_mid.nodes[2] = MsegNode { time_x: 0.5, level_y: 0.0, tension: 0.0 };
+    wall_mid.nodes[3] = MsegNode { time_x: 1.0, level_y: 0.0, tension: 0.0 };
+    assert!(evaluate_mseg_curve(&wall_mid, 0.499) > 0.99);
+    assert!((evaluate_mseg_curve(&wall_mid, 0.5) - 0.0).abs() < 1e-6);
+
+    let mut wall_start = MsegCurve {
+        nodes: [MsegNode::default(); MAX_MSEG_NODES],
+        num_nodes: 3,
+    };
+    wall_start.nodes[0] = MsegNode { time_x: 0.0, level_y: 0.0, tension: 0.0 };
+    wall_start.nodes[1] = MsegNode { time_x: 0.0, level_y: 1.0, tension: 0.0 };
+    wall_start.nodes[2] = MsegNode { time_x: 1.0, level_y: 0.0, tension: 0.0 };
+    assert!((evaluate_mseg_curve(&wall_start, 0.0) - 1.0).abs() < 1e-6);
+
+    let mut wall_end = MsegCurve {
+        nodes: [MsegNode::default(); MAX_MSEG_NODES],
+        num_nodes: 3,
+    };
+    wall_end.nodes[0] = MsegNode { time_x: 0.0, level_y: 0.0, tension: 0.0 };
+    wall_end.nodes[1] = MsegNode { time_x: 1.0, level_y: 1.0, tension: 0.0 };
+    wall_end.nodes[2] = MsegNode { time_x: 1.0, level_y: 0.0, tension: 0.0 };
+    assert!(evaluate_mseg_curve(&wall_end, 0.999) > 0.99);
+    assert!((evaluate_mseg_curve(&wall_end, 1.0) - 0.0).abs() < 1e-6);
+
+    // 5. 32-node curve evaluation & legacy 16-node JSON deserialization
+    let mut curve_32 = MsegCurve {
+        nodes: [MsegNode::default(); MAX_MSEG_NODES],
+        num_nodes: 32,
+    };
+    for (i, node) in curve_32.nodes.iter_mut().enumerate() {
+        *node = MsegNode {
+            time_x: i as f32 / 31.0,
+            level_y: if i % 2 == 0 { 0.2 } else { 0.8 },
+            tension: 0.0,
+        };
+    }
+    assert!((evaluate_mseg_curve(&curve_32, 0.0) - 0.2).abs() < 1e-6);
+    assert!((evaluate_mseg_curve(&curve_32, 1.0) - 0.8).abs() < 1e-6);
+}
