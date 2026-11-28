@@ -18,7 +18,7 @@ use self::curve_canvas::ModSeqCurveCanvas;
 use self::palette::{AdsrPreviewScope, LfoPresetBar, ModSeqPaletteGrid};
 use super::controls::{
     bold_label, build_enum_dropdown, build_flex_knob_cell, build_flex_knob_cell_mod_fmt,
-    build_knob_cell, build_knob_cell_mod_fmt, build_knob_cell_with_readout,
+    build_knob_cell_with_readout,
 };
 use super::mod_bar::{ModUiState, bottom_tab_tag};
 use super::tokens;
@@ -327,37 +327,6 @@ fn make_rate_formatter(
             j_syn_dsp::modseq_division_label(mode, norm).to_string()
         }
     })
-}
-
-fn build_modseq_rate_smooth_knobs(
-    cx: &mut Context,
-    seq_idx: usize,
-    params: Arc<JSynPluginParams>,
-    mod_ui: Arc<ModUiState>,
-) {
-    build_knob_cell_mod_fmt(
-        cx,
-        UiData::params,
-        move |pr| &pr.modseqs[seq_idx].rate,
-        "RATE",
-        false,
-        tokens::KNOB_STD,
-        46.0,
-        ModDestination::modseq_rate(seq_idx),
-        mod_ui,
-        bottom_tab_tag(BottomTab::ModSeq),
-        make_rate_formatter(seq_idx, params),
-    );
-
-    build_knob_cell(
-        cx,
-        UiData::params,
-        move |pr| &pr.modseqs[seq_idx].smooth,
-        "SMOOTH",
-        false,
-        tokens::KNOB_STD,
-        44.0,
-    );
 }
 
 fn format_step_ms(ms: f32) -> String {
@@ -820,32 +789,68 @@ pub(in super::super) fn build_modseq_tab(
                                         } else {
                                             HStack::new(cx, move |cx| {
                                                 let p_lfo = p_mode.clone();
+                                                let u_lfo = u_mode.clone();
                                                 VStack::new(cx, move |cx| {
                                                     LfoPresetBar::new(cx, seq_idx, p_lfo.clone())
                                                         .width(Stretch(1.0))
                                                         .height(Pixels(28.0));
 
                                                     let p_rst = p_lfo;
-                                                    build_preset_action_btn(
-                                                        cx,
-                                                        "RESET CURVE",
-                                                        move |cx| {
-                                                            let mut bank =
-                                                                p_rst.modseq_steps.snapshot();
-                                                            bank.msegs[seq_idx] =
-                                                                j_syn_dsp::MsegCurve::default();
-                                                            p_rst.modseq_steps.store_value(bank);
-                                                            cx.emit(UiEvent::ModUiChanged);
-                                                            cx.needs_redraw();
-                                                        },
-                                                    )
+                                                    let u_s = u_lfo;
+                                                    HStack::new(cx, move |cx| {
+                                                        build_preset_action_btn(
+                                                            cx,
+                                                            "RESET CURVE",
+                                                            move |cx| {
+                                                                let mut bank =
+                                                                    p_rst.modseq_steps.snapshot();
+                                                                bank.msegs[seq_idx] =
+                                                                    j_syn_dsp::MsegCurve::default();
+                                                                p_rst
+                                                                    .modseq_steps
+                                                                    .store_value(bank);
+                                                                cx.emit(UiEvent::ModUiChanged);
+                                                                cx.needs_redraw();
+                                                            },
+                                                        )
+                                                        .width(Stretch(1.0))
+                                                        .height(Pixels(tokens::CONTROL_H));
+
+                                                        let u_press = u_s.clone();
+                                                        let u_chk = u_s;
+                                                        Button::new(
+                                                            cx,
+                                                            move |cx| {
+                                                                u_press.toggle_mseg_snap();
+                                                                cx.emit(UiEvent::ModUiChanged);
+                                                                cx.needs_redraw();
+                                                            },
+                                                            |cx| {
+                                                                bold_label(
+                                                                    cx,
+                                                                    "SNAP",
+                                                                    "snap-btn-label",
+                                                                )
+                                                                .child_space(Stretch(1.0))
+                                                                .hoverable(false)
+                                                            },
+                                                        )
+                                                        .class("snap-btn")
+                                                        .checked(
+                                                            UiData::mod_ui_rev
+                                                                .map(move |_| u_chk.mseg_snap()),
+                                                        )
+                                                        .width(Pixels(64.0))
+                                                        .height(Pixels(tokens::CONTROL_H));
+                                                    })
+                                                    .col_between(Pixels(tokens::SPACE_SM))
                                                     .width(Stretch(1.0))
-                                                    .height(Pixels(20.0));
+                                                    .height(Pixels(tokens::CONTROL_H));
                                                 })
                                                 .row_between(Pixels(tokens::SPACE_SM))
                                                 .top(Stretch(1.0))
                                                 .bottom(Stretch(1.0))
-                                                .width(Pixels(224.0))
+                                                .width(Pixels(tokens::MODSEQ_PALETTE_W))
                                                 .height(Auto);
 
                                                 let p_ctrl = p_mode;
@@ -861,53 +866,35 @@ pub(in super::super) fn build_modseq_tab(
                                                         false,
                                                     );
 
-                                                    VStack::new(cx, {
-                                                        let u_s = u_ctrl.clone();
-                                                        move |cx| {
-                                                            let u_press = u_s.clone();
-                                                            let u_chk = u_s;
-                                                            bold_label(cx, "GRID", "mini-label")
-                                                                .width(Stretch(1.0))
-                                                                .height(Pixels(9.0))
-                                                                .child_space(Stretch(1.0));
-                                                            Button::new(
-                                                                cx,
-                                                                move |cx| {
-                                                                    u_press.toggle_mseg_snap();
-                                                                    cx.emit(UiEvent::ModUiChanged);
-                                                                    cx.needs_redraw();
-                                                                },
-                                                                |cx| {
-                                                                    bold_label(
-                                                                        cx,
-                                                                        "SNAP",
-                                                                        "snap-btn-label",
-                                                                    )
-                                                                    .child_space(Stretch(1.0))
-                                                                    .hoverable(false)
-                                                                },
-                                                            )
-                                                            .class("snap-btn")
-                                                            .checked(
-                                                                UiData::mod_ui_rev.map(move |_| {
-                                                                    u_chk.mseg_snap()
-                                                                }),
-                                                            )
-                                                            .width(Stretch(1.0))
-                                                            .height(Pixels(18.0));
-                                                        }
+                                                    HStack::new(cx, move |cx| {
+                                                        build_flex_knob_cell_mod_fmt(
+                                                            cx,
+                                                            UiData::params,
+                                                            move |pr| &pr.modseqs[seq_idx].rate,
+                                                            "RATE",
+                                                            false,
+                                                            tokens::KNOB_STD,
+                                                            ModDestination::modseq_rate(seq_idx),
+                                                            u_ctrl,
+                                                            bottom_tab_tag(BottomTab::ModSeq),
+                                                            make_rate_formatter(seq_idx, p_ctrl),
+                                                        );
+                                                        build_flex_knob_cell(
+                                                            cx,
+                                                            UiData::params,
+                                                            move |pr| &pr.modseqs[seq_idx].smooth,
+                                                            "SMOOTH",
+                                                            false,
+                                                            tokens::KNOB_STD,
+                                                        );
                                                     })
-                                                    .row_between(Pixels(1.0))
-                                                    .width(Pixels(48.0))
-                                                    .height(Auto)
-                                                    .top(Stretch(1.0))
-                                                    .bottom(Stretch(1.0));
-
-                                                    build_modseq_rate_smooth_knobs(
-                                                        cx, seq_idx, p_ctrl, u_ctrl,
-                                                    );
+                                                    .col_between(Pixels(tokens::SPACE_SM))
+                                                    .child_top(Stretch(1.0))
+                                                    .child_bottom(Stretch(1.0))
+                                                    .width(Stretch(1.0))
+                                                    .height(Stretch(1.0));
                                                 })
-                                                .col_between(Pixels(tokens::SPACE_XS))
+                                                .col_between(Pixels(tokens::SPACE_SM))
                                                 .child_top(Stretch(1.0))
                                                 .child_bottom(Stretch(1.0))
                                                 .width(Stretch(1.0))
