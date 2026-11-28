@@ -421,6 +421,7 @@ fn build_modseq_timing_controls(
                                     .width(Stretch(1.0))
                                     .height(Auto);
                                 })
+                                .class("knob-cell")
                                 .row_between(Pixels(tokens::SPACE_XS))
                                 .width(Stretch(1.0))
                                 .height(Auto);
@@ -436,6 +437,7 @@ fn build_modseq_timing_controls(
                             })
                             .col_between(Pixels(tokens::SPACE_SM))
                             .child_top(Pixels(0.0))
+                            .child_bottom(Stretch(1.0))
                             .width(Stretch(1.0))
                             .height(Auto);
                         }
@@ -466,6 +468,7 @@ fn build_modseq_timing_controls(
                             })
                             .col_between(Pixels(tokens::SPACE_SM))
                             .child_top(Pixels(0.0))
+                            .child_bottom(Stretch(1.0))
                             .width(Stretch(1.0))
                             .height(Auto);
                         }
@@ -494,6 +497,7 @@ fn build_modseq_timing_controls(
                             })
                             .col_between(Pixels(tokens::SPACE_SM))
                             .child_top(Pixels(0.0))
+                            .child_bottom(Stretch(1.0))
                             .width(Stretch(1.0))
                             .height(Auto);
                         }
@@ -502,6 +506,8 @@ fn build_modseq_timing_controls(
             },
         ),
     )
+    .child_top(Pixels(0.0))
+    .child_bottom(Stretch(1.0))
     .width(Stretch(1.0))
     .height(Auto);
 }
@@ -796,6 +802,8 @@ pub(in super::super) fn build_modseq_tab(
                                                         );
                                                     })
                                                     .row_between(Pixels(tokens::SPACE_SM))
+                                                    .child_top(Pixels(0.0))
+                                                    .child_bottom(Stretch(1.0))
                                                     .width(Stretch(1.0))
                                                     .height(Stretch(1.0));
                                                 })
