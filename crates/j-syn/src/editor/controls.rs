@@ -2,7 +2,6 @@
 //! wavetable browser dropdown and center stage tab buttons.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use j_syn_dsp::WavetableBank;
 use nih_plug::prelude::{Enum, GuiContext, Param, ParamSetter};
@@ -126,17 +125,6 @@ pub(crate) const WT_ITEMS: &[(&str, WavetableChoice)] = &[
     ("Aggressive PWM", WavetableChoice::AggressivePwm),
 ];
 
-static WT_LOAD_GEN: [AtomicU64; 4] = [
-    AtomicU64::new(0),
-    AtomicU64::new(0),
-    AtomicU64::new(0),
-    AtomicU64::new(0),
-];
-
-pub(crate) fn current_wt_load_gen(osc_idx: usize) -> u64 {
-    WT_LOAD_GEN[osc_idx].load(Ordering::Acquire)
-}
-
 pub(crate) fn set_wavetable_choice(
     params: &JSynPluginParams,
     gui_context: &Arc<dyn GuiContext>,
@@ -191,15 +179,15 @@ fn spawn_load_wavetable(
     mod_ui: Arc<ModUiState>,
     bank: Arc<WavetableBank>,
 ) {
-    let load_gen = WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel) + 1;
+    let load_gen = mod_ui.next_wt_load_gen(osc_idx);
     std::thread::spawn(move || {
-        if WT_LOAD_GEN[osc_idx].load(Ordering::Acquire) != load_gen {
+        if mod_ui.current_wt_load_gen(osc_idx) != load_gen {
             return;
         }
         let Ok(wt) = j_syn_dsp::Wavetable::load_from_wav(&path) else {
             return;
         };
-        if WT_LOAD_GEN[osc_idx].load(Ordering::Acquire) != load_gen {
+        if mod_ui.current_wt_load_gen(osc_idx) != load_gen {
             return;
         }
         bank.swap_custom(osc_idx, Arc::new(wt));
@@ -252,7 +240,7 @@ pub(crate) fn step_wavetable(
         }
     }
 
-    WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel);
+    mod_ui.cancel_wt_load(osc_idx);
     let pos = WT_ITEMS.iter().position(|&(_, v)| v == cur).unwrap_or(0);
     let next = (pos as isize + delta).rem_euclid(WT_ITEMS.len() as isize) as usize;
     if next != pos || cur == WavetableChoice::Custom {
@@ -316,6 +304,7 @@ pub(crate) fn build_wavetable_dropdown(
                     let expanded = UiData::expanded_wt_folder.get(cx);
                     let p_hdr = p_dir.clone();
                     let g_hdr = g_dir.clone();
+                    let m_hdr = m_dir.clone();
                     let bank_d = bank_dir.clone();
                     let p_d = p_dir.clone();
                     let m_d = m_dir.clone();
@@ -327,8 +316,9 @@ pub(crate) fn build_wavetable_dropdown(
                             for &(label, val) in WT_ITEMS {
                                 let p_ref = p_hdr.clone();
                                 let gui_ctx = g_hdr.clone();
+                                let m_ref = m_hdr.clone();
                                 bold_label(cx, label, "dropdown-item").on_press(move |cx| {
-                                    WT_LOAD_GEN[osc_idx].fetch_add(1, Ordering::AcqRel);
+                                    m_ref.cancel_wt_load(osc_idx);
                                     set_wavetable_choice(&p_ref, &gui_ctx, osc_idx, val);
                                     cx.emit(PopupEvent::Close);
                                 });

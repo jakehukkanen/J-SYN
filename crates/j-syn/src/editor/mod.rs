@@ -326,6 +326,7 @@ impl Model for UiData {
                 meta.consume();
             }
             UiEvent::InitPatch => {
+                self.mod_ui.cancel_all_wt_loads();
                 self.macro_names = crate::presets::init_patch(
                     &self.params,
                     &self.gui_context,
@@ -394,6 +395,7 @@ impl Model for UiData {
             }
             UiEvent::LoadPresetPath(path, name) => {
                 if let Ok(patch) = crate::presets::JSynPatch::load_from_file(path) {
+                    self.mod_ui.cancel_all_wt_loads();
                     self.macro_names = patch.apply(&self.params, &self.gui_context, &self.bank);
                     crate::presets::provision_active_fx(&self.params, &self.mod_ui.fx_swap_queue);
                     self.fx_menu.kind = FxOverlayMenuKind::None;
@@ -424,6 +426,7 @@ impl Model for UiData {
                     };
                     let target = &entries[next_idx];
                     if let Ok(patch) = crate::presets::JSynPatch::load_from_file(&target.path) {
+                        self.mod_ui.cancel_all_wt_loads();
                         self.macro_names =
                             patch.apply(&self.params, &self.gui_context, &self.bank);
                         crate::presets::provision_active_fx(
@@ -537,15 +540,18 @@ impl Model for UiData {
                 meta.consume();
             }
             UiEvent::SyncExternalState => {
+                let mut needs_mod_ui_rev = false;
                 if let Some((patch, name)) = self.mod_ui.take_pending_patch() {
+                    self.mod_ui.cancel_all_wt_loads();
                     self.macro_names = patch.apply(&self.params, &self.gui_context, &self.bank);
                     crate::presets::provision_active_fx(&self.params, &self.mod_ui.fx_swap_queue);
                     self.fx_menu.kind = FxOverlayMenuKind::None;
                     self.current_preset_name = name;
+                    needs_mod_ui_rev = true;
                 }
                 for osc_idx in 0..4 {
                     if let Some(load_gen) = self.mod_ui.take_pending_wt_custom(osc_idx) {
-                        if load_gen == controls::current_wt_load_gen(osc_idx) {
+                        if load_gen == self.mod_ui.current_wt_load_gen(osc_idx) {
                             controls::set_wavetable_choice(
                                 &self.params,
                                 &self.gui_context,
@@ -555,18 +561,23 @@ impl Model for UiData {
                         }
                     }
                 }
-                if let Some(name) = self.mod_ui.take_pending_preset_name() {
-                    self.current_preset_name = name;
+                if self.mod_ui.take_external_dirs_dirty() {
+                    if let Some(name) = self.mod_ui.take_pending_preset_name() {
+                        self.current_preset_name = name;
+                    }
+                    if let Ok(guard) = self.params.macro_names.lock() {
+                        self.macro_names = guard.clone();
+                    }
+                    let cfg = crate::presets::JSynConfig::load();
+                    self.presets_dir_display = format_dir_display(cfg.presets_dir.as_deref());
+                    self.wavetables_dir_display = format_dir_display(cfg.wavetables_dir.as_deref());
+                    self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
+                    self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
+                    needs_mod_ui_rev = true;
                 }
-                if let Ok(guard) = self.params.macro_names.lock() {
-                    self.macro_names = guard.clone();
+                if needs_mod_ui_rev {
+                    self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
                 }
-                let cfg = crate::presets::JSynConfig::load();
-                self.presets_dir_display = format_dir_display(cfg.presets_dir.as_deref());
-                self.wavetables_dir_display = format_dir_display(cfg.wavetables_dir.as_deref());
-                self.presets_dir_rev = self.presets_dir_rev.wrapping_add(1);
-                self.wavetables_dir_rev = self.wavetables_dir_rev.wrapping_add(1);
-                self.mod_ui_rev = self.mod_ui_rev.wrapping_add(1);
                 meta.consume();
             }
             UiEvent::ToggleModMenuPicker => {
