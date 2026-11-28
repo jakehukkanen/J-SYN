@@ -53,12 +53,13 @@ pub use filter::{cutoff_hz_to_norm, cutoff_norm_to_hz};
 pub use modseq::{
     apply_groove_swing_tension, evaluate_modseq_curve, evaluate_modseq_curve_with_swing,
     evaluate_mseg_curve, evaluate_step_shape, fill_modseq_row_with_tile, modseq_division_label,
-    modseq_free_norm_to_hz, modseq_rate_hz, resolve_modseq_step, LfoPreset, ModSeqMode,
-    ModSeqPaletteTile, ModSeqParams, ModSeqPlayMode, ModSeqRetrig, ModSeqRowMode, ModSeqRowStart,
-    ModSeqShapePreset, ModSeqState, ModSeqStep, ModSeqStepBank, ModSeqStepShape, ModSeqStepSpan,
-    ModSeqSyncMode, MsegCurve, MsegNode, MAX_MODSEQ_STEPS, MAX_MSEG_NODES, MODSEQ_DOTTED_DIVS,
-    MODSEQ_PALETTE_TILES, MODSEQ_ROW_STEPS, MODSEQ_STRAIGHT_DIVS, MODSEQ_TRIPLET_DIVS, NUM_ENVS,
-    NUM_MODSEQS, NUM_MOD_ENVS,
+    modseq_free_norm_to_hz, modseq_rate_hz, modseq_step_ms_from_norm, modseq_step_ratio_hz,
+    resolve_modseq_step, LfoPreset, ModSeqMode, ModSeqPaletteTile, ModSeqParams, ModSeqPlayMode,
+    ModSeqRetrig, ModSeqRowMode, ModSeqRowStart, ModSeqShapePreset, ModSeqState, ModSeqStep,
+    ModSeqStepBank, ModSeqStepShape, ModSeqStepSpan, ModSeqSyncMode, MsegCurve, MsegNode,
+    MAX_MODSEQ_STEPS, MAX_MSEG_NODES, MODSEQ_DOTTED_DIVS, MODSEQ_PALETTE_TILES,
+    MODSEQ_ROW_STEPS, MODSEQ_STRAIGHT_DIVS, MODSEQ_TRIPLET_DIVS, NUM_ENVS, NUM_MODSEQS,
+    NUM_MOD_ENVS,
 };
 pub use noise::{NoiseParams, NoiseState, NoiseType};
 pub use oscillator::{

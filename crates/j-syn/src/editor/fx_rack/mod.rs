@@ -572,7 +572,7 @@ fn build_lane_route_dropdown(
         }),
     )
     .width(Stretch(1.0))
-    .height(Pixels(tokens::PILL_H));
+    .height(Pixels(tokens::CONTROL_H));
 }
 
 fn build_lane_header(

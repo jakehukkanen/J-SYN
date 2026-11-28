@@ -18,6 +18,10 @@ pub enum ModSeqSyncParam {
     Triplet,
     #[name = "Dotted"]
     Dotted,
+    #[name = "Step Ratio"]
+    StepRatio,
+    #[name = "Step ms"]
+    StepMs,
 }
 
 impl From<ModSeqSyncParam> for ModSeqSyncMode {
@@ -27,6 +31,8 @@ impl From<ModSeqSyncParam> for ModSeqSyncMode {
             ModSeqSyncParam::Straight => ModSeqSyncMode::Straight,
             ModSeqSyncParam::Triplet => ModSeqSyncMode::Triplet,
             ModSeqSyncParam::Dotted => ModSeqSyncMode::Dotted,
+            ModSeqSyncParam::StepRatio => ModSeqSyncMode::StepRatio,
+            ModSeqSyncParam::StepMs => ModSeqSyncMode::StepMs,
         }
     }
 }
@@ -185,6 +191,12 @@ pub struct ModSeqPluginParams {
 
     #[id = "ms_row_mode"]
     pub row_mode: EnumParam<ModSeqRowModeParam>,
+
+    #[id = "ms_snum"]
+    pub step_ratio_num: IntParam,
+
+    #[id = "ms_sden"]
+    pub step_ratio_den: IntParam,
 }
 
 impl Default for ModSeqPluginParams {
@@ -199,6 +211,16 @@ impl Default for ModSeqPluginParams {
             smooth: percentage_param("Smooth", 0.05),
             start_row: EnumParam::new("Start Row", ModSeqRowStartParam::Row1),
             row_mode: EnumParam::new("Row Mode", ModSeqRowModeParam::Continue),
+            step_ratio_num: IntParam::new(
+                "Step Ratio Num",
+                1,
+                IntRange::Linear { min: 1, max: 16 },
+            ),
+            step_ratio_den: IntParam::new(
+                "Step Ratio Den",
+                16,
+                IntRange::Linear { min: 1, max: 64 },
+            ),
         }
     }
 }
@@ -218,6 +240,8 @@ impl ModSeqPluginParams {
             start_row: self.start_row.value().into(),
             row_mode: self.row_mode.value().into(),
             row_mod: 0.0,
+            step_ratio_num: self.step_ratio_num.value().clamp(1, 16) as u8,
+            step_ratio_den: self.step_ratio_den.value().clamp(1, 64) as u8,
         }
     }
 }

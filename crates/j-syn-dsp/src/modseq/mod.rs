@@ -157,6 +157,8 @@ pub enum ModSeqSyncMode {
     Straight = 1,
     Triplet = 2,
     Dotted = 3,
+    StepRatio = 4,
+    StepMs = 5,
 }
 
 impl ModSeqSyncMode {
@@ -165,6 +167,8 @@ impl ModSeqSyncMode {
             0 => Self::Free,
             2 => Self::Triplet,
             3 => Self::Dotted,
+            4 => Self::StepRatio,
+            5 => Self::StepMs,
             _ => Self::Straight,
         }
     }
@@ -202,11 +206,26 @@ pub const MODSEQ_DOTTED_DIVS: [(&str, f32); 5] = [
 #[inline]
 fn sync_divs(sync_mode: ModSeqSyncMode) -> &'static [(&'static str, f32)] {
     match sync_mode {
-        ModSeqSyncMode::Free => &[],
+        ModSeqSyncMode::Free | ModSeqSyncMode::StepRatio | ModSeqSyncMode::StepMs => &[],
         ModSeqSyncMode::Straight => &MODSEQ_STRAIGHT_DIVS,
         ModSeqSyncMode::Triplet => &MODSEQ_TRIPLET_DIVS,
         ModSeqSyncMode::Dotted => &MODSEQ_DOTTED_DIVS,
     }
+}
+
+/// Maps normalized `0.0..=1.0` knob position to logarithmic `1.0..=2000.0 ms` per step.
+#[inline]
+pub fn modseq_step_ms_from_norm(norm: f32) -> f32 {
+    (2000.0_f32.powf(norm.clamp(0.0, 1.0))).clamp(1.0, 2000.0)
+}
+
+/// Computes step frequency in Hz for a tempo-synced `num / den` bar ratio per step.
+#[inline]
+pub fn modseq_step_ratio_hz(num: u8, den: u8, tempo_bpm: f32) -> f32 {
+    let n = num.clamp(1, 16) as f32;
+    let d = den.clamp(1, 64) as f32;
+    let bpm = tempo_bpm.clamp(20.0, 300.0);
+    ((bpm / 240.0) * (d / n)).clamp(0.01, 1000.0)
 }
 
 /// Maps normalized `0.0..=1.0` rate knob position to continuous `0.05..=50.0 Hz` in `Free` mode.
@@ -288,6 +307,8 @@ pub struct ModSeqParams {
     pub start_row: ModSeqRowStart,
     pub row_mode: ModSeqRowMode,
     pub row_mod: f32,
+    pub step_ratio_num: u8,
+    pub step_ratio_den: u8,
 }
 
 impl Default for ModSeqParams {
@@ -305,6 +326,8 @@ impl Default for ModSeqParams {
             start_row: ModSeqRowStart::Row1,
             row_mode: ModSeqRowMode::Continue,
             row_mod: 0.0,
+            step_ratio_num: 1,
+            step_ratio_den: 16,
         }
     }
 }
@@ -462,7 +485,6 @@ impl ModSeqState {
         mseg: &MsegCurve,
     ) -> f32 {
         let eff_norm = (params.rate_norm + params.rate_mod).clamp(0.0, 1.0);
-        let cycle_hz = modseq_rate_hz(params.sync_mode, eff_norm, tempo_bpm).clamp(0.01, 100.0);
         let n = params.num_steps.clamp(2, MAX_MODSEQ_STEPS);
         let freq_hz = match params.mode {
             ModSeqMode::Performer => {
@@ -470,9 +492,39 @@ impl ModSeqState {
                     ModSeqRowMode::LoopRow => n.min(MODSEQ_ROW_STEPS),
                     ModSeqRowMode::Continue => n,
                 };
-                cycle_hz * (n as f32 / active_len as f32)
+                match params.sync_mode {
+                    ModSeqSyncMode::StepRatio => {
+                        let step_hz = modseq_step_ratio_hz(
+                            params.step_ratio_num,
+                            params.step_ratio_den,
+                            tempo_bpm,
+                        );
+                        (step_hz / active_len as f32).clamp(0.001, 100.0)
+                    }
+                    ModSeqSyncMode::StepMs => {
+                        let step_ms = modseq_step_ms_from_norm(eff_norm);
+                        ((1000.0 / step_ms) / active_len as f32).clamp(0.001, 100.0)
+                    }
+                    _ => {
+                        let cycle_hz =
+                            modseq_rate_hz(params.sync_mode, eff_norm, tempo_bpm).clamp(0.01, 100.0);
+                        cycle_hz * (n as f32 / active_len as f32)
+                    }
+                }
             }
-            ModSeqMode::Mseg => cycle_hz,
+            ModSeqMode::Mseg => match params.sync_mode {
+                ModSeqSyncMode::StepRatio => modseq_step_ratio_hz(
+                    params.step_ratio_num,
+                    params.step_ratio_den,
+                    tempo_bpm,
+                )
+                .clamp(0.01, 100.0),
+                ModSeqSyncMode::StepMs => {
+                    let step_ms = modseq_step_ms_from_norm(eff_norm);
+                    (1000.0 / (step_ms * MODSEQ_ROW_STEPS as f32)).clamp(0.01, 100.0)
+                }
+                _ => modseq_rate_hz(params.sync_mode, eff_norm, tempo_bpm).clamp(0.01, 100.0),
+            },
         };
         let d_phase = freq_hz * dt_seconds.max(0.0);
 

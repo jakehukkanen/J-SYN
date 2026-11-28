@@ -408,6 +408,9 @@ fn migrate_legacy_v1_enum_norm(
     } else if (id == "flt_mode_1" || id == "flt_mode_2") && !params.contains_key("flt_slope_1") {
         // Earliest builds before `flt_slope` / Bandreject / Peak+Peak / Notch+Notch had 12 filter modes.
         Some(11)
+    } else if id.starts_with("ms_sync_") {
+        // `v1` presets stored 4 variants (Free, Straight, Triplet, Dotted) -> 3 steps.
+        Some(3)
     } else {
         None
     }?;
