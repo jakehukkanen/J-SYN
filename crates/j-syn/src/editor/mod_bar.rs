@@ -55,7 +55,11 @@ pub(crate) struct ModUiState {
     last_enabled_mask: AtomicU64,
     external_sync_rev: AtomicU64,
     last_external_sync_rev: AtomicU64,
+    external_dirs_dirty: AtomicBool,
     pending_preset_name: Mutex<Option<String>>,
+    pending_patch: Mutex<Option<(crate::presets::JSynPatch, String)>>,
+    wt_load_gen: [AtomicU64; 4],
+    pending_wt_custom: [AtomicU64; 4],
     drop_rects: Mutex<Box<[(f32, f32, f32, f32, u8); NUM_MOD_DESTS]>>,
 }
 
@@ -88,7 +92,11 @@ impl ModUiState {
             last_enabled_mask: AtomicU64::new(initial_mask),
             external_sync_rev: AtomicU64::new(0),
             last_external_sync_rev: AtomicU64::new(0),
+            external_dirs_dirty: AtomicBool::new(false),
             pending_preset_name: Mutex::new(None),
+            pending_patch: Mutex::new(None),
+            wt_load_gen: std::array::from_fn(|_| AtomicU64::new(0)),
+            pending_wt_custom: std::array::from_fn(|_| AtomicU64::new(0)),
             drop_rects: Mutex::new(Box::new([(0.0, 0.0, 0.0, 0.0, UNSET_U8); NUM_MOD_DESTS])),
         }
     }
@@ -99,6 +107,7 @@ impl ModUiState {
                 *guard = Some(name);
             }
         }
+        self.external_dirs_dirty.store(true, Ordering::Release);
         self.external_sync_rev.fetch_add(1, Ordering::Release);
     }
 
@@ -108,11 +117,74 @@ impl ModUiState {
         cur != prev
     }
 
+    pub fn take_external_dirs_dirty(&self) -> bool {
+        self.external_dirs_dirty.swap(false, Ordering::AcqRel)
+    }
+
     pub fn take_pending_preset_name(&self) -> Option<String> {
         self.pending_preset_name
             .lock()
             .ok()
             .and_then(|mut g| g.take())
+    }
+
+    pub fn queue_pending_patch(&self, patch: crate::presets::JSynPatch, name: String) {
+        if let Ok(mut guard) = self.pending_patch.lock() {
+            *guard = Some((patch, name));
+        }
+        self.external_sync_rev.fetch_add(1, Ordering::Release);
+    }
+
+    pub fn take_pending_patch(&self) -> Option<(crate::presets::JSynPatch, String)> {
+        self.pending_patch.lock().ok().and_then(|mut g| g.take())
+    }
+
+    pub fn next_wt_load_gen(&self, osc_idx: usize) -> u64 {
+        if osc_idx < 4 {
+            self.wt_load_gen[osc_idx].fetch_add(1, Ordering::AcqRel) + 1
+        } else {
+            0
+        }
+    }
+
+    pub fn current_wt_load_gen(&self, osc_idx: usize) -> u64 {
+        if osc_idx < 4 {
+            self.wt_load_gen[osc_idx].load(Ordering::Acquire)
+        } else {
+            0
+        }
+    }
+
+    pub fn cancel_wt_load(&self, osc_idx: usize) {
+        if osc_idx < 4 {
+            self.wt_load_gen[osc_idx].fetch_add(1, Ordering::AcqRel);
+            self.pending_wt_custom[osc_idx].store(0, Ordering::Release);
+        }
+    }
+
+    pub fn cancel_all_wt_loads(&self) {
+        for osc_idx in 0..4 {
+            self.cancel_wt_load(osc_idx);
+        }
+    }
+
+    pub fn queue_pending_wt_custom(&self, osc_idx: usize, load_gen: u64) {
+        if osc_idx < 4 && load_gen > 0 {
+            self.pending_wt_custom[osc_idx].fetch_max(load_gen, Ordering::AcqRel);
+            self.external_sync_rev.fetch_add(1, Ordering::Release);
+        }
+    }
+
+    pub fn take_pending_wt_custom(&self, osc_idx: usize) -> Option<u64> {
+        if osc_idx >= 4 {
+            return None;
+        }
+        let load_gen = self.pending_wt_custom[osc_idx].swap(0, Ordering::AcqRel);
+        if load_gen > 0 {
+            Some(load_gen)
+        } else {
+            None
+        }
     }
 
     #[inline]
@@ -1126,6 +1198,53 @@ mod tests {
         assert!(ui
             .primary_slot_for_dest(ModDestination::Filter1Cutoff)
             .is_none());
+    }
+
+    #[test]
+    fn pending_patch_and_wt_custom_queue_and_drain_cleanly() {
+        let params = Arc::new(JSynPluginParams::default());
+        let telemetry = Arc::new(ModUiTelemetry::new());
+        let swap_queue = Arc::new(FxEngineSwapQueue::new(48_000.0));
+        let ui = ModUiState::new(params.clone(), telemetry, swap_queue);
+
+        assert!(!ui.poll_external_sync_changed());
+        assert!(ui.take_pending_patch().is_none());
+        assert!(ui.take_pending_wt_custom(0).is_none());
+
+        let patch = crate::presets::JSynPatch::capture("TestPatch", &params);
+        ui.queue_pending_patch(patch, "TestPatch".to_string());
+        assert!(ui.poll_external_sync_changed());
+        assert!(!ui.poll_external_sync_changed());
+        assert!(!ui.take_external_dirs_dirty());
+        let (_, name) = ui.take_pending_patch().expect("pending patch queued");
+        assert_eq!(name, "TestPatch");
+        assert!(ui.take_pending_patch().is_none());
+
+        // Per-instance monotonic wt_load_gen + fetch_max prevents out-of-order clobber
+        let g1 = ui.next_wt_load_gen(2);
+        let g2 = ui.next_wt_load_gen(2);
+        assert!(g2 > g1);
+        ui.queue_pending_wt_custom(2, g2);
+        ui.queue_pending_wt_custom(2, g1);
+        assert!(ui.poll_external_sync_changed());
+        assert!(!ui.take_external_dirs_dirty());
+        assert_eq!(ui.take_pending_wt_custom(2), Some(g2));
+        assert!(ui.take_pending_wt_custom(2).is_none());
+        assert!(ui.take_pending_wt_custom(99).is_none());
+
+        // Patch load/init cancellation invalidates in-flight and queued wavetable loads
+        let g3 = ui.next_wt_load_gen(0);
+        ui.queue_pending_wt_custom(0, g3);
+        ui.cancel_all_wt_loads();
+        assert!(ui.current_wt_load_gen(0) > g3);
+        assert!(ui.take_pending_wt_custom(0).is_none());
+
+        // Directory/config sync sets external_dirs_dirty explicitly
+        ui.notify_external_sync(Some("Saved".to_string()));
+        assert!(ui.poll_external_sync_changed());
+        assert!(ui.take_external_dirs_dirty());
+        assert!(!ui.take_external_dirs_dirty());
+        assert_eq!(ui.take_pending_preset_name().as_deref(), Some("Saved"));
     }
 }
 

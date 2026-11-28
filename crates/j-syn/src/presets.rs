@@ -842,25 +842,6 @@ pub fn init_patch(
     names
 }
 
-pub fn load_wavetable_file_for_osc(
-    osc_idx: usize,
-    path: &Path,
-    params: &Arc<JSynPluginParams>,
-    gui_context: &Arc<dyn GuiContext>,
-    bank: &Arc<WavetableBank>,
-) -> Result<(), String> {
-    let wt = Wavetable::load_from_wav(path)?;
-    bank.swap_custom(osc_idx, Arc::new(wt));
-    if let Ok(mut guard) = params.wavetable_paths.lock() {
-        guard[osc_idx] = path.to_string_lossy().into_owned();
-    }
-    let setter = ParamSetter::new(gui_context.as_ref());
-    setter.begin_set_parameter(&params.oscs[osc_idx].wt_select);
-    setter.set_parameter(&params.oscs[osc_idx].wt_select, WavetableChoice::Custom);
-    setter.end_set_parameter(&params.oscs[osc_idx].wt_select);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

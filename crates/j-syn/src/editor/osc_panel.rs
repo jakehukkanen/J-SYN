@@ -94,6 +94,7 @@ pub(super) fn build_osc_panel(
         let p_hdr = params.clone();
         let g_hdr = gui_context.clone();
         let b_hdr = bank.clone();
+        let m_hdr = mod_ui.clone();
         HStack::new(cx, move |cx| {
             LedToggleSwitch::new(
                 cx,
@@ -107,10 +108,11 @@ pub(super) fn build_osc_panel(
 
             let p_prev = p_hdr.clone();
             let g_prev = g_hdr.clone();
+            let m_prev = m_hdr.clone();
             let b_prev = b_hdr.clone();
             ArrowButton::new(
                 cx,
-                move |_| step_wavetable(&p_prev, &g_prev, &b_prev, osc_idx, -1),
+                move |_| step_wavetable(&p_prev, &g_prev, &m_prev, &b_prev, osc_idx, -1),
                 ArrowDir::Left,
             )
             .class("wt-step-btn")
@@ -118,16 +120,24 @@ pub(super) fn build_osc_panel(
             .width(Pixels(tokens::STEP_BTN_W))
             .height(Pixels(tokens::HEADER_STRIP_H));
 
-            build_wavetable_dropdown(cx, osc_idx, b_hdr.clone(), p_hdr.clone(), g_hdr.clone())
-                .width(Stretch(1.0))
-                .height(Pixels(tokens::HEADER_STRIP_H));
+            build_wavetable_dropdown(
+                cx,
+                osc_idx,
+                b_hdr.clone(),
+                p_hdr.clone(),
+                g_hdr.clone(),
+                m_hdr.clone(),
+            )
+            .width(Stretch(1.0))
+            .height(Pixels(tokens::HEADER_STRIP_H));
 
             let p_next = p_hdr;
             let g_next = g_hdr;
+            let m_next = m_hdr;
             let b_next = b_hdr;
             ArrowButton::new(
                 cx,
-                move |_| step_wavetable(&p_next, &g_next, &b_next, osc_idx, 1),
+                move |_| step_wavetable(&p_next, &g_next, &m_next, &b_next, osc_idx, 1),
                 ArrowDir::Right,
             )
             .class("wt-step-btn")
