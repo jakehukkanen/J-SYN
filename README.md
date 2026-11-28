@@ -72,16 +72,16 @@ J-SYN/
 │   │   └── src/
 │   │       ├── lib.rs            # Public DSP exports
 │   │       ├── engine.rs         # 64-voice synth engine, DC blocker & safety limiter
-│   │       ├── voice.rs          # Per-voice signal flow, routing & auto-sleep
+│   │       ├── voice/            # Per-voice signal flow, routing & auto-sleep
 │   │       ├── oscillator.rs     # Wavetable oscillator, unison, warp & PM/RM
 │   │       ├── wavetable.rs      # Factory tables, .wav loader & band-limited mip-maps
 │   │       ├── noise.rs          # Stereo White/Pink/Brown noise generator
 │   │       ├── envelope.rs       # ADSR envelopes
-│   │       ├── filter.rs         # Dual ZDF multimode, Scream, Daft, Comb & combo filters
+│   │       ├── filter/           # Dual ZDF multimode, Scream, Daft, Comb & combo filters
 │   │       ├── insert.rs         # Dual per-voice insert waveshapers & feedback bus
-│   │       ├── fx.rs             # 8-slot serial Master FX Rack (STACK 1..4)
-│   │       ├── mod_matrix.rs     # Lock-free 32-slot mod matrix & scope telemetry
-│   │       ├── modseq.rs         # 4 hybrid 16-step MODSEQ / MSEG LFO modulators
+│   │       ├── fx/               # 3-lane routable Master FX Rack (STACK 1..4)
+│   │       ├── mod_matrix/       # Lock-free 256-slot mod matrix & scope telemetry
+│   │       ├── modseq/           # 8 hybrid 32-step MODSEQ / MSEG LFO modulators
 │   │       ├── adaa.rs           # 2nd-order ADAA tanh waveshaper
 │   │       └── oversample.rs     # 4x polyphase IIR half-band oversampler & RBJ biquads
 │   └── j-syn/                    # "J-SYN" VST3/CLAP plugin, presets & Vizia GUI
@@ -99,7 +99,7 @@ Licensed under the **GNU General Public License v3.0 or later (GPL-3.0-or-later)
 - **[`nih-plug`](https://github.com/robbert-vdh/nih-plug)** & **`nih_plug_vizia`** by Robbert van der Helm for the Rust VST3/CLAP plugin framework and Vizia GUI integration.
 - **[`vitOTTx`](https://github.com/RustedYeast/vitOTTx)** (derived from Matt Tytel's Vital synth DSP) for 3-band Linkwitz-Riley OTT crossover and upward/downward envelope follower math.
 - **[`CrushClone`](https://github.com/doxiedevops/CrushClone)** for Mech and Tube distortion waveshaping curves.
-- **Scream** (`crates/j-syn-dsp/src/filter.rs`, `crates/j-syn-dsp/src/adaa.rs`) — MIT License, Copyright 2025 Cure Audio, exacoustics, Xynth Audio.
+- **Scream** (`crates/j-syn-dsp/src/filter/mod.rs`, `crates/j-syn-dsp/src/adaa.rs`) — MIT License, Copyright 2025 Cure Audio, exacoustics, Xynth Audio.
 - **ADAA** (2nd-order Antiderivative Antialiasing `tanh`) — BSD 3-Clause License, Copyright (c) 2020 jatinchowdhury18.
 - **Polylogarithm** (`li2`) — MIT License, Copyright (c) 2021 Alexander Voigt.
 

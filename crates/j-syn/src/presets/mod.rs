@@ -1,255 +1,25 @@
 //! Local configuration (`presets_dir` / `wavetables_dir`), directory scanning, and JSON patch
 //! serialization/deserialization for `J-SYN`.
 
+mod config;
+mod migrate;
+
+pub use config::*;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use j_syn_dsp::{
-    FxEngineSwapQueue, FxRackOrder, FxType, ModMatrixState, ModSeqStepBank, Wavetable,
-    WavetableBank, NUM_FX_BUSES, NUM_FX_SLOTS,
+    FxEngineSwapQueue, FxRackOrder, FxType, ModMatrixState, ModSeqStepBank, NUM_FX_BUSES,
+    NUM_FX_SLOTS, Wavetable, WavetableBank,
 };
-use nih_plug::params::internals::ParamPtr;
 use nih_plug::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use self::config::scan_extension;
+use self::migrate::resolve_patch_param_norm;
 use crate::{JSynPluginParams, WavetableChoice};
-
-fn default_theme_name() -> String {
-    "Studio Amber".to_string()
-}
-
-fn default_ui_scale() -> u32 {
-    100
-}
-
-fn default_gear_radius() -> f32 {
-    0.32
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct JSynConfig {
-    #[serde(default)]
-    pub presets_dir: Option<String>,
-    #[serde(default)]
-    pub wavetables_dir: Option<String>,
-    #[serde(default = "default_theme_name")]
-    pub theme: String,
-    #[serde(default = "default_ui_scale")]
-    pub ui_scale: u32,
-    #[serde(default = "default_gear_radius")]
-    pub gear_radius: f32,
-}
-
-impl Default for JSynConfig {
-    fn default() -> Self {
-        Self {
-            presets_dir: None,
-            wavetables_dir: None,
-            theme: default_theme_name(),
-            ui_scale: default_ui_scale(),
-            gear_radius: default_gear_radius(),
-        }
-    }
-}
-
-impl JSynConfig {
-    #[allow(dead_code)]
-    pub fn themes_dir() -> Option<PathBuf> {
-        j_syn_ui::theme::themes_dir()
-    }
-    pub fn config_file_path() -> Option<PathBuf> {
-        #[cfg(target_os = "macos")]
-        {
-            std::env::var_os("HOME").map(|h| {
-                PathBuf::from(h)
-                    .join("Library")
-                    .join("Application Support")
-                    .join("j-syn")
-                    .join("config.json")
-            })
-        }
-        #[cfg(target_os = "windows")]
-        {
-            std::env::var_os("APPDATA")
-                .map(|a| PathBuf::from(a).join("j-syn").join("config.json"))
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        {
-            std::env::var_os("HOME").map(|h| {
-                PathBuf::from(h)
-                    .join(".config")
-                    .join("j-syn")
-                    .join("config.json")
-            })
-        }
-    }
-
-    pub fn load() -> Self {
-        let Some(path) = Self::config_file_path() else {
-            return Self::default();
-        };
-        let Ok(raw) = std::fs::read_to_string(&path) else {
-            return Self::default();
-        };
-        serde_json::from_str(&raw).unwrap_or_default()
-    }
-
-    pub fn save(&self) -> Result<(), String> {
-        let Some(path) = Self::config_file_path() else {
-            return Err("Could not determine config directory".to_string());
-        };
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create config dir: {e}"))?;
-        }
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize config: {e}"))?;
-        write_text_atomic(&path, &json).map_err(|e| format!("Failed to write config: {e}"))
-    }
-}
-
-fn write_text_atomic(path: &Path, content: &str) -> std::io::Result<()> {
-    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, content).is_ok() {
-        if std::fs::rename(&tmp, path).is_ok() {
-            return Ok(());
-        }
-        let _ = std::fs::remove_file(&tmp);
-    }
-    std::fs::write(path, content)
-}
-
-pub use j_syn_ui::controls::{DirectoryFileEntry, DirectoryFolder, DirectoryTree};
-
-fn is_hidden_name(path: &std::path::Path) -> bool {
-    path.file_name()
-        .and_then(|s| s.to_str())
-        .is_some_and(|s| s.starts_with('.'))
-}
-
-fn collect_dir_entries(
-    root: &std::path::Path,
-    dir: &std::path::Path,
-    ext_lower: &str,
-    depth: usize,
-) -> (Vec<DirectoryFileEntry>, Vec<DirectoryFolder>) {
-    if depth > 8 {
-        return (Vec::new(), Vec::new());
-    }
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return (Vec::new(), Vec::new());
-    };
-    let mut files = Vec::new();
-    let mut subdirs = Vec::new();
-    for entry in rd.filter_map(|res| res.ok()) {
-        let path = entry.path();
-        if is_hidden_name(&path) {
-            continue;
-        }
-        if path.is_dir() {
-            subdirs.push(path);
-        } else if path.is_file() {
-            let Some(ext) = path.extension().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if ext.to_ascii_lowercase() != ext_lower {
-                continue;
-            }
-            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            files.push(DirectoryFileEntry {
-                name: name.to_string(),
-                path,
-            });
-        }
-    }
-    files.sort_by_key(|a| a.name.to_lowercase());
-    subdirs.sort_by(|a, b| {
-        a.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase()
-            .cmp(
-                &b.file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-                    .to_lowercase(),
-            )
-    });
-
-    let mut folders = Vec::new();
-    for sub in subdirs {
-        let (sub_files, sub_subfolders) = collect_dir_entries(root, &sub, ext_lower, depth + 1);
-        if sub_files.is_empty() && sub_subfolders.is_empty() {
-            continue;
-        }
-        let name = sub
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_string();
-        let rel_path = sub
-            .strip_prefix(root)
-            .map(|rel| rel.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_else(|_| name.clone());
-        folders.push(DirectoryFolder {
-            name,
-            rel_path,
-            files: sub_files,
-            subfolders: sub_subfolders,
-        });
-    }
-
-    (files, folders)
-}
-
-pub fn scan_directory_tree(dir: Option<&str>, ext_lower: &str) -> DirectoryTree {
-    let Some(dir_str) = dir.filter(|s| !s.trim().is_empty()) else {
-        return DirectoryTree::default();
-    };
-    let root = std::path::Path::new(dir_str);
-    let (root_files, folders) = collect_dir_entries(root, root, ext_lower, 0);
-    DirectoryTree {
-        root_files,
-        folders,
-    }
-}
-
-pub fn scan_preset_tree(dir: Option<&str>) -> DirectoryTree {
-    scan_directory_tree(dir, "json")
-}
-
-pub fn scan_wavetable_tree(dir: Option<&str>) -> DirectoryTree {
-    scan_directory_tree(dir, "wav")
-}
-
-fn collect_folder_files(folders: &[DirectoryFolder], out: &mut Vec<DirectoryFileEntry>) {
-    for folder in folders {
-        out.extend(folder.files.iter().cloned());
-        collect_folder_files(&folder.subfolders, out);
-    }
-}
-
-fn scan_extension(dir: Option<&str>, ext_lower: &str) -> Vec<DirectoryFileEntry> {
-    let tree = scan_directory_tree(dir, ext_lower);
-    let mut entries = tree.root_files;
-    collect_folder_files(&tree.folders, &mut entries);
-    entries
-}
-
-pub fn scan_presets(dir: Option<&str>) -> Vec<DirectoryFileEntry> {
-    scan_extension(dir, "json")
-}
-
-#[cfg(test)]
-pub fn scan_wavetables(dir: Option<&str>) -> Vec<DirectoryFileEntry> {
-    scan_extension(dir, "wav")
-}
 
 pub const CURRENT_PATCH_VERSION: u32 = 2;
 
@@ -341,267 +111,6 @@ where
         }
     }
     Ok(names)
-}
-
-#[inline]
-fn clamp_finite_norm(norm: f32, ptr: ParamPtr) -> f32 {
-    if norm.is_finite() {
-        norm.clamp(0.0, 1.0)
-    } else {
-        // SAFETY: Caller passes valid `ParamPtr` from a live `JSynPluginParams`.
-        unsafe { ptr.default_normalized_value() }
-    }
-}
-
-#[inline]
-fn enum_name_alias<'a>(id: &str, name: &'a str) -> &'a str {
-    if name == "Sub"
-        && (id.ends_with("_direct") || id == "f1_out_bus" || id == "f2_out_bus")
-    {
-        "Bus C"
-    } else if id == "fx_bus_topo" {
-        match name {
-            "Parallel (A | B)" => "Parallel (A | B | C)",
-            "Serial (A -> B)" => "Serial (A -> B | C)",
-            _ => name,
-        }
-    } else if id.starts_with("ins_mode_") {
-        match name {
-            "Tube -> Mech" => "T -> M",
-            "Mech -> Tube" => "M -> T",
-            "Sine Shaper" => "Sine",
-            "Bitcrush" => "Crush",
-            "Linear Fold" => "Lin Fold",
-            "Sine Fold" => "Sin Fold",
-            _ => name,
-        }
-    } else if id.starts_with("ins_pos_") {
-        match name {
-            "Pre-F1" => "| F1",
-            "Between F1->F2" => "F1 | F2",
-            "Post-F2" | "F2 |" | "   | F2" | "        | F2" => "| F2",
-            _ => name,
-        }
-    } else {
-        name
-    }
-}
-
-/// Maps `version < 2` normalized enum floats whose variant count expanded in newer builds.
-fn migrate_legacy_v1_enum_norm(
-    id: &str,
-    raw_norm: f32,
-    params: &BTreeMap<String, f32>,
-    ptr: ParamPtr,
-) -> Option<f32> {
-    let old_steps = if id.starts_with("fx_type_") || id.starts_with("bus_b_fx_type_") {
-        if params.contains_key("fx_tr_flt_1") {
-            Some(10usize)
-        } else if params.contains_key("fx_diop_s_1") {
-            // `v0.1` / `v0.1.1`: 10 FxType variants (Empty..=Dispersion).
-            Some(9)
-        } else if params.contains_key("flt_slope_1") {
-            Some(8)
-        } else {
-            Some(7)
-        }
-    } else if (id == "flt_mode_1" || id == "flt_mode_2") && !params.contains_key("flt_slope_1") {
-        // Earliest builds before `flt_slope` / Bandreject / Peak+Peak / Notch+Notch had 12 filter modes.
-        Some(11)
-    } else if id.starts_with("ms_sync_") {
-        // `v1` presets stored 4 variants (Free, Straight, Triplet, Dotted) -> 3 steps.
-        Some(3)
-    } else {
-        None
-    }?;
-
-    let old_idx = (raw_norm * old_steps as f32).round().clamp(0.0, old_steps as f32);
-    // SAFETY: Caller passes valid `ParamPtr` from a live `JSynPluginParams`.
-    Some(clamp_finite_norm(unsafe { ptr.preview_normalized(old_idx) }, ptr))
-}
-
-fn legacy_distortion_slot_keys(id: &str) -> Option<(String, String, String)> {
-    if let Some(suffix) = id
-        .strip_prefix("bus_b_fx_dist_m_")
-        .or_else(|| id.strip_prefix("bus_b_fx_p1_"))
-    {
-        Some((
-            format!("bus_b_fx_type_{suffix}"),
-            format!("bus_b_fx_dist_m_{suffix}"),
-            format!("bus_b_fx_p1_{suffix}"),
-        ))
-    } else {
-        id.strip_prefix("fx_dist_m_")
-            .or_else(|| id.strip_prefix("fx_p1_"))
-            .map(|suffix| {
-                (
-                    format!("fx_type_{suffix}"),
-                    format!("fx_dist_m_{suffix}"),
-                    format!("fx_p1_{suffix}"),
-                )
-            })
-    }
-}
-
-fn is_legacy_distortion_slot(patch: &JSynPatch, type_id: &str, dist_m_id: &str) -> bool {
-    if patch.enum_names.contains_key(dist_m_id)
-        || patch.plain_params.contains_key(dist_m_id)
-        || patch.params.contains_key(dist_m_id)
-    {
-        return false;
-    }
-    if patch
-        .enum_names
-        .get(type_id)
-        .is_some_and(|n| n.eq_ignore_ascii_case("Distortion"))
-    {
-        return true;
-    }
-    if patch
-        .plain_params
-        .get(type_id)
-        .is_some_and(|v| v.is_finite() && v.round() as i32 == 2)
-    {
-        return true;
-    }
-    if let Some(&raw_norm) = patch.params.get(type_id) {
-        if raw_norm.is_finite() {
-            let n = raw_norm.clamp(0.0, 1.0);
-            let old_steps = if patch.params.contains_key("fx_tr_flt_1") {
-                10.0
-            } else if patch.params.contains_key("fx_diop_s_1") {
-                9.0
-            } else if patch.params.contains_key("flt_slope_1") {
-                8.0
-            } else if patch.version < 2 {
-                7.0
-            } else {
-                12.0
-            };
-            return (n * old_steps).round() as i32 == 2;
-        }
-    }
-    false
-}
-
-fn resolve_patch_param_norm(patch: &JSynPatch, id: &str, ptr: ParamPtr) -> f32 {
-    // SAFETY: Caller passes valid `ParamPtr` from a live `JSynPluginParams`.
-    unsafe {
-        match ptr {
-            ParamPtr::EnumParam(_) => {
-                let steps = ptr.step_count().unwrap_or(0);
-                if let Some(raw_name) = patch.enum_names.get(id) {
-                    let aliased = enum_name_alias(id, raw_name);
-                    if let Some(n) = ptr.string_to_normalized_value(aliased) {
-                        return clamp_finite_norm(n, ptr);
-                    }
-                    if let Some(&plain) = patch.plain_params.get(id) {
-                        if plain.is_finite() {
-                            let idx = plain.round();
-                            if idx >= 0.0 && idx <= steps as f32 {
-                                return clamp_finite_norm(ptr.preview_normalized(idx), ptr);
-                            }
-                        }
-                    }
-                    return ptr.default_normalized_value();
-                }
-
-                if let Some(&plain) = patch.plain_params.get(id) {
-                    if plain.is_finite() && plain >= 0.0 {
-                        let idx = plain.round();
-                        if idx <= steps as f32 {
-                            return clamp_finite_norm(ptr.preview_normalized(idx), ptr);
-                        }
-                        return ptr.default_normalized_value();
-                    }
-                }
-
-                if let Some(&raw_norm) = patch.params.get(id) {
-                    if raw_norm.is_finite() {
-                        let n = raw_norm.clamp(0.0, 1.0);
-                        if patch.version < 2 {
-                            if let Some(migrated) =
-                                migrate_legacy_v1_enum_norm(id, n, &patch.params, ptr)
-                            {
-                                return migrated;
-                            }
-                        }
-                        return n;
-                    }
-                }
-
-                if id.starts_with("fx_dist_m_") || id.starts_with("bus_b_fx_dist_m_") {
-                    if let Some((type_id, dist_m_id, p1_id)) = legacy_distortion_slot_keys(id) {
-                        if is_legacy_distortion_slot(patch, &type_id, &dist_m_id) {
-                            let old_p1 = patch
-                                .plain_params
-                                .get(&p1_id)
-                                .or_else(|| patch.params.get(&p1_id))
-                                .copied()
-                                .filter(|v| v.is_finite())
-                                .unwrap_or(0.0)
-                                .clamp(0.0, 1.0);
-                            let idx = j_syn_dsp::waveshaper::legacy_distortion_submode_index(old_p1);
-                            return clamp_finite_norm(ptr.preview_normalized(idx as f32), ptr);
-                        }
-                    }
-                }
-
-                ptr.default_normalized_value()
-            }
-            ParamPtr::IntParam(_) => {
-                if let Some(&plain) = patch.plain_params.get(id) {
-                    if plain.is_finite() {
-                        return clamp_finite_norm(ptr.preview_normalized(plain.round()), ptr);
-                    }
-                }
-                if let Some(&norm) = patch.params.get(id) {
-                    if norm.is_finite() {
-                        let clamped = norm.clamp(0.0, 1.0);
-                        if patch.version < 2 && id.starts_with("ms_steps_") {
-                            let legacy_steps = (2.0 + clamped * 14.0).round();
-                            return clamp_finite_norm(ptr.preview_normalized(legacy_steps), ptr);
-                        }
-                        return clamped;
-                    }
-                }
-                ptr.default_normalized_value()
-            }
-            ParamPtr::FloatParam(_) => {
-                if id.starts_with("fx_p1_") || id.starts_with("bus_b_fx_p1_") {
-                    if let Some((type_id, dist_m_id, _)) = legacy_distortion_slot_keys(id) {
-                        if is_legacy_distortion_slot(patch, &type_id, &dist_m_id) {
-                            return 0.50;
-                        }
-                    }
-                }
-                if let Some(&plain) = patch.plain_params.get(id) {
-                    if plain.is_finite() {
-                        return clamp_finite_norm(ptr.preview_normalized(plain), ptr);
-                    }
-                }
-                if let Some(&norm) = patch.params.get(id) {
-                    if norm.is_finite() {
-                        return norm.clamp(0.0, 1.0);
-                    }
-                }
-                ptr.default_normalized_value()
-            }
-            ParamPtr::BoolParam(_) => {
-                if let Some(&plain) = patch.plain_params.get(id) {
-                    if plain.is_finite() {
-                        return if plain >= 0.5 { 1.0 } else { 0.0 };
-                    }
-                }
-                if let Some(&norm) = patch.params.get(id) {
-                    if norm.is_finite() {
-                        return if norm >= 0.5 { 1.0 } else { 0.0 };
-                    }
-                }
-                ptr.default_normalized_value()
-            }
-        }
-    }
 }
 
 /// Resolves a stored custom wavetable path, falling back to `wavetables_dir` filename lookup
@@ -848,10 +357,7 @@ mod tests {
 
     #[test]
     fn scan_directory_tree_handles_subfolders_and_ignores_hidden_or_empty() {
-        let base = std::env::temp_dir().join(format!(
-            "jsyn_scan_tree_test_{}",
-            std::process::id()
-        ));
+        let base = std::env::temp_dir().join(format!("jsyn_scan_tree_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(base.join("Analog")).unwrap();
         std::fs::create_dir_all(base.join("Bass/Reese")).unwrap();
@@ -906,9 +412,12 @@ mod tests {
                         for step in 0..=steps {
                             let expected = ptr.preview_normalized(step as f32);
                             let name = ptr.normalized_value_to_string(expected, false);
-                            let by_name = ptr.string_to_normalized_value(&name).unwrap_or_else(|| {
-                                panic!("Enum {id} failed name roundtrip for {name:?} (step {step})")
-                            });
+                            let by_name =
+                                ptr.string_to_normalized_value(&name).unwrap_or_else(|| {
+                                    panic!(
+                                        "Enum {id} failed name roundtrip for {name:?} (step {step})"
+                                    )
+                                });
                             assert!(
                                 (by_name - expected).abs() < 1e-4,
                                 "Enum {id} name {name:?} mapped to {by_name}, expected {expected}"
@@ -1035,7 +544,8 @@ mod tests {
             }
         }";
 
-        let tmp = std::env::temp_dir().join(format!("jsyn_future_patch_{}.json", std::process::id()));
+        let tmp =
+            std::env::temp_dir().join(format!("jsyn_future_patch_{}.json", std::process::id()));
         std::fs::write(&tmp, raw_json).unwrap();
         let patch = JSynPatch::load_from_file(&tmp).expect("lenient patch load must succeed");
         let _ = std::fs::remove_file(&tmp);
@@ -1056,13 +566,19 @@ mod tests {
         let glide = resolve_patch_param_norm(&patch, "glide_ms", ptr_for("glide_ms"));
         assert!((unsafe { ptr_for("glide_ms").preview_plain(glide) } - 125.0).abs() < 0.01);
         let stack = resolve_patch_param_norm(&patch, "fx_stack_1", ptr_for("fx_stack_1"));
-        assert_eq!(unsafe { ptr_for("fx_stack_1").preview_plain(stack) }.round(), 3.0);
+        assert_eq!(
+            unsafe { ptr_for("fx_stack_1").preview_plain(stack) }.round(),
+            3.0
+        );
 
         // ModMatrix: unknown dest slot disabled & clamped; known slot preserves routing + drops unknown aux
         assert!(!patch.mod_matrix.slots[0].enabled);
         assert!((patch.mod_matrix.slots[0].depth - 1.0).abs() < 1e-6);
         assert!(patch.mod_matrix.slots[1].enabled);
-        assert_eq!(patch.mod_matrix.slots[1].aux_source, j_syn_dsp::ModMatrixSource::None);
+        assert_eq!(
+            patch.mod_matrix.slots[1].aux_source,
+            j_syn_dsp::ModMatrixSource::None
+        );
 
         // ModSeq & Mseg: clamped safely, unknown shape falls back to Linear, degenerate MSEG resets cleanly
         let s0 = patch.modseq_steps.seqs[0][0];
@@ -1121,7 +637,9 @@ mod tests {
             let ty_id = format!("fx_type_{slot_num}");
             let p1_id = format!("fx_p1_{slot_num}");
             let dm_id = format!("fx_dist_m_{slot_num}");
-            legacy.enum_names.insert(ty_id.clone(), "Distortion".to_string());
+            legacy
+                .enum_names
+                .insert(ty_id.clone(), "Distortion".to_string());
             legacy.params.insert(p1_id.clone(), p1_val);
 
             let resolved_mode = resolve_patch_param_norm(&legacy, &dm_id, ptr_for(&dm_id));
@@ -1139,8 +657,12 @@ mod tests {
         // Modern patch with fx_dist_m_1 present preserves custom Bias
         let mut modern = JSynPatch::default();
         modern.version = 2;
-        modern.enum_names.insert("fx_type_1".into(), "Distortion".into());
-        modern.enum_names.insert("fx_dist_m_1".into(), "Classic B".into());
+        modern
+            .enum_names
+            .insert("fx_type_1".into(), "Distortion".into());
+        modern
+            .enum_names
+            .insert("fx_dist_m_1".into(), "Classic B".into());
         modern.params.insert("fx_p1_1".into(), 0.72);
         let dm = resolve_patch_param_norm(&modern, "fx_dist_m_1", ptr_for("fx_dist_m_1"));
         assert_eq!(
@@ -1164,10 +686,18 @@ mod tests {
         };
 
         let mut legacy = JSynPatch::default();
-        legacy.enum_names.insert("ins_mode_1".into(), "Tube -> Mech".into());
-        legacy.enum_names.insert("ins_mode_2".into(), "Linear Fold".into());
-        legacy.enum_names.insert("ins_pos_1".into(), "Pre-F1".into());
-        legacy.enum_names.insert("ins_pos_2".into(), "Post-F2".into());
+        legacy
+            .enum_names
+            .insert("ins_mode_1".into(), "Tube -> Mech".into());
+        legacy
+            .enum_names
+            .insert("ins_mode_2".into(), "Linear Fold".into());
+        legacy
+            .enum_names
+            .insert("ins_pos_1".into(), "Pre-F1".into());
+        legacy
+            .enum_names
+            .insert("ins_pos_2".into(), "Post-F2".into());
 
         for (id, expected) in [
             ("ins_mode_1", "T -> M"),

@@ -554,10 +554,18 @@ impl FxEngineSwapQueue {
 
     /// Audio thread (wait-free): marks `(bus, slot)` as needing non-RT engine provisioning.
     #[inline]
-    pub(crate) fn mark_needs_provision(&self, bus: usize, slot: usize) {
+    pub fn mark_needs_provision(&self, bus: usize, slot: usize) {
         if bus < NUM_FX_BUSES && slot < NUM_FX_SLOTS {
             self.provision_mask[bus].fetch_or(1u32 << (slot as u32), Ordering::Release);
         }
+    }
+
+    /// Wait-free predicate returning true if any FX bus has pending slot provisioning.
+    #[inline]
+    pub fn has_pending_provision(&self) -> bool {
+        self.provision_mask
+            .iter()
+            .any(|m| m.load(Ordering::Relaxed) != 0)
     }
 
     /// Atomically reads & clears pending provision masks for background task dispatch.

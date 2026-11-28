@@ -41,6 +41,7 @@ mod insert_panel;
 mod macros_tab;
 mod matrix_tab;
 mod mod_bar;
+mod mod_pill;
 mod modseq;
 mod noise_panel;
 mod osc_panel;

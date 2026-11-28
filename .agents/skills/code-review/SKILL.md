@@ -42,9 +42,9 @@ Supports flexible natural arguments after `/code-review`:
 
 3. **Adversarial Audit (Verify Every Claim Against Source):**
    Never review from the diff alone — read surrounding call sites, helper definitions, and widget/DSP implementations for every touched symbol. Check:
-   - **Real-Time Audio Safety (`j-syn-dsp`):** Zero heap allocs *and* zero drops/deallocs on the audio thread; headless `JSynBgTask` provisioning; denormal/NaN/Inf guards; block-size & sample-rate invariance; no coupling of `fx/` DSP to global synth flags.
+   - **Real-Time Audio Safety (`j-syn-dsp`):** Zero heap allocs *and* zero drops/deallocs on the audio thread; headless `FxProvisionWorker` provisioning; denormal/NaN/Inf guards; block-size & sample-rate invariance; no coupling of `fx/` DSP to global synth flags.
    - **Math, Clamping & Boundary Conditions:** Verify UI display formatting matches DSP math 1:1 across the entire parameter range and every mode combination (check min/max endpoints, integer step counts such as `ParamStepPill` `num_steps` = distinct value count, and cross-mode state transitions like `MODSEQ` <-> `LFO` or DAW automation).
-   - **Preset & Parameter Stability:** Immutable `#[id = "..."]` strings; enum additions/renames paired with `presets.rs` v1/v2 migration & `enum_name_alias`; `with_value_to_string` paired with `with_string_to_value`; PDC latency reported only in `initialize()`.
+   - **Preset & Parameter Stability:** Immutable `#[id = "..."]` strings; enum additions/renames paired with `presets/migrate.rs` v1/v2 migration & `enum_name_alias`; `with_value_to_string` paired with `with_string_to_value`; PDC latency reported only in `initialize()`.
    - **Vizia GUI, Theme & FX Unit Hygiene:** Single 60 Hz timer; `ModValChanged` (not `ModUiChanged`) during continuous drags; no unsupported CSS selectors (`:focus-within`), no `.z_index` inside `ScrollView` / `fx_rack/`, no Unicode arrows inside `vizia::Button`, no `.hoverable(false)` wrapping interactive overlays, bound `femtovg` font before `fill_text`, theme-only colors, `tokens::*`, `FX Unit` naming (never `snapin`).
    - **Maintainability & Tests:** Flag duplicated boilerplate, silent fallbacks, `>150` lines added to `>800`-line files (suggesting a concrete extraction), and missing invariant-checking unit tests for new edge cases.
 
