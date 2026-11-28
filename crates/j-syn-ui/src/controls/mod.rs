@@ -233,6 +233,82 @@ pub fn build_knob_cell_mod_fmt<L, Params, P, FMap>(
     .row_between(Pixels(tokens::SPACE_XS));
 }
 
+pub fn build_flex_knob_cell<L, Params, P, FMap>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    knob_sz: f32,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        bold_label(cx, title, "knob-title")
+            .width(Stretch(1.0))
+            .height(Pixels(tokens::KNOB_TITLE_H))
+            .child_space(Stretch(1.0));
+
+        build_rotary_knob_with_opt_mod(cx, params, params_to_param, bipolar, None)
+            .width(Pixels(knob_sz))
+            .height(Pixels(knob_sz))
+            .left(Stretch(1.0))
+            .right(Stretch(1.0));
+    })
+    .class("knob-cell")
+    .width(Stretch(1.0))
+    .height(Auto)
+    .row_between(Pixels(tokens::SPACE_XS));
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_flex_knob_cell_mod_fmt<L, Params, P, FMap>(
+    cx: &mut Context,
+    params: L,
+    params_to_param: FMap,
+    title: &'static str,
+    bipolar: bool,
+    knob_sz: f32,
+    dest: ModDestination,
+    mod_ui: Arc<dyn ModUiHost>,
+    tab_tag: u8,
+    value_formatter: ValueFormatter,
+) where
+    L: Lens<Target = Params> + Clone,
+    Params: 'static,
+    P: Param + 'static,
+    FMap: Fn(&Params) -> &P + Copy + 'static,
+{
+    VStack::new(cx, move |cx| {
+        bold_label(cx, title, "knob-title")
+            .width(Stretch(1.0))
+            .height(Pixels(tokens::KNOB_TITLE_H))
+            .child_space(Stretch(1.0));
+
+        RotaryKnob::new_with_mod_formatter(
+            cx,
+            params,
+            params_to_param,
+            bipolar,
+            dest,
+            mod_ui,
+            tab_tag,
+            value_formatter,
+        )
+        .width(Pixels(knob_sz))
+        .height(Pixels(knob_sz))
+        .left(Stretch(1.0))
+        .right(Stretch(1.0));
+    })
+    .class("knob-cell")
+    .width(Stretch(1.0))
+    .height(Auto)
+    .row_between(Pixels(tokens::SPACE_XS));
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn build_flex_knob_cell_mod<L, Params, P, FMap>(
     cx: &mut Context,

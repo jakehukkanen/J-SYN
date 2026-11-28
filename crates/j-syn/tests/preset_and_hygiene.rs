@@ -453,7 +453,9 @@ fn legacy_v1_modseq_num_steps_rescales_from_16_to_32_and_defaults_row_params() {
         "name": "Legacy16Step",
         "params": {
             "ms_steps_1": 6.0 / 14.0,
-            "ms_steps_2": 1.0
+            "ms_steps_2": 1.0,
+            "ms_sync_1": 1.0 / 3.0,
+            "ms_sync_2": 1.0
         }
     });
     let patch: JSynPatch = serde_json::from_value(v1_json).expect("deserialize v1 patch");
@@ -465,6 +467,10 @@ fn legacy_v1_modseq_num_steps_rescales_from_16_to_32_and_defaults_row_params() {
 
     assert_eq!(rec.written_label(&params, "ms_steps_1"), "8");
     assert_eq!(rec.written_label(&params, "ms_steps_2"), "16");
+    assert_eq!(rec.written_label(&params, "ms_sync_1"), "Straight");
+    assert_eq!(rec.written_label(&params, "ms_sync_2"), "Dotted");
+    assert_eq!(rec.written_label(&params, "ms_snum_1"), "1");
+    assert_eq!(rec.written_label(&params, "ms_sden_1"), "16");
     assert!((rec.written_norm(&params, "ms_row_1") - 0.0).abs() < 1e-5);
     assert!((rec.written_norm(&params, "ms_row_mode_1") - 0.0).abs() < 1e-5);
 }

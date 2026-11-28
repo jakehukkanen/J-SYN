@@ -4191,3 +4191,151 @@ fn mod_matrix_256_slots_compaction_and_evaluation() {
         "High slot 210 must be evaluated via compacted index"
     );
 }
+
+#[test]
+fn modseq_step_ratio_and_step_ms_timing() {
+    use j_syn_dsp::{
+        ModSeqMode, ModSeqParams, ModSeqPlayMode, ModSeqRowMode, ModSeqState, ModSeqStep,
+        ModSeqSyncMode, MsegCurve, MAX_MODSEQ_STEPS,
+    };
+
+    let mut steps = [ModSeqStep::default(); MAX_MODSEQ_STEPS];
+    for (i, step) in steps.iter_mut().enumerate() {
+        let lvl = i as f32 / (MAX_MODSEQ_STEPS - 1) as f32;
+        step.start_level = lvl;
+        step.end_level = lvl;
+    }
+    let mseg = MsegCurve::default();
+
+    for (num_steps, row_mode) in [
+        (16, ModSeqRowMode::Continue),
+        (32, ModSeqRowMode::Continue),
+        (32, ModSeqRowMode::LoopRow),
+    ] {
+        let mut st = ModSeqState::new();
+        let params = ModSeqParams {
+            mode: ModSeqMode::Performer,
+            sync_mode: ModSeqSyncMode::StepRatio,
+            play_mode: ModSeqPlayMode::Loop,
+            num_steps,
+            row_mode,
+            smooth: 0.0,
+            step_ratio_num: 1,
+            step_ratio_den: 16,
+            ..Default::default()
+        };
+        for _ in 0..1000 {
+            st.advance_with_mseg(0.001, 120.0, &params, &steps, &mseg);
+        }
+        let active_len = if row_mode == ModSeqRowMode::LoopRow {
+            num_steps.min(16)
+        } else {
+            num_steps
+        };
+        let step_pos = ((st.phase + 1e-5) * active_len as f32).floor() as usize;
+        assert_eq!(
+            step_pos, 8,
+            "1/16 at 120 BPM should advance 8 steps in 1.0 s for ({num_steps}, {row_mode:?})"
+        );
+    }
+
+    // 7/32 of a bar at 120 BPM = 0.4375 s per step
+    let mut st_7_32 = ModSeqState::new();
+    let params_7_32 = ModSeqParams {
+        mode: ModSeqMode::Performer,
+        sync_mode: ModSeqSyncMode::StepRatio,
+        play_mode: ModSeqPlayMode::Loop,
+        num_steps: 16,
+        smooth: 0.0,
+        step_ratio_num: 7,
+        step_ratio_den: 32,
+        ..Default::default()
+    };
+    st_7_32.advance_with_mseg(0.4376, 120.0, &params_7_32, &steps, &mseg);
+    let step_7_32 = (st_7_32.phase * 16.0).floor() as usize;
+    assert_eq!(step_7_32, 1, "7/32 at 120 BPM should advance 1 step in 0.4375 s");
+
+    // Step ms: 100 ms per step -> 10 steps in 1.0 s
+    let norm_100ms = 100.0_f32.ln() / 2000.0_f32.ln();
+    let mut st_ms = ModSeqState::new();
+    let params_ms = ModSeqParams {
+        mode: ModSeqMode::Performer,
+        sync_mode: ModSeqSyncMode::StepMs,
+        rate_norm: norm_100ms,
+        play_mode: ModSeqPlayMode::Loop,
+        num_steps: 16,
+        smooth: 0.0,
+        ..Default::default()
+    };
+    for _ in 0..1000 {
+        st_ms.advance_with_mseg(0.001, 120.0, &params_ms, &steps, &mseg);
+    }
+    let step_ms_pos = ((st_ms.phase + 1e-5) * 16.0).floor() as usize;
+    assert_eq!(step_ms_pos, 10, "100 ms/step should advance 10 steps in 1.0 s");
+
+    // Positive rate_mod lengthens step_ms -> fewer steps in 1.0 s
+    let mut st_ms_mod = ModSeqState::new();
+    let params_ms_mod = ModSeqParams {
+        rate_mod: 0.25,
+        ..params_ms
+    };
+    for _ in 0..1000 {
+        st_ms_mod.advance_with_mseg(0.001, 120.0, &params_ms_mod, &steps, &mseg);
+    }
+    let step_ms_mod_pos = ((st_ms_mod.phase + 1e-5) * 16.0).floor() as usize;
+    assert!(
+        step_ms_mod_pos < 10,
+        "Positive rate_mod in StepMs should slow step rate (< 10 steps), got {step_ms_mod_pos}"
+    );
+
+    // Fast StepMs boundary (1.0 ms/step) across num_steps = 8 (125 Hz) and 2 (500 Hz)
+    for num_steps in [8_usize, 2] {
+        let mut st_fast = ModSeqState::new();
+        let params_fast = ModSeqParams {
+            mode: ModSeqMode::Performer,
+            sync_mode: ModSeqSyncMode::StepMs,
+            rate_norm: 0.0,
+            play_mode: ModSeqPlayMode::Loop,
+            num_steps,
+            smooth: 0.0,
+            ..Default::default()
+        };
+        st_fast.advance_with_mseg(0.001, 120.0, &params_fast, &steps, &mseg);
+        let expected_phase = 1.0 / num_steps as f32;
+        assert!(
+            (st_fast.phase - expected_phase).abs() < 1e-4,
+            "1.0 ms/step for num_steps={num_steps} should advance phase by {expected_phase}, got {}",
+            st_fast.phase
+        );
+    }
+
+    // Mseg (LFO) mode parity: StepRatio and StepMs behave identically to Free
+    let mut mseg_phases = [0.0_f32; 3];
+    for (idx, sync_mode) in [
+        ModSeqSyncMode::Free,
+        ModSeqSyncMode::StepRatio,
+        ModSeqSyncMode::StepMs,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut st_lfo = ModSeqState::new();
+        let params_lfo = ModSeqParams {
+            mode: ModSeqMode::Mseg,
+            sync_mode,
+            rate_norm: 0.5,
+            play_mode: ModSeqPlayMode::Loop,
+            smooth: 0.0,
+            step_ratio_num: 3,
+            step_ratio_den: 8,
+            ..Default::default()
+        };
+        st_lfo.advance_with_mseg(0.1, 120.0, &params_lfo, &steps, &mseg);
+        mseg_phases[idx] = st_lfo.phase;
+    }
+    assert!(
+        (mseg_phases[0] - mseg_phases[1]).abs() < 1e-6
+            && (mseg_phases[0] - mseg_phases[2]).abs() < 1e-6,
+        "Mseg Free/StepRatio/StepMs phases should match: {mseg_phases:?}"
+    );
+}
