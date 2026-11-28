@@ -310,15 +310,16 @@ fn anti_slop_no_raw_hex_colors_in_editor_or_ui_rust_outside_theme() {
 }
 
 #[test]
-fn anti_slop_single_timer_no_zindex_in_fx_scrollview_and_no_focus_within() {
+fn anti_slop_no_add_timer_no_zindex_in_fx_scrollview_and_no_focus_within() {
     let root = workspace_root();
 
-    // 1. Exactly one cx.add_timer call across editor/ (in mod_bar.rs)
-    let mut editor_files = Vec::new();
-    collect_rs_files(&root.join("crates/j-syn/src/editor"), &mut editor_files);
+    // 1. Zero cx.add_timer calls across editor/ and j-syn-ui/ (vizia_baseview never calls cx.process_timers())
+    let mut ui_files = Vec::new();
+    collect_rs_files(&root.join("crates/j-syn/src/editor"), &mut ui_files);
+    collect_rs_files(&root.join("crates/j-syn-ui/src"), &mut ui_files);
     let mut timer_hits = Vec::new();
-    for path in &editor_files {
-        let src = std::fs::read_to_string(path).expect("read editor file");
+    for path in &ui_files {
+        let src = std::fs::read_to_string(path).expect("read ui file");
         let prod_src = src.split("#[cfg(test)]").next().unwrap_or(&src);
         for (idx, line) in prod_src.lines().enumerate() {
             let code = line.split("//").next().unwrap_or("");
@@ -327,15 +328,9 @@ fn anti_slop_single_timer_no_zindex_in_fx_scrollview_and_no_focus_within() {
             }
         }
     }
-    assert_eq!(
-        timer_hits.len(),
-        1,
-        "Expected exactly 1 add_timer() call in editor (mod_bar.rs), found: {timer_hits:?}"
-    );
     assert!(
-        timer_hits[0].contains("mod_bar.rs"),
-        "Single 60 Hz timer must live in mod_bar.rs, found: {}",
-        timer_hits[0]
+        timer_hits.is_empty(),
+        "Forbidden cx.add_timer() calls (vizia_baseview never calls process_timers(); use FrameSyncView + Binding on FrameSyncToken instead): {timer_hits:?}"
     );
 
     // 2. Zero .z_index( inside fx_rack/ or j-syn-ui/src/fx_units/ (ScrollView clip bug)

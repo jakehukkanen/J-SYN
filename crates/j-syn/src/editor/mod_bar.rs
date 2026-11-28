@@ -1,8 +1,8 @@
-//! Draggable Modulation Source Pills and 60 Hz live telemetry / structural UI redraw ticker.
+//! Draggable Modulation Source Pills and 60 Hz frame-driven UI sync (external async state,
+//! DAW automation dimming, FX engine garbage draining, and FX drag auto-scroll).
 
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use j_syn_dsp::mod_matrix::{
     ModDestination, ModMatrixSource, ModSlot, ModUiTelemetry, NUM_MOD_DESTS, NUM_MOD_SLOTS,
@@ -14,7 +14,7 @@ use nih_plug_vizia::vizia::prelude::*;
 
 use super::fx_drag_overlay::FxDragState;
 use super::modseq::ModSeqSubTab;
-use super::{BottomTab, UiEvent};
+use super::{BottomTab, UiData, UiEvent};
 use crate::JSynPluginParams;
 
 const UNSET_U8: u8 = 255;
@@ -53,6 +53,7 @@ pub(crate) struct ModUiState {
     last_enabled_mask: AtomicU64,
     external_sync_rev: AtomicU64,
     last_external_sync_rev: AtomicU64,
+    drag_scroll_tick: AtomicU64,
     external_dirs_dirty: AtomicBool,
     pending_preset_name: Mutex<Option<String>>,
     pending_patch: Mutex<Option<(crate::presets::JSynPatch, String)>>,
@@ -90,6 +91,7 @@ impl ModUiState {
             last_enabled_mask: AtomicU64::new(initial_mask),
             external_sync_rev: AtomicU64::new(0),
             last_external_sync_rev: AtomicU64::new(0),
+            drag_scroll_tick: AtomicU64::new(0),
             external_dirs_dirty: AtomicBool::new(false),
             pending_preset_name: Mutex::new(None),
             pending_patch: Mutex::new(None),
@@ -276,6 +278,22 @@ impl ModUiState {
         let next = Self::compute_enabled_mask(&self.params);
         let prev = self.last_enabled_mask.swap(next, Ordering::Relaxed);
         prev != next
+    }
+
+    #[inline]
+    pub fn bump_drag_scroll_tick(&self) {
+        self.drag_scroll_tick.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Snapshot observed every frame by Vizia's `binding_system` to drive per-window UI-thread
+    /// event dispatch without `cx.add_timer` (which `vizia_baseview` never ticks) and without the
+    /// process-global `BaseviewProxy` queue.
+    pub fn frame_sync_token(&self) -> FrameSyncToken {
+        FrameSyncToken {
+            external_sync_rev: self.external_sync_rev.load(Ordering::Acquire),
+            enabled_mask: Self::compute_enabled_mask(&self.params),
+            drag_scroll_tick: self.drag_scroll_tick.load(Ordering::Relaxed),
+        }
     }
 
     #[inline]
@@ -901,29 +919,73 @@ impl ModUiHost for ModUiState {
 }
 
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Data)]
+pub(crate) struct FrameSyncToken {
+    pub external_sync_rev: u64,
+    pub enabled_mask: u64,
+    pub drag_scroll_tick: u64,
+}
+
 pub(crate) use super::mod_pill::ModSourcePill;
 
-/// Starts the single 60 Hz UI redraw & structural-state polling timer (`16 ms`)
-/// for live mod-ring, scope, playhead animations, FX engine garbage draining, and drag auto-scroll.
-pub(crate) fn start_ui_redraw_timer(cx: &mut Context, mod_ui: Arc<ModUiState>) {
-    let timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
-        if matches!(action, TimerAction::Tick(_)) {
-            mod_ui.fx_swap_queue.drain_garbage();
-            if let Some((scroll_entity, dy)) =
-                mod_ui.fx_drag.edge_scroll_target(cx.scale_factor())
-            {
-                cx.emit_to(scroll_entity, WindowEvent::MouseScroll(0.0, dy));
-            }
+/// Zero-sized, non-hoverable per-window view whose `draw()` runs at 60 Hz on the UI thread in
+/// `vizia_baseview` to drain retired FX engines and tick drag auto-scroll while dragging.
+struct FrameSyncView {
+    mod_ui: Arc<ModUiState>,
+}
+
+impl FrameSyncView {
+    fn new(cx: &mut Context, mod_ui: Arc<ModUiState>) -> Handle<'_, Self> {
+        Self { mod_ui }
+            .build(cx, |_| {})
+            .position_type(PositionType::SelfDirected)
+            .left(Pixels(0.0))
+            .top(Pixels(0.0))
+            .width(Pixels(0.0))
+            .height(Pixels(0.0))
+            .hoverable(false)
+    }
+}
+
+impl View for FrameSyncView {
+    fn element(&self) -> Option<&'static str> {
+        Some("frame-sync")
+    }
+
+    fn draw(&self, _cx: &mut DrawContext, _canvas: &mut Canvas) {
+        self.mod_ui.fx_swap_queue.drain_garbage();
+        if self.mod_ui.fx_drag.is_active() {
+            self.mod_ui.bump_drag_scroll_tick();
+        }
+    }
+}
+
+/// Mounts the per-window 60 Hz UI-thread sync observer (`FrameSyncView` + reactive `Binding`).
+///
+/// `vizia_baseview` never calls `cx.process_timers()`, so `cx.add_timer(...)` never fires in
+/// VST3/CLAP hosts. Instead, `vizia_baseview` runs `binding_system` and `draw_system` every 60 Hz
+/// frame per window: `FrameSyncView::draw()` drains retired FX engines and ticks active FX drags,
+/// while the zero-child `Binding` observes `FrameSyncToken` and emits events directly into this
+/// window's own `cx.event_queue` (zero idle overhead, 100% multi-instance isolated).
+pub(crate) fn mount_ui_frame_sync(cx: &mut Context, mod_ui: Arc<ModUiState>) {
+    FrameSyncView::new(cx, mod_ui.clone());
+    Binding::new(
+        cx,
+        UiData::mod_ui.map(|m| m.frame_sync_token()),
+        move |cx, _| {
             if mod_ui.poll_enabled_mask_changed() {
                 cx.emit(UiEvent::ModUiChanged);
             }
             if mod_ui.poll_external_sync_changed() {
                 cx.emit(UiEvent::SyncExternalState);
             }
-            cx.needs_redraw();
-        }
-    });
-    cx.start_timer(timer);
+            if let Some((scroll_entity, dy)) =
+                mod_ui.fx_drag.edge_scroll_target(cx.scale_factor())
+            {
+                cx.emit_to(scroll_entity, WindowEvent::MouseScroll(0.0, dy));
+            }
+        },
+    );
 }
 
 #[cfg(test)]
@@ -1019,6 +1081,38 @@ mod tests {
         assert!(ui.take_external_dirs_dirty());
         assert!(!ui.take_external_dirs_dirty());
         assert_eq!(ui.take_pending_preset_name().as_deref(), Some("Saved"));
+    }
+
+    #[test]
+    fn frame_sync_token_tracks_async_sync_drag_ticks_and_stays_stable_when_idle() {
+        let params = Arc::new(JSynPluginParams::default());
+        let telemetry = Arc::new(ModUiTelemetry::new());
+        let swap_queue = Arc::new(FxEngineSwapQueue::new(48_000.0));
+        let ui = ModUiState::new(params.clone(), telemetry, swap_queue);
+
+        let t0 = ui.frame_sync_token();
+        assert_eq!(t0, ui.frame_sync_token(), "token must stay equal when idle");
+
+        let g = ui.next_wt_load_gen(0);
+        ui.queue_pending_wt_custom(0, g);
+        let t1 = ui.frame_sync_token();
+        assert_ne!(t1, t0, "custom wavetable handoff must advance frame_sync_token");
+        assert!(ui.poll_external_sync_changed());
+
+        let patch = crate::presets::JSynPatch::capture("FrameSyncPatch", &params);
+        ui.queue_pending_patch(patch, "FrameSyncPatch".to_string());
+        let t2 = ui.frame_sync_token();
+        assert_ne!(t2, t1, "pending patch handoff must advance frame_sync_token");
+        assert!(ui.poll_external_sync_changed());
+
+        ui.notify_external_sync(None);
+        let t3 = ui.frame_sync_token();
+        assert_ne!(t3, t2, "external directory sync must advance frame_sync_token");
+
+        ui.bump_drag_scroll_tick();
+        let t4 = ui.frame_sync_token();
+        assert_ne!(t4, t3, "active drag tick must advance frame_sync_token");
+        assert_eq!(t4, ui.frame_sync_token(), "token must stabilize after changes");
     }
 }
 
