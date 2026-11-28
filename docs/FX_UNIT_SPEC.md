@@ -53,7 +53,7 @@ Reference checklist for extracting or redesigning any `J-SYN` FX Unit in `crates
 ## 5. Modulation Wiring
 - **All continuous knobs across all tabs must be modulatable** in `J-SYN` via `ModDestination::fx_bus_slot_param(bus_idx, slot_idx, 0..16)`.
 - `RotaryKnob::drop` automatically calls `ModUiHost::unregister_drop_rect` on unmount so tab/sub-tab switches never leave stale drop rects.
-- Ensure `slot_scope_snapshot` in `fx_scopes.rs` and `FxBusState::process` in `j-syn-dsp/src/fx/mod.rs` both apply modulation offsets for all active tab parameters.
+- Ensure `slot_scope_snapshot` in `crates/j-syn-ui/src/scopes/fx_scopes/` and `FxBusState::process` in `j-syn-dsp/src/fx/mod.rs` both apply modulation offsets for all active tab parameters.
 
 ---
 

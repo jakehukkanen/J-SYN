@@ -11,7 +11,7 @@ use super::mod_bar::ModUiState;
 use super::modseq::ModSeqSubTab;
 use super::{BottomTab, UiEvent, theme};
 
-/// Draggable modulation source pill (`E1..E4`, `MS1..MS4`, `VEL`, `KEY`, `MW`, `AT`, `M1..M8`).
+/// Draggable modulation source pill (`E1..E8`, `MS1..MS8`, `VEL`, `KEY`, `MW`, `AT`, `SLD`, `M1..M8`).
 pub(crate) struct ModSourcePill {
     source: ModMatrixSource,
     mod_ui: Arc<ModUiState>,

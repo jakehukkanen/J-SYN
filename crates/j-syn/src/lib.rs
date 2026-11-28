@@ -647,32 +647,52 @@ mod tests {
 
     #[test]
     fn fx_provision_worker_provisions_slots_and_drops_cleanly_under_rapid_teardown() {
+        let bank = WavetableBank::new();
         for _ in 0..20 {
-            let params = Arc::new(JSynPluginParams::default());
+            let mut params = JSynPluginParams::default();
+            params.fx_slots[0].fx_type = EnumParam::new("FX 1 Type", FxTypeParam::Chorus);
+            params.fx_slots[0].stack =
+                IntParam::new("FX 1 Stack", 2, IntRange::Linear { min: 1, max: 4 });
+            let params = Arc::new(params);
+
             let mut engine = SynthEngine::new(48_000.0);
             let swap_queue = engine.fx_swap_queue();
             let worker = FxProvisionWorker::spawn(params.clone(), swap_queue.clone());
 
-            // Simulate headless DAW automation requesting provisioning for Bus A Slot 0
-            swap_queue.mark_needs_provision(0, 0);
-            worker.wake();
+            let mut sp = SynthParams::default();
+            sp.fx_bus_a.slots[0].fx_type = FxType::Chorus;
+            sp.fx_bus_a.slots[0].stack = 2;
 
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-            while swap_queue.has_pending_provision() && std::time::Instant::now() < deadline {
-                std::thread::yield_now();
-            }
+            // Audio thread detects Off != Chorus(stack=2) and marks Bus A Slot 0 for provisioning.
+            let _ = engine.process_sample(&sp, &bank);
             assert!(
-                !swap_queue.has_pending_provision(),
-                "FxProvisionWorker should drain pending provision masks"
+                swap_queue.has_pending_provision(),
+                "Audio thread should request provisioning for unprovisioned Chorus slot"
             );
 
-            // Also push a real Chorus engine swap, consume it on the engine, and tear down immediately
-            swap_queue.provision_slot(0, 0, FxType::Chorus, 1);
-            let sp = SynthParams::default();
-            let bank = WavetableBank::new();
-            let _ = engine.process_sample(&sp, &bank);
+            // Wake worker and wait for it to claim the pending provision mask.
             worker.wake();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while swap_queue.has_pending_provision() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "FxProvisionWorker timed out draining pending provision mask"
+                );
+                worker.wake();
+                std::thread::yield_now();
+            }
+
+            // Drop joins the worker thread, guaranteeing `provision_slot(Chorus, stack=2)` has
+            // finished pushing to `cmd_ring` and that no background thread can clear the mask
+            // during the subsequent audio-thread verification.
             drop(worker);
+
+            // Audio thread drains `cmd_ring`, installs Chorus(stack=2), and must not re-request.
+            let _ = engine.process_sample(&sp, &bank);
+            assert!(
+                !swap_queue.has_pending_provision(),
+                "Provisioned Chorus(stack=2) slot should be installed and stay active"
+            );
         }
     }
 }
